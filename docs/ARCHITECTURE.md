@@ -4,6 +4,20 @@
 
 SOL is a **family-first modular monolith**: one deployable core process and one primary PostgreSQL database, with explicit module boundaries. Operationally simple now, extractable later.
 
+## Default operational profile
+
+The current target host is **native Windows without virtualization**:
+
+```text
+Windows
+├── SOL Core (Node.js)
+├── Codex CLI / App Server
+├── source connectors
+└── PostgreSQL Windows service
+```
+
+Docker Desktop, WSL, Hyper-V, Redis and pgvector are not architectural requirements. SOL depends on `DATABASE_URL`, not on how PostgreSQL is packaged. Redis can be introduced later only if measured queue/cache coordination needs justify another service; pgvector can be introduced later as an optional semantic-search extension.
+
 ## End-to-end flow
 
 ```text
@@ -126,7 +140,7 @@ Modules communicate through domain events/outbox records. Current important even
 - `extraction.completed`
 - future action/delivery events.
 
-The durable PostgreSQL outbox gives at-least-once delivery; handlers must be idempotent.
+The durable PostgreSQL outbox gives at-least-once delivery; handlers must be idempotent. PostgreSQL remains the single persistence/co-ordination dependency for the current scale; no external queue is required yet.
 
 ## AI is a reasoning tool, not storage or authority
 
@@ -165,4 +179,5 @@ The future SOL WhatsApp account therefore must be a distinct **system/interface 
 - No assumption that household members can read each other's private sources.
 - No source message becoming a command merely because it contains prompt-like text.
 - No credentials committed to Git.
+- No mandatory Docker/WSL/Hyper-V layer on the Windows target host.
 - No premature microservices/Kubernetes/Kafka.
