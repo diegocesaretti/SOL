@@ -25,6 +25,55 @@ export interface KnowledgeEntityView {
   updatedAt: string;
 }
 
+export class KnowledgeValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "KnowledgeValidationError";
+  }
+}
+
+export async function createKnowledgeEntity(
+  principal: AuthPrincipal,
+  input: { kind?: string; name?: string; visibility?: string },
+): Promise<KnowledgeEntityView> {
+  if (principal.role === "guest") throw new KnowledgeValidationError("guests cannot create knowledge entities");
+  const kind = input.kind === "person" || input.kind === "project" ? input.kind : null;
+  if (!kind) throw new KnowledgeValidationError("kind must be person or project");
+  const name = typeof input.name === "string" ? input.name.trim() : "";
+  if (!name || name.length > 180) {
+    throw new KnowledgeValidationError("name is required and must be at most 180 characters");
+  }
+  const visibility = input.visibility === "family" ? "family" : "private";
+
+  const result = await db.query<{ id: string; updated_at: Date }>(
+    `INSERT INTO entities(
+       household_id, kind, canonical_name, owner_member_id, visibility, metadata
+     ) VALUES ($1, $2::entity_kind, $3, $4, $5::visibility_scope, $6::jsonb)
+     RETURNING id, updated_at`,
+    [
+      principal.householdId,
+      kind,
+      name,
+      principal.memberId,
+      visibility,
+      JSON.stringify({ origin: "manual", createdByMemberId: principal.memberId }),
+    ],
+  );
+  const row = result.rows[0];
+  if (!row) throw new Error("failed_to_create_entity");
+  return {
+    id: row.id,
+    kind,
+    name,
+    aliases: [],
+    ownerMemberId: principal.memberId,
+    visibility,
+    metadata: { origin: "manual", createdByMemberId: principal.memberId },
+    facts: [],
+    updatedAt: row.updated_at.toISOString(),
+  };
+}
+
 export async function listKnowledgeEntities(
   principal: AuthPrincipal,
   kind: KnowledgeViewKind,
