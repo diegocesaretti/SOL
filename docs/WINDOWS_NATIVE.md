@@ -1,8 +1,10 @@
 # SOL on Windows without Docker
 
-SOL's default target-host profile is now **native Windows**. Docker Desktop, WSL, Hyper-V, Redis and pgvector are not required.
+SOL's target host runs **natively on Windows**. Docker Desktop, WSL, Hyper-V, Redis and pgvector are not required.
 
-## Runtime layout
+The preferred prototype database is now Neon-managed PostgreSQL; this document covers the fully local PostgreSQL alternative for households that prefer to keep the database on the SOL machine.
+
+## Local runtime layout
 
 ```text
 Windows
@@ -15,7 +17,7 @@ Windows
 
 Future connectors such as SOL's own WhatsApp identity, Home Assistant and Mercado Libre use the same SOL Core process and PostgreSQL database; they do not require containers.
 
-## Requirements
+## Requirements for local PostgreSQL
 
 - Windows 10/11 or comparable supported Windows host
 - Node.js 22+ (24 recommended)
@@ -50,6 +52,8 @@ pnpm dev
 
 The administrator password is entered directly into `psql`; SOL does not store it.
 
+`pnpm db:check` itself does **not** require `psql`; it uses SOL's Node PostgreSQL driver and works identically with local PostgreSQL or Neon.
+
 ## Daily startup
 
 PostgreSQL is expected to run as a normal Windows service. SOL itself remains a normal Node process during development:
@@ -69,7 +73,9 @@ SOL depends only on a PostgreSQL connection string:
 DATABASE_URL=postgresql://sol:<generated-password>@127.0.0.1:5432/sol
 ```
 
-The application does not care whether PostgreSQL is Windows-native, Linux-native or remote. Windows-native is simply the preferred installation for the current target host.
+The application does not care whether PostgreSQL is Windows-native, Neon-managed, Linux-native or remote. Only `DATABASE_URL` changes.
+
+For the managed Neon profile, see [NEON.md](NEON.md).
 
 ## Why Redis was removed
 
