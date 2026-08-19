@@ -15,7 +15,7 @@ SOL is a family-first personal information and automation system: one integrated
 - **Proposal before external action.** Semantic detection can be automatic; externally visible writes go through executive/action policy.
 - **Provider independence.** Codex via ChatGPT OAuth is the first reasoning engine, but SOL Core is provider-neutral.
 - **Modular monolith first.** One deployable system with strong module boundaries.
-- **Native-first infrastructure.** The current Windows target runs SOL and PostgreSQL directly; Docker/WSL/Hyper-V are not requirements.
+- **No virtualization requirement.** SOL runs natively on Windows; PostgreSQL can be Neon-managed or a native local service.
 
 ## Implemented today
 
@@ -38,7 +38,7 @@ Google Calendars ──┘                                      │
 Current capabilities include:
 
 - household/member authentication and privacy boundaries;
-- native PostgreSQL data model and durable outbox;
+- standard PostgreSQL data model and durable outbox;
 - Codex App Server + ChatGPT OAuth reasoning;
 - multiple private/shared WhatsApp linked-device accounts;
 - encrypted WhatsApp auth state in PostgreSQL;
@@ -54,6 +54,7 @@ Current capabilities include:
 - local SOL tasks for approved task/deadline proposals;
 - daily and tomorrow-preview briefs per family member;
 - calendar conflict detection;
+- event-driven PostgreSQL outbox wakeups with slow recovery reconciliation;
 - integrated web screens for Home, WhatsApp, Calendar, Day-to-day and AI.
 
 ## Repository layout
@@ -76,9 +77,10 @@ SOL/
 │       │   └── executive/
 │       └── ui/
 ├── packages/database/migrations/
-├── scripts/windows/             # native PostgreSQL setup/check helpers
+├── scripts/windows/
 └── docs/
     ├── ARCHITECTURE.md
+    ├── NEON.md
     ├── WINDOWS_NATIVE.md
     ├── CODEX.md
     ├── WHATSAPP.md
@@ -88,23 +90,21 @@ SOL/
     └── ROADMAP.md
 ```
 
-## Quick start — Windows native (default)
+## Quick start — Neon (recommended prototype profile)
 
-Requirements: Node.js 22+ (24 recommended), pnpm, a native PostgreSQL installation, and the Codex CLI if the AI engine is enabled.
+Requirements: Node.js 22+ (24 recommended), pnpm, internet access, and the Codex CLI if the AI engine is enabled.
 
-**Docker Desktop, WSL, Hyper-V, Redis and pgvector are not required.**
-
-After installing PostgreSQL for Windows and remembering the administrator (`postgres`) password:
+**Docker Desktop, WSL, Hyper-V, Redis, pgvector and a local PostgreSQL installation are not required.**
 
 ```powershell
 pnpm install
-pnpm db:setup
+pnpm db:configure
 pnpm db:check
 pnpm db:migrate
 pnpm dev
 ```
 
-`pnpm db:setup` detects `psql.exe`, creates a dedicated `sol` PostgreSQL role/database, generates an application password and writes `DATABASE_URL` into the Git-ignored `.env` file. It may ask once for the PostgreSQL administrator password; SOL does not store that password.
+`pnpm db:configure` asks for a PostgreSQL connection string through a hidden PowerShell prompt and writes it only to the Git-ignored `.env` file. A TLS-enabled Neon direct connection works with the normal SOL `pg` driver and with the migration runner.
 
 Open:
 
@@ -122,13 +122,51 @@ Useful screens:
 /ai           Codex / ChatGPT
 ```
 
-See [docs/WINDOWS_NATIVE.md](docs/WINDOWS_NATIVE.md) for the full zero-virtualization setup and backup notes.
+See [docs/NEON.md](docs/NEON.md) for the managed-database profile.
+
+## Local PostgreSQL alternative
+
+If household data should remain on the SOL machine, install PostgreSQL natively on Windows and run:
+
+```powershell
+pnpm install
+pnpm db:setup
+pnpm db:check
+pnpm db:migrate
+pnpm dev
+```
+
+`pnpm db:setup` creates the local `sol` role/database and writes its generated application password to `.env`. SOL application code is identical in both modes; only `DATABASE_URL` changes.
+
+See [docs/WINDOWS_NATIVE.md](docs/WINDOWS_NATIVE.md).
+
+## Cloud-friendly database behavior
+
+The runtime is designed not to keep a scale-to-zero database artificially awake:
+
+```text
+transaction inserts event_outbox row
+             ↓
+PostgreSQL trigger emits NOTIFY after commit
+             ↓
+short-lived SOL pool connection receives notification
+             ↓
+outbox dispatcher wakes immediately
+             ↓
+handler runs
+```
+
+Notifications are only wake signals; the durable truth remains in the `event_outbox` table. If a process crashes or a cloud database suspends and loses session state, a slow recovery sweep processes anything still unpublished.
+
+Default runtime behavior keeps the connection pool small, releases idle clients quickly and spaces Calendar/executive reconciliation widely enough to permit meaningful idle windows.
 
 ## Database philosophy
 
 PostgreSQL is the only infrastructure service SOL currently requires. Sessions, durable outbox events, sync cursors, tasks, proposals, briefs and connector state all live there.
 
-Redis was removed because no current module used it. Semantic vector search is also deferred: the base schema no longer requires pgvector. When semantic retrieval becomes useful, pgvector can return as an optional dedicated migration rather than a prerequisite for every Windows installation.
+Redis was removed because no current module used it. Semantic vector search is also deferred: the base schema does not require pgvector. When semantic retrieval becomes useful, pgvector can return as an optional dedicated migration rather than a prerequisite.
+
+Large binary content should not live in PostgreSQL. Future photos, audio, PDFs and attachments should be stored locally or in object storage, while PostgreSQL retains metadata/references.
 
 ## Google Calendar setup
 
@@ -192,8 +230,8 @@ See [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md) and [docs/ROADMAP.md](docs/ROAD
 
 ## Security note
 
-SOL binds to `127.0.0.1` by default. Do not expose the development server directly to the internet. `.env`, `.sol/`, Codex OAuth data, WhatsApp auth encryption keys and Google OAuth encryption keys are ignored by Git and must be protected like credentials.
+SOL binds to `127.0.0.1` by default. Do not expose the development server directly to the internet. `.env`, `.sol/`, database credentials, Codex OAuth data, WhatsApp auth encryption keys and Google OAuth encryption keys are ignored by Git and must be protected like credentials.
 
 ## Current status
 
-Phases 0–3 are implemented and the **core of Phase 4 (Calendar + executive loop) is implemented**. The preferred target-host architecture is now native Windows + native PostgreSQL with no virtualization requirement. Real OAuth/linked-device integration tests still need to be run on the target SOL host. The next planned product phase is SOL's own WhatsApp communication channel, while nightly consolidation and richer proposal editing remain Phase 4 follow-ups.
+Phases 0–3 are implemented and the **core of Phase 4 (Calendar + executive loop) is implemented**. Neon is the preferred prototype database profile, with native local PostgreSQL retained as an alternative. Real OAuth/linked-device integration tests still need to be run on the target SOL host. The next planned product phase is SOL's own WhatsApp communication channel, while nightly consolidation and richer proposal editing remain Phase 4 follow-ups.
