@@ -19,14 +19,14 @@ import {
   handleGoogleOAuthCallback,
 } from "./modules/connectors/google-calendar/routes.js";
 import { CalendarSyncScheduler } from "./modules/connectors/google-calendar/scheduler.js";
+import { homeAssistantManager } from "./modules/connectors/home-assistant/manager.js";
+import { handleHomeAssistantApi } from "./modules/connectors/home-assistant/routes.js";
 import { handleSolWhatsappApi } from "./modules/connectors/sol-whatsapp/routes.js";
 import { registerSolWhatsappDelivery } from "./modules/connectors/sol-whatsapp/service.js";
 import { handleWhatsappApi } from "./modules/connectors/whatsapp/routes.js";
 import { whatsappManager } from "./modules/connectors/whatsapp/manager.js";
 import { handleExecutiveApi } from "./modules/executive/routes.js";
-import {
-  registerExecutiveProposalProcessor,
-} from "./modules/executive/proposals.js";
+import { registerExecutiveProposalProcessor } from "./modules/executive/proposals.js";
 import { ExecutiveScheduler } from "./modules/executive/scheduler.js";
 import {
   createMember,
@@ -51,6 +51,7 @@ import {
 import { renderAiPage } from "./ui/ai.js";
 import { renderCalendarPage } from "./ui/calendar.js";
 import { renderExecutivePage } from "./ui/executive.js";
+import { renderHomeAssistantPage } from "./ui/home-assistant.js";
 import { renderLifePage } from "./ui/life.js";
 import { renderOnboardingPage } from "./ui/onboarding.js";
 import { renderSolWhatsappPage } from "./ui/sol-whatsapp.js";
@@ -138,6 +139,10 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     sendHtml(response, 200, renderLifePage());
     return;
   }
+  if (request.method === "GET" && path === "/home-assistant") {
+    sendHtml(response, 200, renderHomeAssistantPage());
+    return;
+  }
 
   if (request.method === "GET" && path === "/health") {
     const database = await checkDatabase();
@@ -154,13 +159,13 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     sendJson(response, 200, {
       name: "SOL",
       architecture: "family-first modular monolith",
-      version: "0.6.0",
+      version: "0.7.0",
       database,
       aiProvider: "codex",
-      sources: ["whatsapp", "google_calendar"],
+      sources: ["whatsapp", "google_calendar", "home_assistant"],
       interfaces: ["web", "sol_whatsapp"],
       views: ["life_timeline", "people", "projects", "executive"],
-      plannedSources: ["home_assistant", "mercadolibre"],
+      plannedSources: ["mercadolibre"],
     });
     return;
   }
@@ -244,6 +249,11 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     if (!principal) return;
     if (await handleCalendarApi(path, request, response, principal)) return;
   }
+  if (path.startsWith("/v1/home-assistant")) {
+    const principal = await principalFor(request, response);
+    if (!principal) return;
+    if (await handleHomeAssistantApi(path, request, response, principal)) return;
+  }
   if (path.startsWith("/v1/executive/")) {
     const principal = await principalFor(request, response);
     if (!principal) return;
@@ -286,10 +296,9 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
       }>(request, response);
       if (!input) return;
       const provider = input.provider?.trim().toLowerCase();
-      if (provider === "whatsapp" || provider === "google_calendar") {
-        sendJson(response, 400, {
-          error: `Use the dedicated /v1/${provider === "whatsapp" ? "whatsapp" : "calendar"}/accounts endpoint`,
-        });
+      if (provider === "whatsapp" || provider === "google_calendar" || provider === "home_assistant") {
+        const dedicated = provider === "whatsapp" ? "whatsapp" : provider === "google_calendar" ? "calendar" : "home-assistant";
+        sendJson(response, 400, { error: `Use the dedicated /v1/${dedicated}/accounts endpoint` });
         return;
       }
       const manager = principal.role === "owner" || principal.role === "adult";
@@ -392,6 +401,9 @@ server.listen(config.port, config.host, () => {
   void whatsappManager.startLinkedAccounts().catch((error) => {
     console.error("WhatsApp autostart failed", error);
   });
+  void homeAssistantManager.startConfiguredAccounts().catch((error) => {
+    console.error("Home Assistant autostart failed", error);
+  });
   if (config.host !== "127.0.0.1" && config.host !== "localhost") {
     console.warn(
       "SOL is listening beyond localhost. Use HTTPS and review member authentication before exposing it broadly.",
@@ -407,8 +419,11 @@ async function shutdown(signal: string): Promise<void> {
   unregisterSolWhatsappDelivery();
   unregisterExecutiveProcessor();
   unregisterCandidateProcessor();
-  await whatsappManager.stopAll().catch(() => undefined);
-  await codexAppServer.stop().catch(() => undefined);
+  await Promise.all([
+    whatsappManager.stopAll().catch(() => undefined),
+    homeAssistantManager.stopAll().catch(() => undefined),
+    codexAppServer.stop().catch(() => undefined),
+  ]);
   server.close(async () => {
     await closeDatabase();
     process.exit(0);
