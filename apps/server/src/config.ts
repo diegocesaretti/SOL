@@ -29,6 +29,11 @@ function booleanEnv(name: string, fallback: boolean): boolean {
   throw new Error(`${name} must be true or false`);
 }
 
+function optionalEnv(name: string): string | undefined {
+  const value = process.env[name]?.trim();
+  return value || undefined;
+}
+
 export const config = {
   host: process.env.SOL_HOST ?? "127.0.0.1",
   port: integerEnv("SOL_PORT", 3000),
@@ -39,4 +44,9 @@ export const config = {
   redisUrl: process.env.REDIS_URL ?? "redis://localhost:6379",
   sessionDays: integerEnv("SOL_SESSION_DAYS", 30),
   cookieSecure: booleanEnv("SOL_COOKIE_SECURE", false),
+  codexBin: process.env.SOL_CODEX_BIN?.trim() || "codex",
+  codexHome: optionalEnv("SOL_CODEX_HOME"),
+  codexWorkingDirectory: optionalEnv("SOL_CODEX_CWD"),
+  codexRequestTimeoutMs: integerEnv("SOL_CODEX_REQUEST_TIMEOUT_MS", 30_000),
+  outboxPollMs: integerEnv("SOL_OUTBOX_POLL_MS", 2_000),
 } as const;
