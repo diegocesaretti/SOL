@@ -13,6 +13,7 @@
     "typecheck": "pnpm -r typecheck",
     "db:up": "docker compose up -d postgres redis",
     "db:down": "docker compose down",
-    "db:logs": "docker compose logs -f postgres redis"
+    "db:logs": "docker compose logs -f postgres redis",
+    "db:migrate": "pnpm --filter @sol/server db:migrate"
   }
 }
