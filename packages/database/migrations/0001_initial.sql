@@ -1,8 +1,5 @@
 BEGIN;
 
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
-CREATE EXTENSION IF NOT EXISTS vector;
-
 CREATE TYPE member_role AS ENUM ('owner', 'adult', 'member', 'child', 'guest');
 CREATE TYPE member_status AS ENUM ('active', 'invited', 'disabled');
 CREATE TYPE visibility_scope AS ENUM ('private', 'shared', 'family', 'project', 'system');
@@ -262,17 +259,8 @@ CREATE TABLE action_log (
 );
 CREATE INDEX action_log_household_time_idx ON action_log(household_id, created_at DESC);
 
--- Reserved semantic index. 1536 is provisional and must be migrated if the chosen local embedding model differs.
-CREATE TABLE embeddings (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  household_id uuid NOT NULL REFERENCES households(id) ON DELETE CASCADE,
-  resource_type text NOT NULL,
-  resource_id uuid NOT NULL,
-  model text NOT NULL,
-  embedding vector(1536) NOT NULL,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE(resource_type, resource_id, model)
-);
-CREATE INDEX embeddings_household_idx ON embeddings(household_id);
+-- Semantic embeddings are intentionally not part of the mandatory base schema.
+-- When SOL starts using semantic search, a separate optional pgvector migration can
+-- add the vector extension/table without making Windows-native installs depend on it.
 
 COMMIT;
