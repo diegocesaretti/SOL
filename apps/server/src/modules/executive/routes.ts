@@ -29,6 +29,11 @@ export async function handleExecutiveApi(
   response: ServerResponse,
   principal: AuthPrincipal,
 ): Promise<boolean> {
+  if (principal.role === "guest") {
+    sendJson(response, 403, { error: "forbidden" });
+    return true;
+  }
+
   if (path === "/v1/executive/proposals" && request.method === "GET") {
     const url = new URL(request.url ?? path, "http://sol.local");
     sendJson(response, 200, {
