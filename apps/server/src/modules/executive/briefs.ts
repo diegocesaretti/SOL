@@ -187,6 +187,7 @@ function fallbackSummary(content: Omit<ExecutiveBriefContent, "summary">): strin
 export async function buildExecutiveBrief(
   memberId: string,
   type: "morning" | "tomorrow_preview" = "morning",
+  options: { persist?: boolean } = {},
 ): Promise<ExecutiveBriefContent> {
   const member = await loadMember(memberId);
   if (!member) throw new Error("member_not_found");
@@ -254,14 +255,16 @@ export async function buildExecutiveBrief(
   }
 
   const content: ExecutiveBriefContent = { ...base, summary };
-  await db.query(
-    `INSERT INTO executive_briefs(
-       household_id, member_id, brief_type, period_start, period_end, content
-     ) VALUES ($1, $2, $3, $4, $5, $6::jsonb)
-     ON CONFLICT(household_id, member_id, brief_type, period_start, period_end)
-     DO UPDATE SET content = EXCLUDED.content, created_at = now()`,
-    [member.householdId, member.memberId, type, range.start, range.end, JSON.stringify(content)],
-  );
+  if (options.persist !== false) {
+    await db.query(
+      `INSERT INTO executive_briefs(
+         household_id, member_id, brief_type, period_start, period_end, content
+       ) VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+       ON CONFLICT(household_id, member_id, brief_type, period_start, period_end)
+       DO UPDATE SET content = EXCLUDED.content, created_at = now()`,
+      [member.householdId, member.memberId, type, range.start, range.end, JSON.stringify(content)],
+    );
+  }
   return content;
 }
 
