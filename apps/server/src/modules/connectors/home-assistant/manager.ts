@@ -1,5 +1,6 @@
 import { homeAssistantWebSocketUrl, type HomeAssistantState } from "./client.js";
 import { ingestHomeAssistantStateChange } from "./ingest.js";
+import { reconcileSelectedHomeAssistantStates } from "./reconcile.js";
 import {
   getHomeAssistantAccount,
   listConfiguredHomeAssistantAccountIds,
@@ -144,6 +145,14 @@ export class HomeAssistantManager {
     }
     runtime.manualStop = false;
     if (runtime.socket && ["connecting", "open", "reconnecting"].includes(runtime.state)) return status(runtime);
+
+    try {
+      await reconcileSelectedHomeAssistantStates(sourceAccountId);
+    } catch (error) {
+      console.error(`[home-assistant:${sourceAccountId}] selected-state reconcile failed`, error);
+    }
+    const selected = await listSelectedHomeAssistantEntities(sourceAccountId);
+    runtime.selected = new Map(selected.map((entity) => [entity.entityId, entity]));
     await this.connect(runtime);
     return status(runtime);
   }
@@ -204,7 +213,16 @@ export class HomeAssistantManager {
           socket.send(JSON.stringify({ id: nextId++, type: "subscribe_events", event_type: "state_changed" }));
           return;
         }
-        if (type === "result" && authenticated && message.success === true && !subscribed) {
+        if (type === "result" && authenticated && !subscribed) {
+          if (message.success !== true) {
+            runtime.state = "error";
+            runtime.lastError = "Home Assistant rejected state_changed subscription";
+            runtime.updatedAt = new Date();
+            void markHomeAssistantError(runtime.sourceAccountId, runtime.lastError);
+            runtime.manualStop = true;
+            socket.close(4002, "subscription_failed");
+            return;
+          }
           subscribed = true;
           runtime.state = "open";
           runtime.reconnectAttempt = 0;
@@ -226,8 +244,8 @@ export class HomeAssistantManager {
         if (haEvent.event_type !== "state_changed" || !haEvent.data || typeof haEvent.data !== "object") return;
         const data = haEvent.data as { entity_id?: unknown; old_state?: unknown; new_state?: unknown };
         if (typeof data.entity_id !== "string") return;
-        const selected = runtime.selected.get(data.entity_id);
-        if (!selected) return;
+        const selectedEntity = runtime.selected.get(data.entity_id);
+        if (!selectedEntity) return;
         const newState = stateObject(data.new_state);
         if (!newState) return;
         const oldState = stateObject(data.old_state);
@@ -236,7 +254,7 @@ export class HomeAssistantManager {
           .then(() => ingestHomeAssistantStateChange({
             householdId: runtime.householdId,
             sourceAccountId: runtime.sourceAccountId,
-            entity: selected,
+            entity: selectedEntity,
             oldState,
             newState,
             timeFired,
