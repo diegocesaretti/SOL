@@ -12,8 +12,8 @@
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
-    "db:setup:windows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows/setup-postgres.ps1",
-    "db:check:windows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows/check-postgres.ps1",
+    "db:setup": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows/setup-postgres.ps1",
+    "db:check": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows/check-postgres.ps1",
     "db:migrate": "pnpm --filter @sol/server db:migrate"
   }
 }
