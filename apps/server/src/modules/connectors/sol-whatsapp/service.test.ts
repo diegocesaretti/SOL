@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseAssistantIntent } from "./service.js";
+import { parseAssistantIntent } from "./intents.js";
 
 test("routes simple yes/no approvals deterministically", () => {
   assert.deepEqual(parseAssistantIntent("sí"), { kind: "yes" });
