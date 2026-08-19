@@ -93,7 +93,7 @@ The order is intentionally dependency-driven rather than feature-driven.
 - [x] Daily member brief generation
 - [x] Tomorrow-preview brief generation
 - [x] Schedule-conflict detection
-- [x] Persisted briefs reusable by future delivery channels
+- [x] Persisted briefs reusable by delivery channels
 - [x] Integrated `/calendar` and `/executive` UI
 - [x] Sparse Calendar/executive reconciliation defaults for managed scale-to-zero PostgreSQL
 
@@ -106,16 +106,34 @@ The order is intentionally dependency-driven rather than feature-driven.
 - [ ] Reminder delivery policy and snooze/reschedule model
 - [ ] Optional Google Tasks or another external task provider
 
-## Phase 5 — SOL communication channel
+## Phase 5 — SOL communication channel ✅ core
 
-- [ ] Give SOL its own dedicated WhatsApp account/session role
-- [ ] Treat SOL WhatsApp as an assistant interface/action channel, not an ordinary personal source
-- [ ] Resolve incoming sender → authenticated household member
-- [ ] Deliver morning/tomorrow briefs through SOL WhatsApp
-- [ ] Ask for proposal approvals through SOL WhatsApp
-- [ ] Receive natural-language questions/commands through SOL WhatsApp
-- [ ] Route approved outbound WhatsApp messages through `action_log`
-- [ ] Prevent observed third-party messages from gaining command authority
+- [x] Dedicated household WhatsApp account/session role for SOL
+- [x] Treat SOL WhatsApp as an assistant interface/action channel, not an ordinary monitored source
+- [x] Exclude the assistant account from member WhatsApp source/history ingestion
+- [x] One-time member binding challenge → actual WhatsApp JID/LID
+- [x] Prevent one active WhatsApp identity from authenticating multiple members
+- [x] Resolve incoming direct sender → authenticated active household member
+- [x] Reject unknown/group/broadcast senders as command authorities before AI
+- [x] Deliver persisted morning/tomorrow briefs through SOL WhatsApp
+- [x] Deliver executive proposals to the correct member/managers
+- [x] Deterministic `sí/no` approval bound to the last proposal SOL asked about
+- [x] Explicit approve/reject by short proposal reference
+- [x] Receive permission-filtered natural-language questions
+- [x] Authenticated natural-language create command → pending proposal → explicit approval
+- [x] Reuse Executive Core permissions/action policy for WhatsApp approvals
+- [x] Audit outbound assistant WhatsApp messages through `action_log`
+- [x] Idempotent delivery ledger for durable outbox retries
+- [x] Integrated `/sol-whatsapp` setup/member-binding UI
+
+### Phase 5 follow-ups
+
+- [ ] Real dedicated-number linked-device integration test on the target SOL host
+- [ ] Offline-channel delivery reconciliation/retry policy
+- [ ] Rate limiting / abuse controls for unknown senders
+- [ ] Rich media and voice messages on the assistant channel
+- [ ] Multi-turn clarification/editing before approving ambiguous proposals
+- [ ] Delivery receipts / stronger remote-send reconciliation
 
 ## Phase 6 — Family UI + knowledge views
 
