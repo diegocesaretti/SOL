@@ -87,9 +87,10 @@ export class CodexProvider implements AiProvider {
     const threadId = threadResult.thread.id;
 
     let turnId: string | undefined;
-    let finalText = "";
-    let streamedText = "";
-    let completion: TurnCompletedParams["turn"] | undefined;
+    const finalTextByTurn = new Map<string, string>();
+    const streamedTextByTurn = new Map<string, string>();
+    const completionByTurn = new Map<string, TurnCompletedParams["turn"]>();
+
     let resolveCompletion!: () => void;
     const completionPromise = new Promise<void>((resolve) => {
       resolveCompletion = resolve;
@@ -103,33 +104,38 @@ export class CodexProvider implements AiProvider {
 
       if (notification.method === "item/agentMessage/delta") {
         const delta = params as unknown as AgentDeltaParams;
-        if (turnId && delta.turnId && delta.turnId !== turnId) return;
-        if (typeof delta.delta === "string") streamedText += delta.delta;
+        const eventTurnId = delta.turnId ?? turnId;
+        if (!eventTurnId || typeof delta.delta !== "string") return;
+        streamedTextByTurn.set(
+          eventTurnId,
+          `${streamedTextByTurn.get(eventTurnId) ?? ""}${delta.delta}`,
+        );
         return;
       }
 
       if (notification.method === "item/completed") {
         const itemParams = params as unknown as ItemCompletedParams;
-        if (turnId && itemParams.turnId && itemParams.turnId !== turnId) return;
+        const eventTurnId = itemParams.turnId ?? turnId;
+        if (!eventTurnId) return;
         if (
           itemParams.item?.type === "agentMessage" &&
           typeof itemParams.item.text === "string" &&
           itemParams.item.phase !== "commentary"
         ) {
-          finalText = itemParams.item.text;
+          finalTextByTurn.set(eventTurnId, itemParams.item.text);
         }
         return;
       }
 
       if (notification.method === "turn/completed") {
         const turnParams = params as unknown as TurnCompletedParams;
-        if (turnId && turnParams.turn.id !== turnId) return;
-        completion = turnParams.turn;
-        resolveCompletion();
+        completionByTurn.set(turnParams.turn.id, turnParams.turn);
+        if (turnId === turnParams.turn.id) resolveCompletion();
       }
     };
 
     const unsubscribe = this.client.onNotification(handleNotification);
+    let timeout: NodeJS.Timeout | undefined;
 
     try {
       const turnResult = await this.client.request<TurnStartResult>("turn/start", {
@@ -148,16 +154,20 @@ export class CodexProvider implements AiProvider {
       });
       turnId = turnResult.turn.id;
 
-      await Promise.race([
-        completionPromise,
-        new Promise<never>((_, reject) =>
-          setTimeout(
-            () => reject(new CodexAppServerError("Codex reasoning turn timed out")),
-            120_000,
-          ),
-        ),
-      ]);
+      // A very fast App Server may emit turn/completed immediately after the
+      // turn/start response. Buffering by turn id keeps concurrent family turns isolated.
+      if (completionByTurn.has(turnId)) resolveCompletion();
 
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeout = setTimeout(
+          () => reject(new CodexAppServerError("Codex reasoning turn timed out")),
+          120_000,
+        );
+      });
+
+      await Promise.race([completionPromise, timeoutPromise]);
+
+      const completion = completionByTurn.get(turnId);
       if (!completion) {
         throw new CodexAppServerError("Codex turn completed without a completion payload");
       }
@@ -167,7 +177,10 @@ export class CodexProvider implements AiProvider {
         );
       }
 
-      const text = finalText.trim() || streamedText.trim();
+      const text =
+        finalTextByTurn.get(turnId)?.trim() ||
+        streamedTextByTurn.get(turnId)?.trim() ||
+        "";
       if (!text) throw new CodexAppServerError("Codex returned no final text");
 
       return {
@@ -181,6 +194,7 @@ export class CodexProvider implements AiProvider {
         },
       };
     } finally {
+      if (timeout) clearTimeout(timeout);
       unsubscribe();
       void this.client.request("thread/archive", { threadId }).catch(() => undefined);
     }
