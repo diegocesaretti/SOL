@@ -8,6 +8,12 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+foreach ($identifier in @($DatabaseName, $DatabaseUser, $AdminUser)) {
+  if ($identifier -notmatch '^[A-Za-z_][A-Za-z0-9_]*$') {
+    throw "Invalid PostgreSQL identifier: $identifier"
+  }
+}
+
 function Find-Psql {
   $command = Get-Command psql.exe -ErrorAction SilentlyContinue
   if ($command) { return $command.Source }
@@ -26,7 +32,7 @@ function Find-Psql {
   throw @'
 PostgreSQL/psql was not found.
 Install a supported PostgreSQL version for Windows first, then rerun:
-  pnpm db:setup:windows
+  pnpm db:setup
 The normal PostgreSQL Windows installer is sufficient; Docker, WSL and pgvector are not required.
 '@
 }
@@ -105,5 +111,6 @@ Write-Host "Host:     ${PostgresHost}:$PostgresPort"
 Write-Host 'DATABASE_URL was written to .env (which is ignored by Git).'
 Write-Host ''
 Write-Host 'Next:'
+Write-Host '  pnpm db:check'
 Write-Host '  pnpm db:migrate'
 Write-Host '  pnpm dev'
