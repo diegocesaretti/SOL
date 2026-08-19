@@ -37,11 +37,13 @@ function optionalEnv(name: string): string | undefined {
 }
 
 const codexHome = optionalEnv("SOL_CODEX_HOME") ?? resolve(repoRoot, ".sol", "codex");
+const host = process.env.SOL_HOST ?? "127.0.0.1";
+const port = integerEnv("SOL_PORT", 3000);
 
 export const config = {
   repoRoot,
-  host: process.env.SOL_HOST ?? "127.0.0.1",
-  port: integerEnv("SOL_PORT", 3000),
+  host,
+  port,
   logLevel: process.env.SOL_LOG_LEVEL ?? "info",
   databaseUrl:
     process.env.DATABASE_URL ??
@@ -50,13 +52,16 @@ export const config = {
   sessionDays: integerEnv("SOL_SESSION_DAYS", 30),
   cookieSecure: booleanEnv("SOL_COOKIE_SECURE", false),
   codexBin: process.env.SOL_CODEX_BIN?.trim() || "codex",
-  // SOL gets a dedicated Codex profile by default so logging SOL in/out does not
-  // disturb the developer's normal Codex CLI/IDE session on the same machine.
   codexHome,
-  // Reasoning runs from an empty SOL-owned directory by default, avoiding accidental
-  // pickup of repository AGENTS.md/instructions. Override only deliberately.
   codexWorkingDirectory:
     optionalEnv("SOL_CODEX_CWD") ?? resolve(codexHome, "workspace"),
   codexRequestTimeoutMs: integerEnv("SOL_CODEX_REQUEST_TIMEOUT_MS", 30_000),
   outboxPollMs: integerEnv("SOL_OUTBOX_POLL_MS", 2_000),
+  googleClientId: optionalEnv("SOL_GOOGLE_CLIENT_ID"),
+  googleClientSecret: optionalEnv("SOL_GOOGLE_CLIENT_SECRET"),
+  googleRedirectUri:
+    optionalEnv("SOL_GOOGLE_REDIRECT_URI") ??
+    `http://${host}:${port}/v1/google/callback`,
+  calendarSyncMs: integerEnv("SOL_CALENDAR_SYNC_MS", 15 * 60 * 1000),
+  executivePollMs: integerEnv("SOL_EXECUTIVE_POLL_MS", 60_000),
 } as const;
