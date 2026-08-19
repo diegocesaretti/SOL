@@ -12,9 +12,8 @@
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
-    "db:up": "docker compose up -d postgres redis",
-    "db:down": "docker compose down",
-    "db:logs": "docker compose logs -f postgres redis",
+    "db:setup:windows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows/setup-postgres.ps1",
+    "db:check:windows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows/check-postgres.ps1",
     "db:migrate": "pnpm --filter @sol/server db:migrate"
   }
 }
