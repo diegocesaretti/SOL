@@ -70,18 +70,46 @@ The order is intentionally dependency-driven rather than feature-driven.
 - [ ] Rich media pipeline (voice transcription, document/image extraction) with explicit privacy policy
 - [ ] More complete LID/contact/entity reconciliation
 
-## Phase 4 — Calendar + executive loop (next)
+## Phase 4 — Calendar + executive loop ✅ core
 
-- [ ] Google account/Calendar connector
-- [ ] Family and personal calendar mapping
-- [ ] Candidate → confirmed event/task workflow
-- [ ] Morning brief
-- [ ] Daily consolidation
-- [ ] Conflict detection
-- [ ] Reminder/action policies
-- [ ] Approval policy for outbound/destructive actions
+- [x] Google Calendar OAuth connector with offline refresh
+- [x] Multiple Google accounts per household/member
+- [x] Multiple calendars per account with separate read/write selection
+- [x] Family vs personal Calendar privacy mapping
+- [x] Incremental Calendar reconciliation with sync tokens and full-resync recovery
+- [x] Calendar events represented in Life with provenance
+- [x] Candidate → executive proposal workflow
+- [x] Explicit approval/rejection boundary before actions
+- [x] Approved task → local SOL task
+- [x] Approved timed event → idempotent Google Calendar write
+- [x] Family proposal decision restricted to owner/adult
+- [x] Daily member brief generation
+- [x] Tomorrow-preview brief generation
+- [x] Schedule-conflict detection
+- [x] Persisted briefs reusable by future delivery channels
+- [x] Integrated `/calendar` and `/executive` UI
 
-## Phase 5 — Family UI
+### Phase 4 follow-ups
+
+- [ ] Real Google OAuth + Calendar integration test on the target SOL host
+- [ ] Daily/nightly Life → Knowledge consolidation pass
+- [ ] Quota-aware historical WhatsApp candidate consolidation
+- [ ] Rich proposal editing before approval (time/title/destination)
+- [ ] Reminder delivery policy and snooze/reschedule model
+- [ ] Optional Google Tasks or another external task provider
+
+## Phase 5 — SOL communication channel
+
+- [ ] Give SOL its own dedicated WhatsApp account/session role
+- [ ] Treat SOL WhatsApp as an assistant interface/action channel, not an ordinary personal source
+- [ ] Resolve incoming sender → authenticated household member
+- [ ] Deliver morning/tomorrow briefs through SOL WhatsApp
+- [ ] Ask for proposal approvals through SOL WhatsApp
+- [ ] Receive natural-language questions/commands through SOL WhatsApp
+- [ ] Route approved outbound WhatsApp messages through `action_log`
+- [ ] Prevent observed third-party messages from gaining command authority
+
+## Phase 6 — Family UI + knowledge views
 
 - [ ] Responsive web/PWA shell
 - [ ] Full household/member management
@@ -91,6 +119,33 @@ The order is intentionally dependency-driven rather than feature-driven.
 - [ ] Privacy/visibility controls
 - [ ] Automations and action approvals
 
+## Planned first-class connectors
+
+### Home Assistant
+
+- [ ] Entity/device state ingestion
+- [ ] Presence, alarms and meaningful state-change events
+- [ ] Sensor/energy context where useful
+- [ ] Separate read permissions from control permissions
+- [ ] Audited actions with stronger approval for risky controls
+
+### Mercado Libre API
+
+- [ ] OAuth/account connector
+- [ ] Orders/sales ingestion
+- [ ] Questions/messages and listing state
+- [ ] Stock/pricing/shipping/payment signals
+- [ ] Business-scoped knowledge/projects
+- [ ] Explicitly authorized listing/reply/stock/price actions
+
+### Other sources
+
+- [ ] Gmail
+- [ ] Google Drive/files
+- [ ] Contacts
+- [ ] Voice / Codex Audio Remote
+- [ ] Additional household/business sources
+
 ## Deployment hardening
 
 Before SOL is intentionally exposed beyond localhost:
@@ -98,9 +153,7 @@ Before SOL is intentionally exposed beyond localhost:
 - [ ] HTTPS/reverse-proxy deployment profile
 - [ ] Login throttling / abuse controls
 - [ ] Session/device management UI
-- [ ] Backup/restore strategy
+- [ ] Backup/restore strategy including local encryption keys
 - [ ] Secret-store integration
 
-## Later connectors
-
-Gmail, files, Home Assistant, voice/Codex Audio Remote, contacts, Mercado Libre/business sources and other household data can then implement the same source/action contracts without changing SOL Core.
+See `docs/INTEGRATIONS.md` for the distinction between sources, action targets and assistant interfaces.
