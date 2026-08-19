@@ -75,7 +75,7 @@ The order is intentionally dependency-driven rather than feature-driven.
 - [ ] Tune local Spanish candidate heuristics from real household traffic
 - [ ] Quota-aware historical candidate consolidation job
 - [ ] Rich media pipeline (voice transcription, document/image extraction) with explicit privacy policy
-- [ ] More complete LID/contact/entity reconciliation
+- [ ] More complete LID/contact/entity reconciliation across several private observers
 
 ## Phase 4 — Calendar + executive loop ✅ core
 
@@ -112,7 +112,7 @@ The order is intentionally dependency-driven rather than feature-driven.
 - [x] Treat SOL WhatsApp as an assistant interface/action channel, not an ordinary monitored source
 - [x] Exclude the assistant account from member WhatsApp source/history ingestion
 - [x] One-time member binding challenge → actual WhatsApp JID/LID
-- [x] Prevent one active WhatsApp identity from authenticating multiple members
+- [x] Prevent one active WhatsApp identity from authenticating multiple members in app + database policy
 - [x] Resolve incoming direct sender → authenticated active household member
 - [x] Reject unknown/group/broadcast senders as command authorities before AI
 - [x] Deliver persisted morning/tomorrow briefs through SOL WhatsApp
@@ -123,7 +123,7 @@ The order is intentionally dependency-driven rather than feature-driven.
 - [x] Authenticated natural-language create command → pending proposal → explicit approval
 - [x] Reuse Executive Core permissions/action policy for WhatsApp approvals
 - [x] Audit outbound assistant WhatsApp messages through `action_log`
-- [x] Idempotent delivery ledger for durable outbox retries
+- [x] Delivery ledger for durable outbox retries
 - [x] Integrated `/sol-whatsapp` setup/member-binding UI
 
 ### Phase 5 follow-ups
@@ -135,15 +135,23 @@ The order is intentionally dependency-driven rather than feature-driven.
 - [ ] Multi-turn clarification/editing before approving ambiguous proposals
 - [ ] Delivery receipts / stronger remote-send reconciliation
 
-## Phase 6 — Family UI + knowledge views
+## Phase 6 — Family UI + knowledge views 🟡 underway
 
-- [ ] Responsive web/PWA shell
-- [ ] Full household/member management
-- [ ] Per-member source connection screens
-- [ ] Timeline
-- [ ] People/projects views
-- [ ] Privacy/visibility controls
-- [ ] Automations and action approvals
+- [x] Integrated responsive Home modules for Executive, Life, Calendar, sources, SOL WhatsApp and AI
+- [x] Privacy-filtered `/life` timeline for source items, life events and tasks
+- [x] Timeline pagination without cross-member private retrieval
+- [x] People and Projects knowledge views
+- [x] WhatsApp identity → Person entity promotion with source-matched privacy
+- [x] Backfill existing WhatsApp identities into Person entities
+- [x] Manual private/family Person and Project creation
+- [x] Basic household/member creation and per-connector setup screens
+- [ ] Unified reusable PWA/navigation shell across every page
+- [ ] Edit/delete/merge people and projects
+- [ ] Fact/relation inspection with provenance drill-down
+- [ ] User-facing privacy/visibility/grant controls
+- [ ] Full household/member lifecycle management (disable/reset/role changes)
+- [ ] Automation rules and richer action-approval views
+- [ ] Daily/nightly Life → Knowledge consolidator to populate facts/relations/projects automatically
 
 ## Planned first-class connectors
 
