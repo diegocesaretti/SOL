@@ -37,9 +37,12 @@ export function renderWhatsappPage(): string {
     .code { font: 800 26px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .12em; }
     .error { color: #d33; }
     .muted { opacity: .62; }
-    .message { padding: 12px 0; border-top: 1px solid color-mix(in srgb, CanvasText 10%, transparent); }
-    .message:first-child { border-top: 0; }
-    .message time { font-size: 12px; opacity: .55; }
+    .message, .candidate { padding: 12px 0; border-top: 1px solid color-mix(in srgb, CanvasText 10%, transparent); }
+    .message:first-child, .candidate:first-child { border-top: 0; }
+    .message time, .candidate time { font-size: 12px; opacity: .55; }
+    .candidate-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 4px 0; }
+    .candidate-title { font-weight: 800; }
+    .candidate pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; opacity: .75; }
     details { margin-top: 18px; }
     summary { cursor: pointer; font-weight: 800; }
     @media (max-width: 680px) { main { padding-top: 30px; } .grid { grid-template-columns: 1fr; } .full { grid-column: auto; } .row { flex-direction: column; } }
@@ -58,6 +61,7 @@ export function renderWhatsappPage(): string {
 <script>
   const app = document.getElementById('app');
   let pollTimer;
+  let interactionLock = false;
 
   function esc(value) {
     return String(value ?? '').replace(/[&<>'"]/g, (char) => ({
@@ -74,6 +78,10 @@ export function renderWhatsappPage(): string {
 
   function stateLabel(state) {
     return ({ idle:'Desconectado', connecting:'Conectando', qr:'Esperando vínculo', open:'Conectado', reconnecting:'Reconectando', error:'Error', logged_out:'Desvinculado' })[state] || state;
+  }
+
+  function candidateStatusLabel(status) {
+    return ({ pending:'Pendiente', analyzed:'Analizado', ignored:'Ignorado', failed:'Falló' })[status] || status;
   }
 
   function accountCard(account) {
@@ -105,7 +113,10 @@ export function renderWhatsappPage(): string {
         </div>
         \${runtime.lastError ? '<p class="error">' + esc(runtime.lastError) + '</p>' : ''}
         \${qr}\${pairing}\${manage}
-        \${account.canRead ? '<details><summary>Últimos mensajes almacenados</summary><div data-messages="' + esc(account.id) + '"><p class="muted">Abrí para cargar.</p></div></details>' : ''}
+        \${account.canRead ? `
+          <details><summary>Candidatos detectados por SOL</summary><div data-candidates="\${esc(account.id)}"><p class="muted">Abrí para cargar.</p></div></details>
+          <details><summary>Últimos mensajes almacenados</summary><div data-messages="\${esc(account.id)}"><p class="muted">Abrí para cargar.</p></div></details>
+        ` : ''}
       </article>
     \`;
   }
@@ -120,6 +131,33 @@ export function renderWhatsappPage(): string {
     target.innerHTML = messages.length ? messages.map((m) => \`
       <div class="message"><time>\${esc(new Date(m.occurredAt).toLocaleString())}</time><div>\${esc(m.text || '[mensaje sin texto]')}</div></div>
     \`).join('') : '<p class="muted">Todavía no hay mensajes almacenados.</p>';
+  }
+
+  async function loadCandidates(accountId, target) {
+    const result = await api('/v1/whatsapp/accounts/' + encodeURIComponent(accountId) + '/candidates');
+    if (!result.response.ok) {
+      target.innerHTML = '<p class="error">' + esc(result.body.error || 'No se pudieron leer los candidatos') + '</p>';
+      return;
+    }
+    const candidates = result.body.candidates || [];
+    target.innerHTML = candidates.length ? candidates.map((c) => {
+      const extracted = c.extracted || {};
+      const title = extracted.title || c.kind || 'Candidato';
+      const summary = extracted.summary || '';
+      const confidence = c.confidence == null ? '' : ' · ' + Math.round(Number(c.confidence) * 100) + '%';
+      const reasons = (c.reasons || []).join(', ');
+      return \`
+        <div class="candidate">
+          <time>\${esc(new Date(c.occurredAt).toLocaleString())}</time>
+          <div class="candidate-head"><span class="pill">\${esc(candidateStatusLabel(c.status))}</span><span class="candidate-title">\${esc(title)}</span><span class="meta">\${esc(c.kind)}\${esc(confidence)}</span></div>
+          <div>\${esc(c.text || '')}</div>
+          \${summary ? '<p>' + esc(summary) + '</p>' : ''}
+          <div class="meta">Filtro local: \${Math.round(Number(c.score || 0) * 100)}% · \${esc(reasons || 'sin motivos')}</div>
+          \${c.error ? '<p class="error">' + esc(c.error) + '</p>' : ''}
+          \${c.extracted ? '<pre>' + esc(JSON.stringify(c.extracted, null, 2)) + '</pre>' : ''}
+        </div>
+      \`;
+    }).join('') : '<p class="muted">Todavía no hay candidatos. Un mensaje trivial se almacena pero no aparece acá.</p>';
   }
 
   function bindActions() {
@@ -137,6 +175,8 @@ export function renderWhatsappPage(): string {
 
     document.querySelectorAll('[data-action="pair"]').forEach((button) => {
       button.addEventListener('click', () => {
+        interactionLock = true;
+        clearTimeout(pollTimer);
         const id = button.dataset.id;
         const slot = document.getElementById('pair-' + id);
         slot.innerHTML = \`
@@ -156,7 +196,10 @@ export function renderWhatsappPage(): string {
             method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({phoneNumber})
           });
           if (!result.response.ok) status.innerHTML = '<p class="error">' + esc(result.body.error || 'No se pudo generar') + '</p>';
-          else await load();
+          else {
+            interactionLock = false;
+            await load();
+          }
         });
       });
     });
@@ -174,13 +217,23 @@ export function renderWhatsappPage(): string {
       details.addEventListener('toggle', () => {
         if (!details.open || details.dataset.loaded) return;
         details.dataset.loaded = '1';
-        const target = details.querySelector('[data-messages]');
-        if (target) void loadMessages(target.dataset.messages, target);
+        const messages = details.querySelector('[data-messages]');
+        const candidates = details.querySelector('[data-candidates]');
+        if (messages) void loadMessages(messages.dataset.messages, messages);
+        if (candidates) void loadCandidates(candidates.dataset.candidates, candidates);
       });
+    });
+
+    const refresh = document.getElementById('refresh');
+    if (refresh) refresh.addEventListener('click', async () => {
+      interactionLock = false;
+      refresh.disabled = true;
+      await load();
     });
   }
 
   async function load() {
+    if (interactionLock) return;
     clearTimeout(pollTimer);
     const [me, accountsResult] = await Promise.all([api('/v1/auth/me'), api('/v1/whatsapp/accounts')]);
     if (!me.response.ok) {
@@ -198,7 +251,7 @@ export function renderWhatsappPage(): string {
     const canShared = ['owner','adult'].includes(member.role);
 
     app.innerHTML = \`
-      <div class="row"><div><h2>Cuentas vinculables</h2><div class="meta">Sesión SOL: \${esc(member.displayName)} · \${esc(member.role)}</div></div><span class="pill">\${accounts.length} cuenta(s)</span></div>
+      <div class="row"><div><h2>Cuentas vinculables</h2><div class="meta">Sesión SOL: \${esc(member.displayName)} · \${esc(member.role)}</div></div><div class="actions" style="margin-top:0"><span class="pill">\${accounts.length} cuenta(s)</span><button class="secondary" id="refresh">Actualizar</button></div></div>
       \${canAdd ? \`
         <details open>
           <summary>Agregar cuenta</summary>
@@ -234,7 +287,7 @@ export function renderWhatsappPage(): string {
 
     bindActions();
     const waiting = accounts.some((a) => ['connecting','qr','reconnecting'].includes(a.runtime?.state));
-    pollTimer = setTimeout(load, waiting ? 1500 : 5000);
+    if (waiting) pollTimer = setTimeout(load, 1500);
   }
 
   load();
