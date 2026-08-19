@@ -6,7 +6,10 @@ The order is intentionally dependency-driven rather than feature-driven.
 
 - [x] Private repository initialized
 - [x] TypeScript/pnpm modular-monolith scaffold
-- [x] PostgreSQL + pgvector + Redis local infrastructure
+- [x] PostgreSQL-first local infrastructure
+- [x] Native Windows PostgreSQL setup/check workflow; no Docker/WSL/Hyper-V requirement
+- [x] Redis removed until a demonstrated workload requires it
+- [x] pgvector deferred to an optional semantic-search migration
 - [x] Household/member/source-account data model
 - [x] Visibility/access contract
 - [x] Provider-neutral ingestion contract
@@ -150,10 +153,14 @@ The order is intentionally dependency-driven rather than feature-driven.
 
 Before SOL is intentionally exposed beyond localhost:
 
+- [ ] Register SOL Core as an always-on Windows service on the target host
+- [ ] Automated native PostgreSQL backup/restore workflow
 - [ ] HTTPS/reverse-proxy deployment profile
 - [ ] Login throttling / abuse controls
 - [ ] Session/device management UI
 - [ ] Backup/restore strategy including local encryption keys
 - [ ] Secret-store integration
+- [ ] Revisit optional pgvector only when semantic retrieval is actually implemented
+- [ ] Revisit Redis only if measured queue/cache coordination needs justify another service
 
 See `docs/INTEGRATIONS.md` for the distinction between sources, action targets and assistant interfaces.
