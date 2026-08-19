@@ -7,54 +7,52 @@ SOL is a family-first personal information and automation system: one integrated
 ## Principles
 
 - **Family-first, not single-user.** Records belong to a household and can have a member owner plus an explicit visibility scope.
-- **Multiple accounts per provider.** Each member can connect several WhatsApp/Google/future accounts; household-shared accounts are separate.
+- **Multiple accounts per provider.** Each member can connect several provider accounts; household-shared accounts are separate.
 - **Source traceability.** Derived tasks/events/knowledge remain traceable to the source item that caused them.
-- **Privacy before AI.** Authorization filters context before it reaches Codex.
+- **Privacy before AI and UI.** Authorization filters records before they reach Codex or user-facing views.
 - **Private really means private.** Household owner/admin status does not automatically reveal another member's private records.
-- **Knowledge is not authority.** Observed WhatsApp/e-mail/source content is untrusted data, not a command to SOL.
-- **Interfaces establish authority.** A verified member talking directly to SOL is different from third-party text merely observed by a connector.
+- **Knowledge is not authority.** Observed source content is untrusted data, not a command to SOL.
+- **Interfaces establish authority.** A verified member talking directly to SOL is different from third-party text observed by a connector.
 - **Proposal before external action.** Semantic detection can be automatic; externally visible writes go through executive/action policy.
-- **Provider independence.** Codex via ChatGPT OAuth is the first reasoning engine, but SOL Core is provider-neutral.
-- **Modular monolith first.** One deployable system with strong module boundaries.
+- **Provider independence.** Codex is the first reasoning engine, but SOL Core remains provider-neutral.
 - **No virtualization requirement.** SOL runs natively on Windows; PostgreSQL can be Neon-managed or a native local service.
 
-## Implemented today
+## Current architecture
 
 ```text
 SOURCES
 member WhatsApps ─┐
 Google Calendars ─┼─→ Life → Knowledge → Executive → Actions
-future HA / ML ───┘                         │
-                                             │
-INTERFACES                                   │
-Web ─────────────────────────────────────────┤
-SOL WhatsApp ↔ verified family members ──────┘
+future HA / ML ───┘        │        │          │
+                           │        │          │
+                           └── Timeline         │
+                                People/Projects │
+                                               │
+INTERFACES                                     │
+Web ───────────────────────────────────────────┤
+SOL WhatsApp ↔ verified family members ────────┘
 ```
 
-Current capabilities include:
+## Implemented today
 
-- household/member authentication and privacy boundaries;
-- standard PostgreSQL data model and durable outbox;
-- Neon-friendly event-driven database behavior;
+- household/member authentication and conservative privacy boundaries;
+- PostgreSQL schema, migrations, provenance and durable event outbox;
+- Neon-friendly event-driven database behavior with native Windows PostgreSQL fallback;
 - Codex App Server + ChatGPT OAuth reasoning;
 - multiple private/shared WhatsApp linked-device **source** accounts;
-- encrypted WhatsApp auth state in PostgreSQL;
+- encrypted WhatsApp auth/Signal state;
 - realtime/history WhatsApp ingestion and deterministic candidate filtering;
 - structured Codex extraction of tasks/events/commitments/deadlines;
-- multiple private/shared Google Calendar accounts;
-- separate Calendar read/write selection;
-- incremental Calendar reconciliation with source-backed Life events;
-- executive proposals with explicit approval/rejection;
-- idempotent approved-event creation in Google Calendar;
-- local SOL tasks;
-- daily/tomorrow briefs and conflict detection;
-- a dedicated **WhatsApp de SOL** assistant account, separate from monitored sources;
-- one-time member → actual WhatsApp JID/LID identity binding;
-- direct questions, today/tomorrow briefs and pending-proposal queries over SOL WhatsApp;
-- authenticated create requests → pending proposal → explicit confirmation;
-- deterministic `sí/no` and proposal-reference approvals using Executive Core permissions;
-- automatic brief/proposal delivery over SOL WhatsApp;
-- outbound assistant-message auditing through `action_log`.
+- Google Calendar multi-account sync with separate read/write calendar selection;
+- executive proposals, approvals, local tasks, Calendar actions and `action_log`;
+- daily/tomorrow briefs and schedule conflicts;
+- dedicated **WhatsApp de SOL** assistant account, separate from monitored sources;
+- one-time member → actual WhatsApp JID/LID binding;
+- questions, briefs, create requests and deterministic proposal approvals over SOL WhatsApp;
+- `/life` privacy-filtered timeline of source items, Life events and tasks;
+- `/life` People/Projects knowledge views with aliases/facts;
+- WhatsApp identities promoted to Person entities using source-matched privacy;
+- manual private/family Person and Project creation.
 
 ## Repository layout
 
@@ -68,13 +66,14 @@ SOL/
 │       │   ├── identity/
 │       │   ├── auth/
 │       │   ├── security/
-│       │   ├── connectors/
-│       │   │   ├── whatsapp/          # monitored source accounts
-│       │   │   ├── sol-whatsapp/      # SOL's own assistant interface
-│       │   │   └── google-calendar/
-│       │   ├── ai/codex/
+│       │   ├── life/
 │       │   ├── knowledge/
-│       │   └── executive/
+│       │   ├── executive/
+│       │   ├── connectors/
+│       │   │   ├── whatsapp/          # monitored sources
+│       │   │   ├── sol-whatsapp/      # assistant interface
+│       │   │   └── google-calendar/
+│       │   └── ai/codex/
 │       └── ui/
 ├── packages/database/migrations/
 ├── scripts/windows/
@@ -93,7 +92,7 @@ SOL/
 
 ## Quick start — Neon (recommended prototype profile)
 
-Requirements: Node.js 22+ (24 recommended), pnpm, internet access, and the Codex CLI if the AI engine is enabled.
+Requirements: Node.js 22+ (24 recommended), pnpm, internet access, and Codex CLI if AI reasoning is enabled.
 
 **Docker Desktop, WSL, Hyper-V, Redis, pgvector and a local PostgreSQL installation are not required.**
 
@@ -117,6 +116,7 @@ Useful screens:
 
 ```text
 /               SOL Home
+/life           Timeline + People + Projects
 /sol-whatsapp   SOL's own WhatsApp interface + member binding
 /executive      brief + pending proposals
 /calendar       Google accounts/calendars
@@ -124,11 +124,11 @@ Useful screens:
 /ai             Codex / ChatGPT
 ```
 
-See [docs/NEON.md](docs/NEON.md) and [docs/SOL_WHATSAPP.md](docs/SOL_WHATSAPP.md).
+See [docs/NEON.md](docs/NEON.md), [docs/SOL_WHATSAPP.md](docs/SOL_WHATSAPP.md) and [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Local PostgreSQL alternative
 
-If household data should remain on the SOL machine, install PostgreSQL natively on Windows and run:
+If household data should remain on the SOL machine:
 
 ```powershell
 pnpm install
@@ -141,8 +141,6 @@ pnpm dev
 Only `DATABASE_URL` changes; SOL application behavior is the same. See [docs/WINDOWS_NATIVE.md](docs/WINDOWS_NATIVE.md).
 
 ## WhatsApp: source vs assistant
-
-SOL intentionally has two different WhatsApp roles:
 
 ```text
 Member's ordinary WhatsApp
@@ -158,31 +156,28 @@ verified MEMBER INTERFACE
 questions / proposals / approvals
 ```
 
-The dedicated assistant account does not sync ordinary history into Life. Members authenticate their WhatsApp by generating a short-lived challenge while already logged into SOL and sending it directly to the dedicated SOL number. The protocol-visible JID is then bound to that member.
+The assistant account skips normal history ingestion. A member binds their direct WhatsApp identity by generating a short-lived code from an authenticated SOL web session and sending it to the dedicated SOL account. `sí/no` is scoped to the last proposal SOL explicitly asked that member about.
 
-A request such as:
+## Life and Knowledge
 
-```text
-agendame dentista el viernes a las 16
-```
-
-becomes:
+`/life` is built from permission-filtered queries rather than fetching household data and hiding it afterwards.
 
 ```text
-authenticated SOL WhatsApp command
-        ↓
-Codex structures it (no write authority)
-        ↓
-pending executive proposal
-        ↓
-SOL asks for confirmation
-        ↓
-sí / no
-        ↓
-Executive Core authorization
-        ↓
-Calendar/task action + action_log
+Timeline
+├── visible source items
+├── visible Life events
+└── visible tasks
+
+Knowledge
+├── People
+│   ├── aliases
+│   └── visible facts
+└── Projects
+    ├── aliases
+    └── visible facts
 ```
+
+Manual People/Projects may be `private` or `family`. WhatsApp-derived People inherit a conservative privacy scope from the source that first established the identity. More complete cross-source/entity consolidation remains a later Knowledge job.
 
 ## Database behavior
 
@@ -210,9 +205,9 @@ OAuth credentials are encrypted before PostgreSQL storage with a local key under
 
 ## Planned first-class connectors
 
-Home Assistant and Mercado Libre API are already part of the architecture as future **source + action** connectors. They will feed the same Life → Knowledge → Executive flow and become available to web, SOL WhatsApp and voice through the same permission layer.
+Home Assistant and Mercado Libre API remain planned **source + action** connectors. They will feed the same Life → Knowledge → Executive flow and become available to Web, SOL WhatsApp and voice through the same permission layer.
 
-See [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md) and [docs/ROADMAP.md](docs/ROADMAP.md).
+See [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md).
 
 ## Security note
 
@@ -220,4 +215,4 @@ SOL binds to `127.0.0.1` by default. Do not expose the development server direct
 
 ## Current status
 
-Phases 0–3 are implemented; Phase 4 (Calendar + executive loop) and **Phase 5 (SOL WhatsApp communication channel) are implemented at core level**. Real Google OAuth, monitored WhatsApp and dedicated SOL WhatsApp integration tests still need to run on the target host. The next larger product phase is the family UI/knowledge layer, while Home Assistant and Mercado Libre remain planned first-class connectors.
+Phases 0–3 are implemented; Phase 4 (Calendar/executive) and Phase 5 (SOL WhatsApp) are implemented at core level. **Phase 6 is underway with the Timeline and People/Projects core already implemented.** Real Google OAuth and both WhatsApp linked-device flows still need integration tests on the target host.
