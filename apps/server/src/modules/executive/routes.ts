@@ -66,16 +66,21 @@ export async function handleExecutiveApi(
   if (!proposalId || !action) return false;
 
   if (action === "reject") {
-    const rejected = await rejectExecutiveProposal({
-      proposalId,
-      householdId: principal.householdId,
-      memberId: principal.memberId,
-    });
-    if (!rejected) {
-      sendJson(response, 404, { error: "proposal_not_found_or_not_rejectable" });
-      return true;
+    try {
+      const rejected = await rejectExecutiveProposal({
+        proposalId,
+        householdId: principal.householdId,
+        memberId: principal.memberId,
+        role: principal.role,
+      });
+      if (!rejected) {
+        sendJson(response, 404, { error: "proposal_not_found_or_not_rejectable" });
+        return true;
+      }
+      sendJson(response, 200, { ok: true });
+    } catch (error) {
+      sendJson(response, 403, { error: error instanceof Error ? error.message : String(error) });
     }
-    sendJson(response, 200, { ok: true });
     return true;
   }
 
@@ -90,6 +95,7 @@ export async function handleExecutiveApi(
       proposalId,
       householdId: principal.householdId,
       memberId: principal.memberId,
+      role: principal.role,
       targetSourceAccountId: body.targetSourceAccountId,
       targetGoogleCalendarId: body.targetGoogleCalendarId,
     });
