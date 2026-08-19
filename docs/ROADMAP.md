@@ -46,25 +46,40 @@ The order is intentionally dependency-driven rather than feature-driven.
 - [ ] Persist optional per-household AI profiles if SOL later supports more than one ChatGPT/Codex identity on the same host
 - [ ] Add integration tests against a real installed Codex CLI/App Server runtime
 
-## Phase 3 — First source: WhatsApp (next)
+## Phase 3 — First source: WhatsApp ✅
 
-- [ ] Multi-session connector manager
-- [ ] One `source_account` per WhatsApp session
-- [ ] Realtime message ingestion
-- [ ] History/reconciliation strategy
-- [ ] Conversation/identity resolution
-- [ ] Zero-AI deterministic filtering for trivial messages
-- [ ] Candidate commitment/task extraction
+- [x] Multi-session connector manager
+- [x] One `source_account` per WhatsApp linked-device session
+- [x] Encrypted PostgreSQL Baileys auth/Signal-key store
+- [x] QR and pairing-code connection UI
+- [x] Realtime `messages.upsert` ingestion
+- [x] History sync/reconciliation with idempotent message IDs
+- [x] Direct/group conversation and basic identity resolution
+- [x] Personal vs shared-family privacy boundaries
+- [x] Zero-AI deterministic filtering for trivial messages
+- [x] Candidate commitment/task/event/deadline detection
+- [x] Realtime candidate → Codex structured classification
+- [x] Historical candidates held for future quota-aware batch processing
+- [x] Automatic reconnect with explicit logout/bad-session handling
 
-## Phase 4 — Calendar + executive loop
+### Phase 3 follow-ups
+
+- [ ] Real linked-device integration test on the target SOL host
+- [ ] Tune local Spanish candidate heuristics from real household traffic
+- [ ] Quota-aware historical candidate consolidation job
+- [ ] Rich media pipeline (voice transcription, document/image extraction) with explicit privacy policy
+- [ ] More complete LID/contact/entity reconciliation
+
+## Phase 4 — Calendar + executive loop (next)
 
 - [ ] Google account/Calendar connector
 - [ ] Family and personal calendar mapping
-- [ ] Candidate → confirmed event workflow
+- [ ] Candidate → confirmed event/task workflow
 - [ ] Morning brief
 - [ ] Daily consolidation
 - [ ] Conflict detection
 - [ ] Reminder/action policies
+- [ ] Approval policy for outbound/destructive actions
 
 ## Phase 5 — Family UI
 
