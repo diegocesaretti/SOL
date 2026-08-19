@@ -39,15 +39,12 @@ interface OAuthStateRow {
 function credentialAad(sourceAccountId: string): string {
   return `sol:google-calendar:${sourceAccountId}:oauth`;
 }
-
 function stateHash(state: string): string {
   return createHash("sha256").update(state).digest("hex");
 }
-
 function challenge(verifier: string): string {
   return createHash("sha256").update(verifier).digest("base64url");
 }
-
 function requireGoogleConfig(): { clientId: string; clientSecret: string } {
   if (!config.googleClientId || !config.googleClientSecret) {
     throw new Error("Google Calendar OAuth is not configured. Set SOL_GOOGLE_CLIENT_ID and SOL_GOOGLE_CLIENT_SECRET.");
@@ -66,15 +63,8 @@ async function readCredential(sourceAccountId: string): Promise<StoredCredential
   return JSON.parse(text) as StoredCredential;
 }
 
-async function saveCredential(
-  sourceAccountId: string,
-  credential: StoredCredential,
-  scopes?: string[],
-): Promise<void> {
-  const encrypted = await sealGoogleCredential(
-    JSON.stringify(credential),
-    credentialAad(sourceAccountId),
-  );
+async function saveCredential(sourceAccountId: string, credential: StoredCredential, scopes?: string[]): Promise<void> {
+  const encrypted = await sealGoogleCredential(JSON.stringify(credential), credentialAad(sourceAccountId));
   await db.query(
     `INSERT INTO google_oauth_credentials(source_account_id, encrypted_payload, granted_scopes, updated_at)
      VALUES ($1, $2, $3::text[], now())
@@ -113,21 +103,12 @@ export async function startGoogleOAuth(input: {
   const state = randomBytes(32).toString("base64url");
   const verifier = randomBytes(48).toString("base64url");
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
-
   await db.query("DELETE FROM google_oauth_states WHERE expires_at <= now() OR consumed_at IS NOT NULL");
   await db.query(
     `INSERT INTO google_oauth_states(
        household_id, member_id, source_account_id, state_hash, code_verifier, redirect_after, expires_at
      ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-    [
-      input.householdId,
-      input.memberId,
-      input.sourceAccountId,
-      stateHash(state),
-      verifier,
-      input.redirectAfter ?? "/calendar",
-      expiresAt,
-    ],
+    [input.householdId, input.memberId, input.sourceAccountId, stateHash(state), verifier, input.redirectAfter ?? "/calendar", expiresAt],
   );
 
   const url = new URL(AUTH_URL);
@@ -141,7 +122,6 @@ export async function startGoogleOAuth(input: {
   url.searchParams.set("state", state);
   url.searchParams.set("code_challenge", challenge(verifier));
   url.searchParams.set("code_challenge_method", "S256");
-
   return { authorizationUrl: url.toString(), expiresAt: expiresAt.toISOString() };
 }
 
@@ -163,10 +143,7 @@ export async function completeGoogleOAuth(
     );
     row = result.rows[0];
     if (!row) throw new Error("Google OAuth state is invalid or expired");
-    await client.query(
-      "UPDATE google_oauth_states SET consumed_at = now() WHERE state_hash = $1",
-      [stateHash(state)],
-    );
+    await client.query("UPDATE google_oauth_states SET consumed_at = now() WHERE state_hash = $1", [stateHash(state)]);
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK");
@@ -174,6 +151,7 @@ export async function completeGoogleOAuth(
   } finally {
     client.release();
   }
+  if (!row) throw new Error("Google OAuth state is invalid or expired");
 
   const token = await tokenRequest(
     new URLSearchParams({
@@ -185,13 +163,11 @@ export async function completeGoogleOAuth(
       redirect_uri: config.googleRedirectUri,
     }),
   );
-
   const existing = await readCredential(row.source_account_id);
   const refreshToken = token.refresh_token || existing?.refreshToken;
   if (!refreshToken) {
     throw new Error("Google did not return a refresh token. Reconnect the account and grant offline access.");
   }
-
   await saveCredential(
     row.source_account_id,
     {
@@ -203,7 +179,6 @@ export async function completeGoogleOAuth(
     },
     token.scope?.split(/\s+/).filter(Boolean) ?? SCOPES,
   );
-
   return {
     sourceAccountId: row.source_account_id,
     householdId: row.household_id,
@@ -212,23 +187,13 @@ export async function completeGoogleOAuth(
   };
 }
 
-export async function getGoogleAccessToken(
-  sourceAccountId: string,
-  forceRefresh = false,
-): Promise<string> {
+export async function getGoogleAccessToken(sourceAccountId: string, forceRefresh = false): Promise<string> {
   const { clientId, clientSecret } = requireGoogleConfig();
   const credential = await readCredential(sourceAccountId);
   if (!credential) throw new Error("Google Calendar account is not authenticated");
-
-  if (
-    !forceRefresh &&
-    credential.accessToken &&
-    credential.expiresAt &&
-    credential.expiresAt > Date.now() + 60_000
-  ) {
+  if (!forceRefresh && credential.accessToken && credential.expiresAt && credential.expiresAt > Date.now() + 60_000) {
     return credential.accessToken;
   }
-
   const token = await tokenRequest(
     new URLSearchParams({
       client_id: clientId,
@@ -237,7 +202,6 @@ export async function getGoogleAccessToken(
       grant_type: "refresh_token",
     }),
   );
-
   const updated: StoredCredential = {
     ...credential,
     accessToken: token.access_token,
