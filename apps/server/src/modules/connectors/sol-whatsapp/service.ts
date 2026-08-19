@@ -15,6 +15,7 @@ import {
   type ExecutiveProposal,
 } from "../../executive/proposals.js";
 import { extractWhatsappText } from "../whatsapp/message-content.js";
+import { parseAssistantIntent } from "./intents.js";
 import {
   activeBindingForMember,
   getLastProposal,
@@ -40,50 +41,6 @@ export interface SolWhatsappInbound {
   householdId: string;
   message: WAMessage;
   reply(text: string): Promise<void>;
-}
-
-export type AssistantIntent =
-  | { kind: "help" }
-  | { kind: "today" }
-  | { kind: "tomorrow" }
-  | { kind: "pending" }
-  | { kind: "yes" }
-  | { kind: "no" }
-  | { kind: "approve"; reference: string }
-  | { kind: "reject"; reference: string }
-  | { kind: "create" }
-  | { kind: "question" };
-
-function normalized(value: string): string {
-  return value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .trim();
-}
-
-export function parseAssistantIntent(text: string): AssistantIntent {
-  const value = normalized(text).replace(/[.!?]+$/g, "").trim();
-  const approve = value.match(/^(?:aprobar|aceptar|confirmar)\s+([0-9a-f]{4,12})$/i);
-  if (approve?.[1]) return { kind: "approve", reference: approve[1] };
-  const reject = value.match(/^(?:rechazar|ignorar|descartar)\s+([0-9a-f]{4,12})$/i);
-  if (reject?.[1]) return { kind: "reject", reference: reject[1] };
-
-  if (/^(?:si|s|dale|ok|okay|confirmo|hacelo|hazlo)$/.test(value)) return { kind: "yes" };
-  if (/^(?:no|n|rechazo|ignorar|dejalo|dejalo asi|cancelar)$/.test(value)) return { kind: "no" };
-
-  if (/\b(?:recordame|recuerdame|agendame|agenda|anota|anotame|crea|crear|sumame|agrega|agregame|avisa|avisame)\b/.test(value)) {
-    return { kind: "create" };
-  }
-  if (/\b(?:pendientes|propuestas|por aprobar|por revisar)\b/.test(value)) return { kind: "pending" };
-  if (/\b(?:manana)\b/.test(value) && /\b(?:que tengo|agenda|planes|eventos|dia|brief|resumen)\b/.test(value)) {
-    return { kind: "tomorrow" };
-  }
-  if (/\b(?:hoy)\b/.test(value) && /\b(?:que tengo|agenda|planes|eventos|dia|brief|resumen)\b/.test(value)) {
-    return { kind: "today" };
-  }
-  if (/^(?:hola|buenas|ayuda|help|que podes hacer|que puedes hacer|menu)$/.test(value)) return { kind: "help" };
-  return { kind: "question" };
 }
 
 function verificationHash(code: string): string {
@@ -222,6 +179,16 @@ async function writeOutboundAudit(input: {
   );
 }
 
+async function writeOutboundAuditSafely(input: Parameters<typeof writeOutboundAudit>[0]): Promise<void> {
+  try {
+    await writeOutboundAudit(input);
+  } catch (error) {
+    // The remote WhatsApp send already succeeded. Do not turn a local audit failure
+    // into an outbound-message retry that could duplicate the user's notification.
+    console.error("[sol-whatsapp] outbound audit failed after successful send", error);
+  }
+}
+
 async function sendToBinding(
   transport: SolWhatsappTransport,
   binding: SolWhatsappBinding,
@@ -233,7 +200,7 @@ async function sendToBinding(
   const jid = binding.primaryJid ?? binding.alternateJid;
   if (!jid) throw new Error("sol_whatsapp_binding_has_no_jid");
   await transport.sendText(binding.sourceAccountId, jid, text);
-  await writeOutboundAudit({
+  await writeOutboundAuditSafely({
     sourceAccountId: binding.sourceAccountId,
     memberId: binding.memberId,
     jid,
@@ -252,7 +219,7 @@ async function sendReply(
 ): Promise<void> {
   const jid = senderJids(inbound.message).primary ?? binding.primaryJid ?? "unknown";
   await inbound.reply(text);
-  await writeOutboundAudit({
+  await writeOutboundAuditSafely({
     sourceAccountId: inbound.sourceAccountId,
     memberId: binding.memberId,
     jid,
@@ -441,7 +408,7 @@ export async function handleSolWhatsappInbound(inbound: SolWhatsappInbound): Pro
       alternateJid: jids.alternate,
     });
     if (!binding) {
-      await inbound.reply("Ese código de vinculación no es válido o ya venció. Generá uno nuevo desde SOL.");
+      await inbound.reply("Ese código no es válido, venció o este WhatsApp ya está vinculado a otro perfil de SOL. Generá uno nuevo o revocá el vínculo anterior.");
       return;
     }
     await recordSolWhatsappInteraction({
@@ -516,7 +483,12 @@ export async function handleSolWhatsappInbound(inbound: SolWhatsappInbound): Pro
       await sendReply(inbound, binding, "No tenés propuestas pendientes.", "pending");
       return;
     }
-    const textOut = ["*Propuestas pendientes*", ...proposals.slice(0, 8).map((proposal) => `• ${shortRef(proposal.id)} · ${proposal.title}`), "", "Usá aprobar/rechazar + referencia."].join("\n");
+    const textOut = [
+      "*Propuestas pendientes*",
+      ...proposals.slice(0, 8).map((proposal) => `• ${shortRef(proposal.id)} · ${proposal.title}`),
+      "",
+      "Usá aprobar/rechazar + referencia.",
+    ].join("\n");
     await sendReply(inbound, binding, textOut, "pending");
     return;
   }
@@ -534,7 +506,11 @@ export async function handleSolWhatsappInbound(inbound: SolWhatsappInbound): Pro
     const proposalId = await getLastProposal(binding.sourceAccountId, binding.memberId);
     const member = await getMemberContext(binding.memberId);
     const proposals = member
-      ? await listExecutiveProposals({ householdId: member.householdId, memberId: member.memberId, status: "pending" })
+      ? await listExecutiveProposals({
+          householdId: member.householdId,
+          memberId: member.memberId,
+          status: "pending",
+        })
       : [];
     const proposal = proposals.find((item) => item.id === proposalId);
     const result = proposal
@@ -663,16 +639,28 @@ async function deliverProposalEvent(
     createdAt: row.created_at.toISOString(),
   };
   const recipients = row.owner_member_id
-    ? [await activeBindingForMember(account.id, row.owner_member_id)].filter((item): item is SolWhatsappBinding => Boolean(item))
+    ? [await activeBindingForMember(account.id, row.owner_member_id)].filter(
+        (item): item is SolWhatsappBinding => Boolean(item),
+      )
     : await listActiveManagerBindings(account.id);
 
   for (const binding of recipients) {
-    const key = { sourceAccountId: account.id, memberId: binding.memberId, eventType: event.type, aggregateId: row.id };
+    const key = {
+      sourceAccountId: account.id,
+      memberId: binding.memberId,
+      eventType: event.type,
+      aggregateId: row.id,
+    };
     if (!(await deliveryClaim(key))) continue;
     try {
       const member = await getMemberContext(binding.memberId);
       if (!member) continue;
-      await sendToBinding(transport, binding, proposalText(proposal, member.timezone), "proposal_delivery");
+      await sendToBinding(
+        transport,
+        binding,
+        proposalText(proposal, member.timezone),
+        "proposal_delivery",
+      );
       await setLastProposal(account.id, binding.memberId, proposal.id);
       await deliverySuccess(key);
     } catch (error) {
@@ -705,7 +693,12 @@ async function deliverBriefEvent(
   if (!binding) return;
   const member = await getMemberContext(binding.memberId);
   if (!member) return;
-  const key = { sourceAccountId: account.id, memberId: binding.memberId, eventType: event.type, aggregateId: briefId };
+  const key = {
+    sourceAccountId: account.id,
+    memberId: binding.memberId,
+    eventType: event.type,
+    aggregateId: briefId,
+  };
   if (!(await deliveryClaim(key))) return;
   try {
     await sendToBinding(transport, binding, formatBrief(row.content, member.timezone), "brief_delivery");
