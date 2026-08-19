@@ -47,8 +47,7 @@ export const config = {
   logLevel: process.env.SOL_LOG_LEVEL ?? "info",
   databaseUrl:
     process.env.DATABASE_URL ??
-    "postgresql://sol:sol_dev_only@localhost:5432/sol",
-  redisUrl: process.env.REDIS_URL ?? "redis://localhost:6379",
+    "postgresql://sol:sol_dev_only@127.0.0.1:5432/sol",
   sessionDays: integerEnv("SOL_SESSION_DAYS", 30),
   cookieSecure: booleanEnv("SOL_COOKIE_SECURE", false),
   codexBin: process.env.SOL_CODEX_BIN?.trim() || "codex",
