@@ -226,20 +226,26 @@ export async function ingestWhatsappMessage(
       const candidateId = candidateResult.rows[0]?.id;
       if (candidateId) {
         candidateCreated = true;
-        await client.query(
-          `INSERT INTO event_outbox(
-             household_id, event_type, aggregate_type, aggregate_id, payload
-           ) VALUES ($1, 'whatsapp.candidate.detected', 'extraction_candidate', $2, $3::jsonb)`,
-          [
-            account.householdId,
-            candidateId,
-            JSON.stringify({
+
+        // Historical sync can contain a huge backlog. Keep those candidates local
+        // for a future quota-aware batch consolidation; only new realtime traffic
+        // consumes reasoning immediately.
+        if (origin === "realtime") {
+          await client.query(
+            `INSERT INTO event_outbox(
+               household_id, event_type, aggregate_type, aggregate_id, payload
+             ) VALUES ($1, 'whatsapp.candidate.detected', 'extraction_candidate', $2, $3::jsonb)`,
+            [
+              account.householdId,
               candidateId,
-              sourceItemId: sourceItem.id,
-              ownerMemberId: account.ownerMemberId ?? null,
-            }),
-          ],
-        );
+              JSON.stringify({
+                candidateId,
+                sourceItemId: sourceItem.id,
+                ownerMemberId: account.ownerMemberId ?? null,
+              }),
+            ],
+          );
+        }
       }
     }
 
