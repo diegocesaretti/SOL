@@ -71,16 +71,22 @@ Visibility is **not** an AI instruction. It is enforced during retrieval before 
 
 ## Durable event outbox
 
-`event_outbox` records domain events in the same database transaction as state changes that must emit them. Examples already produced by Phase 1:
+`event_outbox` records domain events in the same database transaction as state changes that must emit them. Examples already produced by SOL include:
 
 ```text
 household.bootstrapped
 member.created
 source_account.created
+whatsapp.candidate.detected
+extraction.completed
 ```
 
-A dispatcher will later claim unpublished rows and publish them into SOL's runtime event bus. This avoids losing an event if the process crashes immediately after a database commit.
+The dispatcher publishes these into SOL's runtime event bus with at-least-once semantics, so handlers must be idempotent.
 
-## Vector search
+## Semantic/vector search
 
-Embeddings are an index, never the canonical memory. Structured queries should answer structured questions (calendar, tasks, people, projects). Semantic search is used when wording/topic similarity is useful.
+Embeddings are an index, never canonical memory. Structured questions about calendars, tasks, people, projects and state should use structured PostgreSQL queries first.
+
+The mandatory schema intentionally does **not** require pgvector. No implemented SOL flow currently needs it, and requiring the extension would add unnecessary friction to the native Windows installation.
+
+When semantic retrieval is implemented, SOL can add an optional pgvector migration/profile and create an embeddings index without changing Life/Knowledge/Executive canonical tables.
