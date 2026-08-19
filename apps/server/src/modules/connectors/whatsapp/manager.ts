@@ -2,10 +2,9 @@ import makeWASocket, {
   Browsers,
   DisconnectReason,
   makeCacheableSignalKeyStore,
-  type WAMessage,
 } from "baileys";
 import pino from "pino";
-import { toDataURL } from "qrcode";
+import * as QRCode from "qrcode";
 import { createWhatsappAuthState, clearWhatsappAuthState } from "./auth-store.js";
 import {
   ingestWhatsappMessage,
@@ -60,6 +59,7 @@ interface RuntimeSession {
   startPromise?: Promise<void>;
   reconnectTimer?: NodeJS.Timeout;
   ingestChain: Promise<void>;
+  authSaveChain: Promise<void>;
 }
 
 const logger = pino({ level: "silent" });
@@ -140,6 +140,7 @@ export class WhatsappManager {
         manualStop: false,
         generation: 0,
         ingestChain: Promise.resolve(),
+        authSaveChain: Promise.resolve(),
       };
       this.sessions.set(sourceAccountId, runtime);
     }
@@ -201,6 +202,7 @@ export class WhatsappManager {
         // Credentials are explicitly cleared below even if WhatsApp is unreachable.
       }
       this.closeSocket(runtime.socket);
+      await runtime.authSaveChain.catch(() => undefined);
       this.sessions.delete(sourceAccountId);
     }
 
@@ -220,6 +222,7 @@ export class WhatsappManager {
     if (!account) throw new Error("WhatsApp source account not found");
     if (!account.enabled) throw new Error("WhatsApp source account is disabled");
 
+    await runtime.authSaveChain;
     runtime.generation += 1;
     const generation = runtime.generation;
     runtime.state = runtime.reconnectAttempt > 0 ? "reconnecting" : "connecting";
@@ -245,16 +248,23 @@ export class WhatsappManager {
     runtime.socket = socket;
 
     socket.ev.on("creds.update", () => {
-      void saveCreds().catch((error) => {
-        console.error(`[whatsapp:${runtime.sourceAccountId}] save creds failed`, error);
-      });
+      runtime.authSaveChain = runtime.authSaveChain
+        .then(saveCreds)
+        .catch((error) => {
+          runtime.lastError = `Failed to persist WhatsApp credentials: ${
+            error instanceof Error ? error.message : String(error)
+          }`;
+          runtime.updatedAt = new Date();
+          console.error(`[whatsapp:${runtime.sourceAccountId}] save creds failed`, error);
+          throw error;
+        });
     });
 
     socket.ev.on("connection.update", (update) => {
       if (runtime.generation !== generation) return;
 
       if (update.qr) {
-        void toDataURL(update.qr, {
+        void QRCode.toDataURL(update.qr, {
           width: 320,
           margin: 1,
           errorCorrectionLevel: "M",
@@ -408,6 +418,7 @@ export class WhatsappManager {
         statusCode === DisconnectReason.loggedOut ||
         statusCode === DisconnectReason.badSession
       ) {
+        await runtime.authSaveChain.catch(() => undefined);
         await clearWhatsappAuthState(runtime.sourceAccountId).catch(() => undefined);
         await clearWhatsappLinkState(runtime.sourceAccountId).catch(() => undefined);
       }
@@ -427,9 +438,12 @@ export class WhatsappManager {
     if (runtime.reconnectTimer) clearTimeout(runtime.reconnectTimer);
     runtime.reconnectTimer = setTimeout(() => {
       runtime.reconnectTimer = undefined;
-      runtime.startPromise = this.connect(runtime).finally(() => {
-        runtime.startPromise = undefined;
-      });
+      runtime.startPromise = runtime.authSaveChain
+        .catch(() => undefined)
+        .then(() => this.connect(runtime))
+        .finally(() => {
+          runtime.startPromise = undefined;
+        });
       void runtime.startPromise.catch((reconnectError) => {
         runtime.state = "error";
         runtime.lastError =
@@ -448,7 +462,12 @@ export class WhatsappManager {
     runtime.socket = undefined;
     runtime.state = "idle";
     runtime.updatedAt = new Date();
-    if (waitForIngest) await runtime.ingestChain.catch(() => undefined);
+    if (waitForIngest) {
+      await Promise.all([
+        runtime.ingestChain.catch(() => undefined),
+        runtime.authSaveChain.catch(() => undefined),
+      ]);
+    }
   }
 
   private closeSocket(socket: Socket | undefined): void {
