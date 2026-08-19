@@ -48,6 +48,11 @@ export const config = {
   databaseUrl:
     process.env.DATABASE_URL ??
     "postgresql://sol:sol_dev_only@127.0.0.1:5432/sol",
+  // Small/short-lived pools work well both with local PostgreSQL and scale-to-zero
+  // providers such as Neon. A direct DATABASE_URL is preferred for migrations.
+  databasePoolMax: integerEnv("SOL_DB_POOL_MAX", 4),
+  databaseIdleTimeoutMs: integerEnv("SOL_DB_IDLE_TIMEOUT_MS", 15_000),
+  databaseConnectionTimeoutMs: integerEnv("SOL_DB_CONNECT_TIMEOUT_MS", 15_000),
   sessionDays: integerEnv("SOL_SESSION_DAYS", 30),
   cookieSecure: booleanEnv("SOL_COOKIE_SECURE", false),
   codexBin: process.env.SOL_CODEX_BIN?.trim() || "codex",
@@ -55,12 +60,14 @@ export const config = {
   codexWorkingDirectory:
     optionalEnv("SOL_CODEX_CWD") ?? resolve(codexHome, "workspace"),
   codexRequestTimeoutMs: integerEnv("SOL_CODEX_REQUEST_TIMEOUT_MS", 30_000),
-  outboxPollMs: integerEnv("SOL_OUTBOX_POLL_MS", 2_000),
+  // PostgreSQL NOTIFY wakes the outbox immediately. This is only a recovery sweep.
+  outboxPollMs: integerEnv("SOL_OUTBOX_RECOVERY_MS", 30 * 60 * 1000),
   googleClientId: optionalEnv("SOL_GOOGLE_CLIENT_ID"),
   googleClientSecret: optionalEnv("SOL_GOOGLE_CLIENT_SECRET"),
   googleRedirectUri:
     optionalEnv("SOL_GOOGLE_REDIRECT_URI") ??
     `http://${host}:${port}/v1/google/callback`,
-  calendarSyncMs: integerEnv("SOL_CALENDAR_SYNC_MS", 15 * 60 * 1000),
-  executivePollMs: integerEnv("SOL_EXECUTIVE_POLL_MS", 60_000),
+  // Cloud-friendly defaults leave long idle windows so scale-to-zero can engage.
+  calendarSyncMs: integerEnv("SOL_CALENDAR_SYNC_MS", 60 * 60 * 1000),
+  executivePollMs: integerEnv("SOL_EXECUTIVE_POLL_MS", 30 * 60 * 1000),
 } as const;
