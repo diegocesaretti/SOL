@@ -31,6 +31,12 @@ async function baselineLegacyInitialMigration(filename: string): Promise<boolean
   return true;
 }
 
+function stripOuterTransaction(sql: string): string {
+  return sql
+    .replace(/^\s*BEGIN;\s*/i, "")
+    .replace(/\s*COMMIT;\s*$/i, "");
+}
+
 async function migrate(): Promise<void> {
   await ensureMigrationTable();
 
@@ -47,7 +53,9 @@ async function migrate(): Promise<void> {
 
     if (await baselineLegacyInitialMigration(filename)) continue;
 
-    const sql = await readFile(`${migrationsDir}${filename}`, "utf8");
+    const sql = stripOuterTransaction(
+      await readFile(`${migrationsDir}${filename}`, "utf8"),
+    );
     const client = await db.connect();
     try {
       await client.query("BEGIN");
