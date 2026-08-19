@@ -27,16 +27,26 @@ The order is intentionally dependency-driven rather than feature-driven.
 - [x] Durable event outbox storage and transactional writes
 - [x] Localhost-first pre-deployment security default
 
-## Phase 2 — Codex reasoning adapter (next)
+## Phase 2 — Codex reasoning adapter ✅
 
-- [ ] Implement `CodexProvider` behind `AiProvider`
-- [ ] ChatGPT OAuth/App Server login flow
-- [ ] Connection/status endpoint
-- [ ] Rate-limit/availability awareness
-- [ ] Structured reasoning jobs (classification/consolidation/planning)
-- [ ] Outbox dispatcher into SOL's runtime event bus
+- [x] Implement `CodexProvider` behind `AiProvider`
+- [x] Codex App Server JSON-RPC/JSONL runtime
+- [x] ChatGPT OAuth browser login flow
+- [x] ChatGPT device-code fallback
+- [x] Connection/status/logout endpoints
+- [x] ChatGPT plan + rate-limit awareness
+- [x] Integrated `/ai` setup and reasoning-test UI
+- [x] Structured reasoning purposes (conversation/classification/consolidation/planning/automation)
+- [x] Prompt-injection boundary for source context before Codex
+- [x] Outbox dispatcher into SOL's runtime event bus
 
-## Phase 3 — First source: WhatsApp
+### Phase 2 follow-ups
+
+- [ ] Decide whether background/batch reasoning should use Codex SDK while interactive auth remains on App Server
+- [ ] Persist optional per-household AI profiles if SOL later supports more than one ChatGPT/Codex identity on the same host
+- [ ] Add integration tests against a real installed Codex CLI/App Server runtime
+
+## Phase 3 — First source: WhatsApp (next)
 
 - [ ] Multi-session connector manager
 - [ ] One `source_account` per WhatsApp session
