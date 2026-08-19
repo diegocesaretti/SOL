@@ -93,6 +93,7 @@ export async function listWhatsappAccounts(
   const result = await db.query<WhatsappAccountRow>(
     `${SELECT_ACCOUNT}
        AND s.household_id = $1
+       AND COALESCE(s.auth_mode, '') <> 'linked-device-assistant'
        AND ($3::boolean OR s.owner_member_id = $2 OR s.owner_member_id IS NULL)
      ORDER BY s.created_at ASC`,
     [householdId, viewerMemberId, canSeeAllMetadata],
