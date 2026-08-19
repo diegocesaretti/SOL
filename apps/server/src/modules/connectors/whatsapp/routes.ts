@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { readJsonBody, sendJson } from "../../../http.js";
 import type { AuthPrincipal } from "../../auth/session.js";
 import { createSourceAccount } from "../../identity/source-accounts.js";
+import { listRecentWhatsappCandidates } from "./candidates.js";
 import { whatsappManager } from "./manager.js";
 import {
   ensureWhatsappSessionRecord,
@@ -133,7 +134,7 @@ export async function handleWhatsappApi(
   }
 
   const match = path.match(
-    /^\/v1\/whatsapp\/accounts\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/(status|connect|restart|pairing-code|logout|messages))?$/i,
+    /^\/v1\/whatsapp\/accounts\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/(status|connect|restart|pairing-code|logout|messages|candidates))?$/i,
   );
   if (!match) return false;
 
@@ -147,14 +148,20 @@ export async function handleWhatsappApi(
     return true;
   }
 
-  if (action === "messages" && request.method === "GET") {
+  if ((action === "messages" || action === "candidates") && request.method === "GET") {
     if (!canReadAccount(principal, account)) {
       sendJson(response, 403, { error: "forbidden" });
       return true;
     }
-    sendJson(response, 200, {
-      messages: await listRecentWhatsappMessages(account.id, 50),
-    });
+    if (action === "messages") {
+      sendJson(response, 200, {
+        messages: await listRecentWhatsappMessages(account.id, 50),
+      });
+    } else {
+      sendJson(response, 200, {
+        candidates: await listRecentWhatsappCandidates(account.id, 50),
+      });
+    }
     return true;
   }
 
