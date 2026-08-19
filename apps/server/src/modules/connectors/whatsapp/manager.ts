@@ -71,6 +71,14 @@ const NON_RECONNECTABLE = new Set<number>([
   DisconnectReason.multideviceMismatch,
 ]);
 
+function shouldIgnoreJid(jid: string): boolean {
+  return (
+    jid === "status@broadcast" ||
+    jid.endsWith("@broadcast") ||
+    jid.endsWith("@newsletter")
+  );
+}
+
 function disconnectStatusCode(error: unknown): number | undefined {
   if (!error || typeof error !== "object") return undefined;
   const value = error as {
@@ -222,7 +230,7 @@ export class WhatsappManager {
     if (!account) throw new Error("WhatsApp source account not found");
     if (!account.enabled) throw new Error("WhatsApp source account is disabled");
 
-    await runtime.authSaveChain;
+    await runtime.authSaveChain.catch(() => undefined);
     runtime.generation += 1;
     const generation = runtime.generation;
     runtime.state = runtime.reconnectAttempt > 0 ? "reconnecting" : "connecting";
@@ -243,13 +251,24 @@ export class WhatsappManager {
       markOnlineOnConnect: false,
       syncFullHistory: true,
       shouldSyncHistoryMessage: () => true,
+      shouldIgnoreJid,
       emitOwnEvents: true,
     });
     runtime.socket = socket;
 
     socket.ev.on("creds.update", () => {
+      // Recover from a previous transient save failure before attempting the next
+      // credential snapshot. A failed save must be visible, but must not poison
+      // every future update in this session forever.
       runtime.authSaveChain = runtime.authSaveChain
+        .catch(() => undefined)
         .then(saveCreds)
+        .then(() => {
+          if (runtime.lastError?.startsWith("Failed to persist WhatsApp credentials:")) {
+            runtime.lastError = undefined;
+            runtime.updatedAt = new Date();
+          }
+        })
         .catch((error) => {
           runtime.lastError = `Failed to persist WhatsApp credentials: ${
             error instanceof Error ? error.message : String(error)
