@@ -15,13 +15,14 @@ export function renderOnboardingPage(): string {
     h2 { margin: 0 0 8px; font-size: 24px; }
     h3 { margin: 24px 0 6px; font-size: 17px; }
     p { line-height: 1.55; opacity: .8; }
+    a { color: inherit; }
     .card { margin-top: 32px; padding: 28px; border: 1px solid color-mix(in srgb, CanvasText 18%, transparent); border-radius: 22px; background: color-mix(in srgb, Canvas 96%, CanvasText 4%); }
     .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
     label { display: grid; gap: 7px; font-size: 13px; font-weight: 700; }
     label.full { grid-column: 1 / -1; }
     input, select { width: 100%; padding: 12px 14px; border-radius: 12px; border: 1px solid color-mix(in srgb, CanvasText 22%, transparent); background: Canvas; color: CanvasText; font: inherit; }
-    button { margin-top: 22px; padding: 12px 18px; border: 0; border-radius: 999px; font: inherit; font-weight: 800; cursor: pointer; background: CanvasText; color: Canvas; }
-    button.secondary { background: transparent; color: CanvasText; border: 1px solid color-mix(in srgb, CanvasText 20%, transparent); }
+    button, .action-link { margin-top: 22px; padding: 12px 18px; border: 0; border-radius: 999px; font: inherit; font-weight: 800; cursor: pointer; background: CanvasText; color: Canvas; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; }
+    button.secondary, .action-link.secondary { background: transparent; color: CanvasText; border: 1px solid color-mix(in srgb, CanvasText 20%, transparent); }
     button:disabled { opacity: .45; cursor: wait; }
     .status { margin-top: 14px; min-height: 20px; font-size: 14px; }
     .error { color: #d33; }
@@ -31,11 +32,15 @@ export function renderOnboardingPage(): string {
     .row { display: flex; justify-content: space-between; gap: 20px; align-items: center; padding: 16px 0; border-top: 1px solid color-mix(in srgb, CanvasText 12%, transparent); }
     .row:first-of-type { border-top: 0; }
     .actions { display: flex; gap: 10px; flex-wrap: wrap; }
-    .actions button { margin-top: 12px; }
+    .actions button, .actions .action-link { margin-top: 12px; }
+    .modules { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px; }
+    .module { display: block; padding: 16px; border: 1px solid color-mix(in srgb, CanvasText 14%, transparent); border-radius: 16px; text-decoration: none; }
+    .module strong { display: block; margin-bottom: 4px; }
+    .module span { font-size: 13px; opacity: .62; }
     details { margin-top: 18px; padding-top: 16px; border-top: 1px solid color-mix(in srgb, CanvasText 12%, transparent); }
     summary { cursor: pointer; font-weight: 800; }
     details form { margin-top: 16px; }
-    @media (max-width: 620px) { main { padding: 36px 0; } .grid { grid-template-columns: 1fr; } label.full { grid-column: auto; } .card { padding: 22px; } .row { align-items: flex-start; } }
+    @media (max-width: 620px) { main { padding: 36px 0; } .grid, .modules { grid-template-columns: 1fr; } label.full { grid-column: auto; } .card { padding: 22px; } .row { align-items: flex-start; } }
   </style>
 </head>
 <body>
@@ -226,13 +231,20 @@ export function renderOnboardingPage(): string {
       app.innerHTML = \`
         <h2>\${escapeHtml(household?.name || 'SOL Home')}</h2>
         <p>Sesión: <strong>\${escapeHtml(member.displayName)}</strong> · \${escapeHtml(member.role)}</p>
+        <div class="modules">
+          <a class="module" href="/whatsapp"><strong>WhatsApp</strong><span>Vincular cuentas, ver mensajes y candidatos detectados.</span></a>
+          <a class="module" href="/ai"><strong>AI Engine</strong><span>Conectar Codex / ChatGPT, revisar cuota y probar razonamiento.</span></a>
+        </div>
         <h3>Miembros</h3>
         \${memberRows}
         \${memberForm}
         <h3>Fuentes</h3>
         \${sourceRows}
-        <div class="row"><div><strong>AI Engine</strong><br><span class="muted">Codex OAuth / ChatGPT</span></div><span class="pill">Pendiente</span></div>
-        <div class="actions"><button class="secondary" id="logout">Cerrar sesión</button></div>
+        <div class="actions">
+          <a class="action-link secondary" href="/whatsapp">Gestionar WhatsApp</a>
+          <a class="action-link secondary" href="/ai">Gestionar AI</a>
+          <button class="secondary" id="logout">Cerrar sesión</button>
+        </div>
       \`;
 
       const memberFormElement = document.getElementById('member-form');
