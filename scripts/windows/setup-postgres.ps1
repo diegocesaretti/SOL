@@ -1,5 +1,3 @@
-$ErrorActionPreference = 'Stop'
-
 param(
   [string]$PostgresHost = '127.0.0.1',
   [int]$PostgresPort = 5432,
@@ -7,6 +5,8 @@ param(
   [string]$DatabaseName = 'sol',
   [string]$DatabaseUser = 'sol'
 )
+
+$ErrorActionPreference = 'Stop'
 
 function Find-Psql {
   $command = Get-Command psql.exe -ErrorAction SilentlyContinue
@@ -33,8 +33,16 @@ The normal PostgreSQL Windows installer is sufficient; Docker, WSL and pgvector 
 
 function New-SafePassword {
   $bytes = New-Object byte[] 24
-  [Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
-  return ([Convert]::ToBase64String($bytes) -replace '[^A-Za-z0-9]', '').Substring(0, 28)
+  $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+  try {
+    $rng.GetBytes($bytes)
+  }
+  finally {
+    $rng.Dispose()
+  }
+  $password = [Convert]::ToBase64String($bytes) -replace '[^A-Za-z0-9]', ''
+  if ($password.Length -lt 28) { $password += 'SolNativePostgres2026' }
+  return $password.Substring(0, 28)
 }
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot '..\..')
