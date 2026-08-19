@@ -26,7 +26,9 @@ SOL is a family-first personal information and automation system: one integrated
 - Provider-neutral `AiProvider`
 - Codex App Server adapter using ChatGPT OAuth
 - Isolated SOL Codex credential profile under `.sol/codex`
-- Connectors added incrementally
+- Baileys 7 multi-session WhatsApp linked-device connector
+- Encrypted PostgreSQL WhatsApp authentication state
+- Local candidate filtering before AI reasoning
 
 ## Repository layout
 
@@ -39,6 +41,7 @@ SOL/
 ├── docs/
 │   ├── ARCHITECTURE.md
 │   ├── CODEX.md
+│   ├── WHATSAPP.md
 │   ├── DATA_MODEL.md
 │   ├── SECURITY.md
 │   └── ROADMAP.md
@@ -57,15 +60,17 @@ modules/
 ├── onboarding/            first household/owner bootstrap
 ├── auth/                  credentials and persistent sessions
 ├── security/              visibility and authorization
-├── ingestion/             normalized source events
+├── connectors/
+│   └── whatsapp/           multi-session runtime, encrypted auth, ingestion
+├── ingestion/             provider-neutral source contracts
 ├── ai/
 │   ├── provider.ts         provider-neutral SOL contract
 │   └── codex/              App Server, ChatGPT auth and reasoning adapter
-├── life/                  chronological source-backed records (next)
-├── knowledge/             facts/entities/relations (next)
+├── knowledge/             candidate classification and future knowledge model
+├── life/                  chronological source-backed records
 ├── automation/            schedules/triggers (next)
-└── actions/               controlled writes to external systems (next)
-ui/                        integrated family + AI setup UI
+└── actions/               controlled external writes (next)
+ui/                        family, AI and WhatsApp setup UI
 ```
 
 ## Quick start
@@ -98,9 +103,35 @@ http://127.0.0.1:3000/ai
 
 From there an owner/adult can start ChatGPT browser OAuth or the device-code fallback. Codex owns and refreshes its OAuth tokens; SOL does not store them in PostgreSQL. SOL uses a separate `.sol/codex` profile so its login does not intentionally reuse the normal Codex CLI/IDE cache.
 
-The same screen shows account/plan state, ChatGPT Codex rate-limit usage, and a minimal reasoning test using only the authenticated SOL member and household context.
+### Connect WhatsApp
 
-Useful endpoints:
+Open:
+
+```text
+http://127.0.0.1:3000/whatsapp
+```
+
+An authorized member can create one or more WhatsApp source accounts and link each one independently with QR or a pairing code. Personal accounts remain private to the member who owns them; explicitly shared household accounts use family visibility.
+
+SOL stores linked-device auth/Signal keys encrypted in PostgreSQL using a local key under `.sol/secrets/`. QR strings and pairing codes are kept only in runtime memory.
+
+New WhatsApp messages flow through:
+
+```text
+Baileys
+  ↓
+source_items / messages / conversations
+  ↓
+local deterministic candidate filter
+  ├─ trivial → stored only
+  └─ candidate → durable event → Codex structured classification
+```
+
+Historical sync is stored and deduplicated, but historical candidates do not immediately consume Codex quota. They remain pending for a future quota-aware batch job.
+
+The WhatsApp page can display authorized recent messages plus the candidate/extraction state so the pipeline can be tested without querying PostgreSQL manually.
+
+Useful endpoints include:
 
 ```text
 GET  /health
@@ -118,24 +149,34 @@ GET  /v1/ai/status
 POST /v1/ai/codex/login
 POST /v1/ai/codex/logout
 POST /v1/ai/test
+GET  /v1/whatsapp/accounts
+POST /v1/whatsapp/accounts
+POST /v1/whatsapp/accounts/:id/connect
+POST /v1/whatsapp/accounts/:id/pairing-code
+POST /v1/whatsapp/accounts/:id/restart
+POST /v1/whatsapp/accounts/:id/logout
+GET  /v1/whatsapp/accounts/:id/messages
+GET  /v1/whatsapp/accounts/:id/candidates
 ```
 
-## AI security boundary
+## AI + source security boundary
 
-SOL's Codex reasoning turns run with approval policy `never` and a restricted read-only sandbox. SOL does not grant Codex write/action capabilities at this stage. Source context is explicitly wrapped as untrusted data so future WhatsApp/e-mail/document content cannot grant itself instruction authority.
+SOL's Codex reasoning turns run with approval policy `never` and a restricted read-only sandbox. SOL does not grant Codex write/action capabilities at this stage. WhatsApp/e-mail/document context is explicitly wrapped as untrusted data and cannot grant itself instruction authority.
 
-This is defense in depth: member/household authorization must filter records **before** they become AI context.
+Authorization happens before context construction. A household owner/admin does not automatically gain access to another member's private WhatsApp content.
+
+WhatsApp linked-device traffic is end-to-end encrypted up to the linked SOL endpoint. Once SOL decrypts and persists a message locally—or sends a selected candidate to Codex—that copy is outside WhatsApp's transport encryption envelope. SOL therefore keeps ordinary traffic local and sends only locally selected candidates to the reasoning engine.
 
 ## Security note
 
 SOL binds to `127.0.0.1` by default. Do not expose the current development server directly to the internet. For LAN/family deployment we will define HTTPS/reverse-proxy and deployment policy deliberately rather than silently changing the bind address.
 
-`.env`, `.sol/`, Codex `auth.json`, and local auth/session directories are ignored by Git. File-based Codex OAuth credentials must still be treated like passwords.
+`.env`, `.sol/`, Codex `auth.json`, WhatsApp encryption keys and local auth/session directories are ignored by Git. Backups of encrypted WhatsApp auth data require the matching `.sol/secrets/whatsapp-auth.key` to be useful.
 
 ## Current status
 
-Phases 0, 1 and 2 are implemented: family-first foundation, persistence/onboarding/auth, multi-account source records, privacy boundaries, durable event delivery, Codex App Server integration, ChatGPT OAuth/device login, rate-limit status and restricted reasoning.
+Phases 0 through 3 are implemented: family-first foundation, persistence/onboarding/auth, privacy boundaries, durable event delivery, Codex ChatGPT authentication/reasoning, and the first real multi-account source connector with WhatsApp ingestion and candidate classification.
 
-The next major integration is the first real source connector: multi-session WhatsApp ingestion.
+The next major phase is Calendar + the executive loop: turn structured candidates into user-confirmed tasks/events, add conflict detection, briefs and approval policies for actions.
 
-See [docs/ROADMAP.md](docs/ROADMAP.md) and [docs/CODEX.md](docs/CODEX.md).
+See [docs/ROADMAP.md](docs/ROADMAP.md), [docs/CODEX.md](docs/CODEX.md) and [docs/WHATSAPP.md](docs/WHATSAPP.md).
