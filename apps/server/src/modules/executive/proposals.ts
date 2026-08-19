@@ -20,6 +20,8 @@ export interface ExecutiveProposal {
   createdAt: string;
 }
 
+type DecisionRole = "owner" | "adult" | "member" | "child" | "guest";
+
 interface CandidateForProposal {
   id: string;
   household_id: string;
@@ -28,6 +30,19 @@ interface CandidateForProposal {
   kind: ExecutiveProposal["kind"] | "none" | "unknown";
   confidence: number | null;
   extracted: Record<string, unknown> | null;
+}
+
+interface ProposalRow {
+  id: string;
+  owner_member_id: string | null;
+  source_item_id: string | null;
+  kind: ExecutiveProposal["kind"];
+  title: string;
+  summary: string | null;
+  starts_at: Date | null;
+  due_at: Date | null;
+  visibility: string;
+  confidence: number;
 }
 
 function parseDate(value: unknown): Date | null {
@@ -41,6 +56,11 @@ function proposalKind(candidate: CandidateForProposal): ExecutiveProposal["kind"
     return candidate.kind as ExecutiveProposal["kind"];
   }
   return null;
+}
+
+function canDecide(ownerMemberId: string | null, memberId: string, role: DecisionRole): boolean {
+  if (ownerMemberId) return ownerMemberId === memberId;
+  return role === "owner" || role === "adult";
 }
 
 async function createProposalFromCandidate(candidateId: string): Promise<void> {
@@ -199,17 +219,43 @@ async function validateExplicitTarget(
   if (!result.rowCount) throw new Error("calendar_target_not_allowed");
 }
 
+async function lockProposalForDecision(
+  proposalId: string,
+  householdId: string,
+  memberId: string,
+  role: DecisionRole,
+): Promise<ProposalRow> {
+  const result = await db.query<ProposalRow>(
+    `SELECT id, owner_member_id, source_item_id, kind::text, title, summary,
+            starts_at, due_at, visibility::text, confidence
+     FROM executive_proposals
+     WHERE id = $1 AND household_id = $2 AND status = 'pending'`,
+    [proposalId, householdId],
+  );
+  const proposal = result.rows[0];
+  if (!proposal || !canDecide(proposal.owner_member_id, memberId, role)) {
+    throw new Error("proposal_not_found_or_not_approvable");
+  }
+  return proposal;
+}
+
 export async function rejectExecutiveProposal(input: {
   proposalId: string;
   householdId: string;
   memberId: string;
+  role: DecisionRole;
 }): Promise<boolean> {
+  const proposal = await lockProposalForDecision(
+    input.proposalId,
+    input.householdId,
+    input.memberId,
+    input.role,
+  );
   const result = await db.query(
     `UPDATE executive_proposals
-     SET status = 'rejected', decided_by_member_id = $3, decided_at = now(), updated_at = now()
-     WHERE id = $1 AND household_id = $2 AND status = 'pending'
-       AND (owner_member_id = $3 OR owner_member_id IS NULL)`,
-    [input.proposalId, input.householdId, input.memberId],
+     SET status = 'rejected', decided_by_member_id = $2, decided_at = now(), updated_at = now()
+     WHERE id = $1 AND status = 'pending'`,
+    [proposal.id, input.memberId],
   );
   return Boolean(result.rowCount);
 }
@@ -218,40 +264,26 @@ export async function approveExecutiveProposal(input: {
   proposalId: string;
   householdId: string;
   memberId: string;
+  role: DecisionRole;
   targetSourceAccountId?: string;
   targetGoogleCalendarId?: string;
 }): Promise<{ kind: "task" | "calendar_event"; id: string; externalEventId?: string }> {
   const client = await db.connect();
-  let proposal: {
-    id: string;
-    owner_member_id: string | null;
-    source_item_id: string | null;
-    kind: ExecutiveProposal["kind"];
-    title: string;
-    summary: string | null;
-    starts_at: Date | null;
-    due_at: Date | null;
-    visibility: string;
-    confidence: number;
-  } | undefined;
-
+  let proposal: ProposalRow | undefined;
   try {
     await client.query("BEGIN");
-    const result = await client.query<typeof proposal extends infer _ ? {
-      id: string; owner_member_id: string | null; source_item_id: string | null;
-      kind: ExecutiveProposal["kind"]; title: string; summary: string | null;
-      starts_at: Date | null; due_at: Date | null; visibility: string; confidence: number;
-    } : never>(
+    const result = await client.query<ProposalRow>(
       `SELECT id, owner_member_id, source_item_id, kind::text, title, summary,
               starts_at, due_at, visibility::text, confidence
        FROM executive_proposals
        WHERE id = $1 AND household_id = $2 AND status = 'pending'
-         AND (owner_member_id = $3 OR owner_member_id IS NULL)
        FOR UPDATE`,
-      [input.proposalId, input.householdId, input.memberId],
+      [input.proposalId, input.householdId],
     );
     proposal = result.rows[0];
-    if (!proposal) throw new Error("proposal_not_found_or_not_approvable");
+    if (!proposal || !canDecide(proposal.owner_member_id, input.memberId, input.role)) {
+      throw new Error("proposal_not_found_or_not_approvable");
+    }
     await client.query(
       `UPDATE executive_proposals
        SET status = 'approved', decided_by_member_id = $2, decided_at = now(), updated_at = now()
@@ -266,44 +298,52 @@ export async function approveExecutiveProposal(input: {
     client.release();
   }
 
-  const eventLike = proposal.kind === "event" || (proposal.kind === "commitment" && proposal.starts_at);
+  const eventLike = proposal.kind === "event" || (proposal.kind === "commitment" && Boolean(proposal.starts_at));
   if (!eventLike) {
-    const task = await db.query<{ id: string }>(
-      `INSERT INTO tasks(
-         household_id, owner_member_id, assigned_member_id, title, description,
-         status, visibility, confidence, due_at
-       ) VALUES ($1, $2, $2, $3, $4, 'open', $5::visibility_scope, $6, $7)
-       RETURNING id`,
-      [
-        input.householdId,
-        proposal.owner_member_id,
-        proposal.title,
-        proposal.summary,
-        proposal.visibility,
-        proposal.confidence,
-        proposal.due_at ?? proposal.starts_at,
-      ],
-    );
-    const taskId = task.rows[0]?.id;
-    if (!taskId) throw new Error("task_creation_failed");
-    if (proposal.source_item_id) {
-      await db.query(
-        `INSERT INTO source_links(source_item_id, target_type, target_id, relation)
-         VALUES ($1, 'task', $2, 'derived_from')
-         ON CONFLICT(source_item_id, target_type, target_id, relation) DO NOTHING`,
-        [proposal.source_item_id, taskId],
+    try {
+      const task = await db.query<{ id: string }>(
+        `INSERT INTO tasks(
+           household_id, owner_member_id, assigned_member_id, title, description,
+           status, visibility, confidence, due_at
+         ) VALUES ($1, $2, $2, $3, $4, 'open', $5::visibility_scope, $6, $7)
+         RETURNING id`,
+        [
+          input.householdId,
+          proposal.owner_member_id,
+          proposal.title,
+          proposal.summary,
+          proposal.visibility,
+          proposal.confidence,
+          proposal.due_at ?? proposal.starts_at,
+        ],
       );
+      const taskId = task.rows[0]?.id;
+      if (!taskId) throw new Error("task_creation_failed");
+      if (proposal.source_item_id) {
+        await db.query(
+          `INSERT INTO source_links(source_item_id, target_type, target_id, relation)
+           VALUES ($1, 'task', $2, 'derived_from')
+           ON CONFLICT(source_item_id, target_type, target_id, relation) DO NOTHING`,
+          [proposal.source_item_id, taskId],
+        );
+      }
+      await db.query(
+        `UPDATE executive_proposals SET status = 'executed', executed_at = now(), error = NULL, updated_at = now() WHERE id = $1`,
+        [proposal.id],
+      );
+      await db.query(
+        `INSERT INTO action_log(household_id, actor_member_id, action_type, target_provider, target_ref, approval_state, request, result, completed_at)
+         VALUES ($1, $2, 'task.create', 'sol', $3, 'approved', $4::jsonb, $5::jsonb, now())`,
+        [input.householdId, input.memberId, taskId, JSON.stringify({ proposalId: proposal.id }), JSON.stringify({ taskId })],
+      );
+      return { kind: "task", id: taskId };
+    } catch (error) {
+      await db.query(
+        `UPDATE executive_proposals SET status = 'failed', error = $2, updated_at = now() WHERE id = $1`,
+        [proposal.id, error instanceof Error ? error.message.slice(0, 2000) : String(error).slice(0, 2000)],
+      );
+      throw error;
     }
-    await db.query(
-      `UPDATE executive_proposals SET status = 'executed', executed_at = now(), updated_at = now() WHERE id = $1`,
-      [proposal.id],
-    );
-    await db.query(
-      `INSERT INTO action_log(household_id, actor_member_id, action_type, target_provider, target_ref, approval_state, request, result, completed_at)
-       VALUES ($1, $2, 'task.create', 'sol', $3, 'approved', $4::jsonb, $5::jsonb, now())`,
-      [input.householdId, input.memberId, taskId, JSON.stringify({ proposalId: proposal.id }), JSON.stringify({ taskId })],
-    );
-    return { kind: "task", id: taskId };
   }
 
   if (!proposal.starts_at) {
@@ -314,7 +354,7 @@ export async function approveExecutiveProposal(input: {
     throw new Error("event_time_required");
   }
 
-  let target =
+  const target =
     input.targetSourceAccountId && input.targetGoogleCalendarId
       ? { sourceAccountId: input.targetSourceAccountId, googleCalendarId: input.targetGoogleCalendarId }
       : await chooseCalendarTarget(input.householdId, proposal.owner_member_id);
@@ -365,7 +405,7 @@ export async function approveExecutiveProposal(input: {
       ],
     );
     void syncGoogleCalendarAccount(target.sourceAccountId).catch((error) =>
-      console.error(`[calendar:${target!.sourceAccountId}] post-action sync failed`, error),
+      console.error(`[calendar:${target.sourceAccountId}] post-action sync failed`, error),
     );
     return { kind: "calendar_event", id: proposal.id, externalEventId: created.eventId };
   } catch (error) {
