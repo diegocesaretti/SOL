@@ -9,11 +9,22 @@ import {
   loginMember,
   revokeRequestSession,
   sessionCookie,
+  type AuthPrincipal,
 } from "./modules/auth/session.js";
+import {
+  createMember,
+  MemberValidationError,
+  type NewMemberRole,
+} from "./modules/identity/members.js";
 import {
   getOnboardingState,
   listMembers,
 } from "./modules/identity/repository.js";
+import {
+  createSourceAccount,
+  listSourceAccounts,
+  SourceAccountValidationError,
+} from "./modules/identity/source-accounts.js";
 import {
   AlreadyConfiguredError,
   ValidationError,
@@ -31,6 +42,40 @@ function pathname(request: IncomingMessage): string {
 function requireJson(request: IncomingMessage, response: ServerResponse): boolean {
   if (request.headers["content-type"]?.includes("application/json")) return true;
   sendJson(response, 415, { error: "content-type must be application/json" });
+  return false;
+}
+
+async function jsonBody<T>(
+  request: IncomingMessage,
+  response: ServerResponse,
+): Promise<T | null> {
+  if (!requireJson(request, response)) return null;
+  try {
+    return await readJsonBody<T>(request);
+  } catch (error) {
+    sendJson(response, 400, {
+      error: error instanceof Error ? error.message : "invalid request body",
+    });
+    return null;
+  }
+}
+
+async function principalFor(
+  request: IncomingMessage,
+  response: ServerResponse,
+): Promise<AuthPrincipal | null> {
+  const principal = await authenticateRequest(request);
+  if (!principal) sendJson(response, 401, { error: "unauthenticated" });
+  return principal;
+}
+
+function canManageMembers(principal: AuthPrincipal): boolean {
+  return principal.role === "owner" || principal.role === "adult";
+}
+
+function canCreateRole(principal: AuthPrincipal, role: NewMemberRole): boolean {
+  if (principal.role === "owner") return true;
+  if (principal.role === "adult") return role !== "adult";
   return false;
 }
 
@@ -72,10 +117,10 @@ async function handleRequest(
   }
 
   if (request.method === "POST" && path === "/v1/onboarding") {
-    if (!requireJson(request, response)) return;
+    const input = await jsonBody<BootstrapInput>(request, response);
+    if (!input) return;
 
     try {
-      const input = await readJsonBody<BootstrapInput>(request);
       const result = await bootstrapHousehold(input);
       const login = await loginMember(
         result.household.id,
@@ -101,22 +146,18 @@ async function handleRequest(
         sendJson(response, 400, { error: error.message });
         return;
       }
-      if (error instanceof Error && error.message.startsWith("request body")) {
-        sendJson(response, 400, { error: error.message });
-        return;
-      }
       throw error;
     }
     return;
   }
 
   if (request.method === "POST" && path === "/v1/auth/login") {
-    if (!requireJson(request, response)) return;
-    const input = await readJsonBody<{
+    const input = await jsonBody<{
       householdId?: string;
       loginName?: string;
       password?: string;
-    }>(request);
+    }>(request, response);
+    if (!input) return;
 
     if (!input.householdId || !input.loginName || !input.password) {
       sendJson(response, 400, { error: "householdId, loginName and password are required" });
@@ -142,11 +183,8 @@ async function handleRequest(
   }
 
   if (request.method === "GET" && path === "/v1/auth/me") {
-    const principal = await authenticateRequest(request);
-    if (!principal) {
-      sendJson(response, 401, { error: "unauthenticated" });
-      return;
-    }
+    const principal = await principalFor(request, response);
+    if (!principal) return;
     sendJson(response, 200, { member: principal });
     return;
   }
@@ -158,15 +196,70 @@ async function handleRequest(
     return;
   }
 
-  const membersMatch = path.match(
-    /^\/v1\/households\/([0-9a-f-]{36})\/members$/i,
-  );
-  if (request.method === "GET" && membersMatch) {
-    const principal = await authenticateRequest(request);
-    if (!principal) {
-      sendJson(response, 401, { error: "unauthenticated" });
+  if (path === "/v1/source-accounts") {
+    const principal = await principalFor(request, response);
+    if (!principal) return;
+
+    if (request.method === "GET") {
+      const canSeeAll = principal.role === "owner" || principal.role === "adult";
+      sendJson(response, 200, {
+        sourceAccounts: await listSourceAccounts(
+          principal.householdId,
+          principal.memberId,
+          canSeeAll,
+        ),
+      });
       return;
     }
+
+    if (request.method === "POST") {
+      if (principal.role === "child" || principal.role === "guest") {
+        sendJson(response, 403, { error: "forbidden" });
+        return;
+      }
+
+      const input = await jsonBody<{
+        provider?: string;
+        label?: string;
+        authMode?: string;
+        ownerMemberId?: string;
+        shared?: boolean;
+      }>(request, response);
+      if (!input) return;
+
+      const manager = principal.role === "owner" || principal.role === "adult";
+      const ownerMemberId = manager
+        ? input.shared
+          ? undefined
+          : input.ownerMemberId ?? principal.memberId
+        : principal.memberId;
+
+      try {
+        const sourceAccount = await createSourceAccount({
+          householdId: principal.householdId,
+          ownerMemberId,
+          provider: input.provider ?? "",
+          label: input.label ?? "",
+          authMode: input.authMode,
+        });
+        sendJson(response, 201, { sourceAccount });
+      } catch (error) {
+        if (error instanceof SourceAccountValidationError) {
+          sendJson(response, 400, { error: error.message });
+          return;
+        }
+        throw error;
+      }
+      return;
+    }
+  }
+
+  const membersMatch = path.match(
+    /^\/v1\/households\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/members$/i,
+  );
+  if (membersMatch) {
+    const principal = await principalFor(request, response);
+    if (!principal) return;
 
     const householdId = membersMatch[1];
     if (!householdId || principal.householdId !== householdId) {
@@ -174,8 +267,52 @@ async function handleRequest(
       return;
     }
 
-    sendJson(response, 200, { members: await listMembers(householdId) });
-    return;
+    if (request.method === "GET") {
+      sendJson(response, 200, { members: await listMembers(householdId) });
+      return;
+    }
+
+    if (request.method === "POST") {
+      if (!canManageMembers(principal)) {
+        sendJson(response, 403, { error: "forbidden" });
+        return;
+      }
+
+      const input = await jsonBody<{
+        displayName?: string;
+        loginName?: string;
+        password?: string;
+        role?: NewMemberRole;
+        locale?: string;
+        timezone?: string;
+      }>(request, response);
+      if (!input) return;
+
+      if (!input.role || !canCreateRole(principal, input.role)) {
+        sendJson(response, 403, { error: "role_not_allowed" });
+        return;
+      }
+
+      try {
+        const member = await createMember({
+          householdId,
+          displayName: input.displayName ?? "",
+          loginName: input.loginName ?? "",
+          password: input.password ?? "",
+          role: input.role,
+          locale: input.locale,
+          timezone: input.timezone,
+        });
+        sendJson(response, 201, { member });
+      } catch (error) {
+        if (error instanceof MemberValidationError) {
+          sendJson(response, 400, { error: error.message });
+          return;
+        }
+        throw error;
+      }
+      return;
+    }
   }
 
   sendJson(response, 404, { error: "not_found" });
