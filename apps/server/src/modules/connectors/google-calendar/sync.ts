@@ -56,21 +56,78 @@ function visibilityFor(ownerMemberId: string | null): "private" | "family" {
   return ownerMemberId ? "private" : "family";
 }
 
-function eventStart(event: GoogleEvent): { startsAt: Date; allDay: boolean } {
-  const value = event.start?.dateTime || event.start?.date;
-  if (value) {
-    const date = new Date(event.start?.dateTime || `${value}T00:00:00Z`);
-    if (!Number.isNaN(date.getTime())) return { startsAt: date, allDay: Boolean(event.start?.date && !event.start?.dateTime) };
+function timezoneOffsetMs(date: Date, timezone: string): number {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const value = (type: string) => Number(parts.find((part) => part.type === type)?.value ?? 0);
+  return Date.UTC(
+    value("year"),
+    value("month") - 1,
+    value("day"),
+    value("hour"),
+    value("minute"),
+    value("second"),
+  ) - date.getTime();
+}
+
+function localDateMidnight(dateText: string, timezone: string): Date | null {
+  const match = dateText.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const localTarget = Date.UTC(year, month - 1, day, 0, 0, 0);
+  try {
+    let guess = new Date(localTarget);
+    for (let index = 0; index < 2; index += 1) {
+      guess = new Date(localTarget - timezoneOffsetMs(guess, timezone));
+    }
+    return guess;
+  } catch {
+    const fallback = new Date(`${dateText}T00:00:00Z`);
+    return Number.isNaN(fallback.getTime()) ? null : fallback;
+  }
+}
+
+function eventStart(
+  event: GoogleEvent,
+  calendarTimezone?: string,
+): { startsAt: Date; allDay: boolean } {
+  if (event.start?.dateTime) {
+    const date = new Date(event.start.dateTime);
+    if (!Number.isNaN(date.getTime())) return { startsAt: date, allDay: false };
+  }
+  if (event.start?.date) {
+    const date = localDateMidnight(
+      event.start.date,
+      event.start.timeZone || calendarTimezone || "UTC",
+    );
+    if (date) return { startsAt: date, allDay: true };
   }
   const fallback = new Date(event.updated || event.created || Date.now());
   return { startsAt: Number.isNaN(fallback.getTime()) ? new Date() : fallback, allDay: false };
 }
 
-function eventEnd(event: GoogleEvent): Date | null {
-  const value = event.end?.dateTime || event.end?.date;
-  if (!value) return null;
-  const date = new Date(event.end?.dateTime || `${value}T00:00:00Z`);
-  return Number.isNaN(date.getTime()) ? null : date;
+function eventEnd(event: GoogleEvent, calendarTimezone?: string): Date | null {
+  if (event.end?.dateTime) {
+    const date = new Date(event.end.dateTime);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+  if (event.end?.date) {
+    return localDateMidnight(
+      event.end.date,
+      event.end.timeZone || calendarTimezone || "UTC",
+    );
+  }
+  return null;
 }
 
 async function persistGoogleEvent(
@@ -82,8 +139,8 @@ async function persistGoogleEvent(
   const externalId = `${calendar.externalCalendarId}:${event.id}`;
   const visibility = visibilityFor(sourceAccount.ownerMemberId);
   const cancelled = event.status === "cancelled";
-  const { startsAt, allDay } = eventStart(event);
-  const endsAt = eventEnd(event);
+  const { startsAt, allDay } = eventStart(event, calendar.timezone);
+  const endsAt = eventEnd(event, calendar.timezone);
   const client = await db.connect();
 
   try {
@@ -302,7 +359,7 @@ async function syncOneCalendar(
     "SELECT sync_token FROM google_calendars WHERE id = $1",
     [calendar.id],
   );
-  let syncToken = reset ? undefined : tokenResult.rows[0]?.sync_token ?? undefined;
+  const syncToken = reset ? undefined : tokenResult.rows[0]?.sync_token ?? undefined;
   let pageToken: string | undefined;
   let nextSyncToken: string | undefined;
   let count = 0;
