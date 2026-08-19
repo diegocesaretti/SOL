@@ -1,0 +1,93 @@
+import type { IncomingMessage, ServerResponse } from "node:http";
+import { readJsonBody, sendJson } from "../../http.js";
+import type { AuthPrincipal } from "../auth/session.js";
+import {
+  approveExecutiveProposal,
+  listExecutiveProposals,
+  rejectExecutiveProposal,
+} from "./proposals.js";
+
+async function readJson<T>(request: IncomingMessage, response: ServerResponse): Promise<T | null> {
+  if (!request.headers["content-type"]?.includes("application/json")) {
+    sendJson(response, 415, { error: "content-type must be application/json" });
+    return null;
+  }
+  try {
+    return await readJsonBody<T>(request);
+  } catch (error) {
+    sendJson(response, 400, {
+      error: error instanceof Error ? error.message : "invalid request body",
+    });
+    return null;
+  }
+}
+
+export async function handleExecutiveApi(
+  path: string,
+  request: IncomingMessage,
+  response: ServerResponse,
+  principal: AuthPrincipal,
+): Promise<boolean> {
+  if (path === "/v1/executive/proposals" && request.method === "GET") {
+    const url = new URL(request.url ?? path, "http://sol.local");
+    sendJson(response, 200, {
+      proposals: await listExecutiveProposals({
+        householdId: principal.householdId,
+        memberId: principal.memberId,
+        status: url.searchParams.get("status") || undefined,
+      }),
+    });
+    return true;
+  }
+
+  const match = path.match(
+    /^\/v1\/executive\/proposals\/([0-9a-f-]{36})\/(approve|reject)$/i,
+  );
+  if (!match || request.method !== "POST") return false;
+  const proposalId = match[1];
+  const action = match[2];
+  if (!proposalId || !action) return false;
+
+  if (action === "reject") {
+    const rejected = await rejectExecutiveProposal({
+      proposalId,
+      householdId: principal.householdId,
+      memberId: principal.memberId,
+    });
+    if (!rejected) {
+      sendJson(response, 404, { error: "proposal_not_found_or_not_rejectable" });
+      return true;
+    }
+    sendJson(response, 200, { ok: true });
+    return true;
+  }
+
+  const body = await readJson<{
+    targetSourceAccountId?: string;
+    targetGoogleCalendarId?: string;
+  }>(request, response);
+  if (!body) return true;
+
+  try {
+    const result = await approveExecutiveProposal({
+      proposalId,
+      householdId: principal.householdId,
+      memberId: principal.memberId,
+      targetSourceAccountId: body.targetSourceAccountId,
+      targetGoogleCalendarId: body.targetGoogleCalendarId,
+    });
+    sendJson(response, 200, { result });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const status = [
+      "proposal_not_found_or_not_approvable",
+      "calendar_target_required",
+      "calendar_target_not_allowed",
+      "event_time_required",
+    ].includes(message)
+      ? 409
+      : 503;
+    sendJson(response, status, { error: message });
+  }
+  return true;
+}
