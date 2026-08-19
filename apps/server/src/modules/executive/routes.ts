@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { readJsonBody, sendJson } from "../../http.js";
 import type { AuthPrincipal } from "../auth/session.js";
+import { buildExecutiveBrief, readExecutiveBrief } from "./briefs.js";
 import {
   approveExecutiveProposal,
   listExecutiveProposals,
@@ -37,6 +38,22 @@ export async function handleExecutiveApi(
         status: url.searchParams.get("status") || undefined,
       }),
     });
+    return true;
+  }
+
+  if (path === "/v1/executive/brief" && request.method === "GET") {
+    const url = new URL(request.url ?? path, "http://sol.local");
+    const type = url.searchParams.get("type") === "tomorrow_preview" ? "tomorrow_preview" : "morning";
+    const refresh = url.searchParams.get("refresh") === "1";
+    try {
+      const content = refresh
+        ? await buildExecutiveBrief(principal.memberId, type)
+        : (await readExecutiveBrief(principal.memberId, type)) ??
+          (await buildExecutiveBrief(principal.memberId, type));
+      sendJson(response, 200, { brief: content });
+    } catch (error) {
+      sendJson(response, 503, { error: error instanceof Error ? error.message : String(error) });
+    }
     return true;
   }
 
