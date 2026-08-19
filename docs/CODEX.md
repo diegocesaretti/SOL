@@ -39,7 +39,26 @@ The `/ai` screen supports:
 4. Rate-limit status (`account/rateLimits/read`)
 5. Logout (`account/logout`)
 
-SOL never copies ChatGPT OAuth tokens into PostgreSQL. Codex owns and refreshes its login cache. By default this uses the normal Codex credential location/OS credential store. `SOL_CODEX_HOME` can isolate a dedicated Codex home later if desired.
+SOL never copies ChatGPT OAuth tokens into PostgreSQL. Codex owns the OAuth lifecycle and refreshes managed ChatGPT tokens automatically.
+
+### Dedicated SOL Codex profile
+
+SOL intentionally does **not** use the developer's normal `~/.codex` login by default. It runs App Server with:
+
+```text
+CODEX_HOME=<repo>/.sol/codex
+```
+
+and creates a private `config.toml` containing:
+
+```toml
+cli_auth_credentials_store = "file"
+forced_login_method = "chatgpt"
+```
+
+The `.sol/` directory is gitignored. On platforms that honor POSIX modes SOL creates the directory as `0700` and the config as `0600`. The resulting `auth.json` must still be treated like a password because it contains access tokens.
+
+This isolation means signing SOL in or out does not intentionally reuse or revoke the ordinary Codex CLI/IDE cache used for development. `SOL_CODEX_HOME` can point to another dedicated persistent location when SOL is moved to a server or container.
 
 ## Reasoning security boundary
 
@@ -55,9 +74,9 @@ This is only one layer. Before future source data reaches the provider, SOL's ow
 
 ## Household scope
 
-The first implementation uses one host-level Codex identity for the SOL instance. Household members may use that shared reasoning engine, while SOL controls which context each member may retrieve.
+The first implementation uses one SOL-level Codex identity for the running SOL instance. Household members share that reasoning engine while SOL controls which records each authenticated member can retrieve and send as context.
 
-If SOL later needs separate ChatGPT identities per household/member, each Codex identity should run in an isolated `CODEX_HOME`/App Server process rather than sharing one mutable login cache.
+If SOL later needs separate ChatGPT identities per household/member, each identity should run in its own `CODEX_HOME` and App Server process rather than sharing mutable auth state.
 
 ## SDK follow-up
 
