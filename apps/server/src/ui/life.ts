@@ -10,8 +10,8 @@ export function renderLifePage(): string {
     * { box-sizing:border-box; }
     body { margin:0; min-height:100vh; background:Canvas; color:CanvasText; }
     main { width:min(980px, calc(100% - 28px)); margin:auto; padding:38px 0 80px; }
-    .top,.row,.tabs { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
-    .top,.row { justify-content:space-between; }
+    .top,.row,.tabs,.toolbar { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+    .top,.row,.toolbar { justify-content:space-between; }
     .brand { font-size:13px; font-weight:900; letter-spacing:.17em; opacity:.65; }
     nav { display:flex; gap:14px; font-size:14px; flex-wrap:wrap; }
     a { color:inherit; }
@@ -21,7 +21,7 @@ export function renderLifePage(): string {
     .muted { opacity:.62; }
     .tabs { margin:24px 0 16px; }
     button { padding:10px 14px; border-radius:999px; border:1px solid color-mix(in srgb, CanvasText 18%, transparent); background:transparent; color:CanvasText; font:inherit; font-weight:800; cursor:pointer; }
-    button.active { background:CanvasText; color:Canvas; }
+    button.active, button.primary { background:CanvasText; color:Canvas; }
     .card { padding:18px 20px; border:1px solid color-mix(in srgb, CanvasText 14%, transparent); border-radius:18px; margin:10px 0; }
     .meta { display:flex; gap:8px; flex-wrap:wrap; align-items:center; font-size:12px; opacity:.62; margin-top:7px; }
     .badge { border:1px solid color-mix(in srgb, CanvasText 16%, transparent); padding:4px 7px; border-radius:999px; }
@@ -45,7 +45,7 @@ export function renderLifePage(): string {
   const content=document.getElementById('content');
   let current='timeline', nextBefore;
   function esc(v){return String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#039;','"':'&quot;'}[c]));}
-  async function api(path){const r=await fetch(path,{cache:'no-store'});let b={};try{b=await r.json()}catch{};return{r,b};}
+  async function api(path,options={}){const r=await fetch(path,{cache:'no-store',...options});let b={};try{b=await r.json()}catch{};return{r,b};}
   function when(v){try{return new Intl.DateTimeFormat('es-AR',{dateStyle:'medium',timeStyle:'short'}).format(new Date(v))}catch{return v}}
   function visibility(v){return ({private:'privado',family:'familia',shared:'compartido',project:'proyecto',system:'sistema'})[v]||v;}
   function itemLabel(i){return i.type==='task'?'Tarea':i.type==='event'?'Evento':(i.provider==='whatsapp'?'WhatsApp':i.provider||'Fuente');}
@@ -63,7 +63,15 @@ export function renderLifePage(): string {
   }
   function valueText(v){if(v===undefined||v===null)return ''; if(typeof v==='string')return v; try{return JSON.stringify(v)}catch{return String(v)}}
   function entityCard(e){const aliases=(e.aliases||[]).length?'<div class="meta">También: '+esc(e.aliases.join(', '))+'</div>':'';const facts=(e.facts||[]).slice(0,8).map(f=>'<div class="fact"><strong>'+esc(f.predicate)+'</strong>: '+esc(valueText(f.value)||f.objectEntityId||'—')+'</div>').join('');return '<article class="card"><div class="row"><h2>'+esc(e.name)+'</h2><span class="badge">'+esc(visibility(e.visibility))+'</span></div>'+aliases+(facts?'<div style="margin-top:12px">'+facts+'</div>':'<p class="muted">Sin hechos consolidados todavía.</p>')+'</article>';}
-  async function loadEntities(kind){content.innerHTML='<p class="empty">Cargando…</p>';const out=await api('/v1/knowledge/entities?kind='+kind);if(!out.r.ok){content.innerHTML='<p class="empty">'+esc(out.b.error||'No se pudo cargar')+'</p>';return;}const entities=out.b.entities||[];content.innerHTML=entities.length?'<div class="entity-grid">'+entities.map(entityCard).join('')+'</div>':'<p class="empty">SOL todavía no consolidó '+(kind==='person'?'personas':'proyectos')+' visibles para vos.</p>';}
+  async function createEntity(kind){
+    const label=kind==='project'?'proyecto':'persona';
+    const name=prompt('Nombre de '+label+':'); if(!name||!name.trim())return;
+    const family=confirm('¿Querés que sea visible para la familia?\nAceptar = familia · Cancelar = privado');
+    const out=await api('/v1/knowledge/entities',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({kind,name:name.trim(),visibility:family?'family':'private'})});
+    if(!out.r.ok){alert(out.b.error||'No se pudo crear');return;}
+    await loadEntities(kind);
+  }
+  async function loadEntities(kind){content.innerHTML='<p class="empty">Cargando…</p>';const out=await api('/v1/knowledge/entities?kind='+kind);if(!out.r.ok){content.innerHTML='<p class="empty">'+esc(out.b.error||'No se pudo cargar')+'</p>';return;}const entities=out.b.entities||[];const label=kind==='person'?'persona':'proyecto';const empty=entities.length?'':'<p class="empty">SOL todavía no tiene '+(kind==='person'?'personas':'proyectos')+' visibles para vos.</p>';content.innerHTML='<div class="toolbar"><span class="muted">'+entities.length+' '+(kind==='person'?'persona(s)':'proyecto(s)')+'</span><button class="primary" id="create-entity">Nuevo '+label+'</button></div>'+empty+(entities.length?'<div class="entity-grid">'+entities.map(entityCard).join('')+'</div>':'');document.getElementById('create-entity').onclick=()=>createEntity(kind);}
   async function select(tab){current=tab;document.querySelectorAll('[data-tab]').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));if(tab==='timeline')await loadTimeline();else await loadEntities(tab==='people'?'person':'project');}
   document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>select(b.dataset.tab));
   select('timeline');
