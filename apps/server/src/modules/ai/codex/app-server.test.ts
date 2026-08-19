@@ -9,11 +9,20 @@ import { CodexProvider } from "./provider.js";
 const fakeServer = String.raw`
 const readline = require('node:readline');
 const rl = readline.createInterface({ input: process.stdin });
+let ready = false;
 function send(message) { process.stdout.write(JSON.stringify(message) + '\n'); }
 rl.on('line', line => {
   const msg = JSON.parse(line);
   if (msg.method === 'initialize') {
-    send({ id: msg.id, result: { userAgent: 'fake-codex' } });
+    setTimeout(() => send({ id: msg.id, result: { userAgent: 'fake-codex' } }), 20);
+    return;
+  }
+  if (msg.method === 'initialized') {
+    ready = true;
+    return;
+  }
+  if (!ready) {
+    send({ id: msg.id, error: { code: -32002, message: 'Not initialized' } });
     return;
   }
   if (msg.method === 'account/read') {
@@ -62,13 +71,21 @@ async function withFakeCodex(
   }
 }
 
-test("Codex app-server client performs initialize and account RPC", async () => {
+test("Codex app-server serializes initialization across concurrent RPCs", async () => {
   await withFakeCodex(async (client) => {
-    const account = await client.request<{
-      account: { type: string; planType: string };
-    }>("account/read", { refreshToken: false });
-    assert.equal(account.account.type, "chatgpt");
-    assert.equal(account.account.planType, "plus");
+    const [first, second] = await Promise.all([
+      client.request<{ account: { type: string; planType: string } }>(
+        "account/read",
+        { refreshToken: false },
+      ),
+      client.request<{ account: { type: string; planType: string } }>(
+        "account/read",
+        { refreshToken: false },
+      ),
+    ]);
+    assert.equal(first.account.type, "chatgpt");
+    assert.equal(second.account.planType, "plus");
+    assert.equal(client.ready, true);
   });
 });
 
