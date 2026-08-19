@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 jobs:
-  typecheck-and-build:
+  typecheck-test-build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -28,6 +28,9 @@ jobs:
 
       - name: Typecheck
         run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
 
       - name: Build
         run: pnpm build
