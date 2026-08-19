@@ -1,0 +1,30 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-sol}
+      POSTGRES_USER: ${POSTGRES_USER:-sol}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sol_dev_only}
+    ports:
+      - "5432:5432"
+    volumes:
+      - sol_postgres:/var/lib/postgresql/data
+      - ./packages/database/migrations/0001_initial.sql:/docker-entrypoint-initdb.d/0001_initial.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sol} -d ${POSTGRES_DB:-sol}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - sol_redis:/data
+
+volumes:
+  sol_postgres:
+  sol_redis:
