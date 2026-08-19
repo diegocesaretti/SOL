@@ -13,7 +13,7 @@ if (-not $DatabaseUrl -and (Test-Path $envPath)) {
 }
 
 if (-not $DatabaseUrl) {
-  throw 'DATABASE_URL is not configured. Run pnpm db:setup:windows first.'
+  throw 'DATABASE_URL is not configured. Run pnpm db:setup first.'
 }
 
 $psql = (Get-Command psql.exe -ErrorAction SilentlyContinue).Source
@@ -25,9 +25,31 @@ if (-not $psql) {
 }
 if (-not $psql) { throw 'psql.exe was not found.' }
 
-& $psql $DatabaseUrl --no-password --tuples-only --command='SELECT current_database(), current_user, version();'
-if ($LASTEXITCODE -ne 0) {
-  throw "Could not connect to SOL PostgreSQL (exit code $LASTEXITCODE)."
+$uri = [Uri]$DatabaseUrl
+$userInfo = $uri.UserInfo.Split(':', 2)
+$user = [Uri]::UnescapeDataString($userInfo[0])
+$password = if ($userInfo.Length -gt 1) { [Uri]::UnescapeDataString($userInfo[1]) } else { '' }
+$database = $uri.AbsolutePath.TrimStart('/')
+$port = if ($uri.Port -gt 0) { $uri.Port } else { 5432 }
+
+$previousPassword = $env:PGPASSWORD
+try {
+  $env:PGPASSWORD = $password
+  & $psql `
+    --host=$($uri.Host) `
+    --port=$port `
+    --username=$user `
+    --dbname=$database `
+    --no-password `
+    --tuples-only `
+    --command='SELECT current_database(), current_user, version();'
+
+  if ($LASTEXITCODE -ne 0) {
+    throw "Could not connect to SOL PostgreSQL (exit code $LASTEXITCODE)."
+  }
+}
+finally {
+  $env:PGPASSWORD = $previousPassword
 }
 
 Write-Host 'SOL PostgreSQL is reachable.' -ForegroundColor Green
