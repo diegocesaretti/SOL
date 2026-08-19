@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { config } from "./config.js";
 import { InMemoryEventBus } from "./core/event-bus.js";
+import { OutboxDispatcher } from "./core/outbox-dispatcher.js";
 import { checkDatabase, closeDatabase } from "./database/client.js";
 import { readJsonBody, sendHtml, sendJson } from "./http.js";
 import {
@@ -11,6 +12,8 @@ import {
   sessionCookie,
   type AuthPrincipal,
 } from "./modules/auth/session.js";
+import { handleAiApi } from "./modules/ai/routes.js";
+import { codexAppServer } from "./modules/ai/codex/runtime.js";
 import {
   createMember,
   MemberValidationError,
@@ -31,9 +34,11 @@ import {
   bootstrapHousehold,
   type BootstrapInput,
 } from "./modules/onboarding/service.js";
+import { renderAiPage } from "./ui/ai.js";
 import { renderOnboardingPage } from "./ui/onboarding.js";
 
 export const eventBus = new InMemoryEventBus();
+const outboxDispatcher = new OutboxDispatcher(eventBus, config.outboxPollMs);
 
 function pathname(request: IncomingMessage): string {
   return new URL(request.url ?? "/", "http://sol.local").pathname;
@@ -90,6 +95,11 @@ async function handleRequest(
     return;
   }
 
+  if (request.method === "GET" && path === "/ai") {
+    sendHtml(response, 200, renderAiPage());
+    return;
+  }
+
   if (request.method === "GET" && path === "/health") {
     const database = await checkDatabase();
     sendJson(response, database ? 200 : 503, {
@@ -105,8 +115,9 @@ async function handleRequest(
     sendJson(response, 200, {
       name: "SOL",
       architecture: "family-first modular monolith",
-      version: "0.1.0",
+      version: "0.2.0",
       database,
+      aiProvider: "codex",
     });
     return;
   }
@@ -194,6 +205,12 @@ async function handleRequest(
     response.setHeader("set-cookie", clearedSessionCookie());
     sendJson(response, 200, { ok: true });
     return;
+  }
+
+  if (path.startsWith("/v1/ai/")) {
+    const principal = await principalFor(request, response);
+    if (!principal) return;
+    if (await handleAiApi(path, request, response, principal)) return;
   }
 
   if (path === "/v1/source-accounts") {
@@ -331,6 +348,7 @@ const server = createServer((request, response) => {
 
 server.listen(config.port, config.host, () => {
   console.log(`SOL Core listening on http://${config.host}:${config.port}`);
+  outboxDispatcher.start();
   if (config.host !== "127.0.0.1" && config.host !== "localhost") {
     console.warn(
       "SOL is listening beyond localhost. Use HTTPS and review member authentication before exposing it broadly.",
@@ -340,6 +358,8 @@ server.listen(config.port, config.host, () => {
 
 async function shutdown(signal: string): Promise<void> {
   console.log(`Received ${signal}; shutting down SOL Core`);
+  outboxDispatcher.stop();
+  await codexAppServer.stop().catch(() => undefined);
   server.close(async () => {
     await closeDatabase();
     process.exit(0);
