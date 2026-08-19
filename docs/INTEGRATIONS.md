@@ -30,19 +30,25 @@ shared account    → family source
 
 They feed messages/conversations into Life. Private accounts stay private to their owning member even when another member is a household owner/admin.
 
-### SOL's own WhatsApp account — planned
+### SOL's own WhatsApp account — implemented core
 
-SOL will also have a dedicated WhatsApp identity/account used to **communicate with household members**. This account is not just another monitored personal source. It is an assistant interface and an action/delivery channel.
+SOL can also have one dedicated household WhatsApp identity/account used to **communicate with household members**. This account is not an ordinary monitored source. It is an assistant interface plus delivery/action channel.
 
-Expected responsibilities:
+Implemented responsibilities:
 
-- send morning briefs and reminders;
-- ask for approval of executive proposals;
-- receive direct commands/questions from identified household members;
-- notify about conflicts, important changes and automation results;
-- provide a natural mobile interface when the web UI is not open.
+- send persisted morning/tomorrow briefs;
+- deliver executive proposals to the member allowed to decide them;
+- receive direct questions from verified household members;
+- receive natural-language create requests that become pending proposals rather than immediate actions;
+- accept deterministic `sí/no` approval for the last proposal SOL explicitly asked that member about;
+- accept approve/reject commands by proposal reference;
+- audit outbound assistant messages through `action_log`.
 
-The SOL account must have an explicit system role/session type and its outbound messages must pass through action authorization/audit. A message received by the SOL account may become an authenticated user instruction only after its sender identity is resolved to an allowed household member. Messages observed in members' ordinary chats remain untrusted source data.
+Member authentication uses a one-time challenge generated from an already authenticated SOL web session. The member sends that code from their own WhatsApp to SOL; the actual WhatsApp JID/LID seen by the protocol is then bound to the member. A phone/display name is not treated as sufficient authentication.
+
+Unknown senders, groups, broadcasts and messages observed in members' ordinary chats never gain command authority. The dedicated assistant account also skips normal WhatsApp history ingestion and candidate extraction so assistant conversations do not masquerade as source observations.
+
+See `docs/SOL_WHATSAPP.md` for setup, binding and command details.
 
 ## Google Calendar
 
