@@ -21,7 +21,7 @@ function serialize(value: unknown): string {
   return JSON.stringify(value, BufferJSON.replacer);
 }
 
-function deserialize<T>(value: string): T {
+function deserialize<T = unknown>(value: string): T {
   return JSON.parse(value, BufferJSON.reviver) as T;
 }
 
@@ -52,8 +52,9 @@ export async function createWhatsappAuthState(sourceAccountId: string): Promise<
   const state: AuthenticationState = {
     creds,
     keys: {
-      get: async <T extends keyof SignalDataTypeMap>(type: T, ids: string[]) => {
-        if (ids.length === 0) return {};
+      get: async (type, ids) => {
+        const data: { [id: string]: SignalDataTypeMap[typeof type] } = {};
+        if (ids.length === 0) return data;
 
         const result = await db.query<{
           key_id: string;
@@ -66,11 +67,9 @@ export async function createWhatsappAuthState(sourceAccountId: string): Promise<
              AND key_id = ANY($3::text[])`,
           [sourceAccountId, type, ids],
         );
-
         const rowsById = new Map(
           result.rows.map((row) => [row.key_id, row.encrypted_payload]),
         );
-        const data: Partial<Record<string, SignalDataTypeMap[T]>> = {};
 
         await Promise.all(
           ids.map(async (id) => {
@@ -80,25 +79,25 @@ export async function createWhatsappAuthState(sourceAccountId: string): Promise<
               encrypted,
               keyAad(sourceAccountId, String(type), id),
             );
-            let value = deserialize<SignalDataTypeMap[T]>(plaintext);
+            let value = deserialize<any>(plaintext);
             if (type === "app-state-sync-key" && value) {
-              value = proto.Message.AppStateSyncKeyData.fromObject(
-                value as proto.Message.IAppStateSyncKeyData,
-              ) as SignalDataTypeMap[T];
+              value = proto.Message.AppStateSyncKeyData.fromObject(value);
             }
-            data[id] = value;
+            data[id] = value as SignalDataTypeMap[typeof type];
           }),
         );
 
-        return data as { [id: string]: SignalDataTypeMap[T] };
+        return data;
       },
       set: async (updates) => {
         const client = await db.connect();
         try {
           await client.query("BEGIN");
-          for (const [category, entries] of Object.entries(updates)) {
+          for (const category in updates) {
+            const entries = updates[category as keyof SignalDataTypeMap];
             if (!entries) continue;
-            for (const [keyId, value] of Object.entries(entries)) {
+            for (const keyId in entries) {
+              const value = entries[keyId];
               if (value == null) {
                 await client.query(
                   `DELETE FROM whatsapp_auth_keys
