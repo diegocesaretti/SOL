@@ -5,6 +5,8 @@ import makeWASocket, {
 } from "baileys";
 import pino from "pino";
 import * as QRCode from "qrcode";
+import { getSolWhatsappAccountById } from "../sol-whatsapp/repository.js";
+import { handleSolWhatsappInbound } from "../sol-whatsapp/service.js";
 import { createWhatsappAuthState, clearWhatsappAuthState } from "./auth-store.js";
 import {
   ingestWhatsappMessage,
@@ -126,6 +128,19 @@ export class WhatsappManager {
     return publicStatus(runtime);
   }
 
+  isOpen(sourceAccountId: string): boolean {
+    return this.sessions.get(sourceAccountId)?.state === "open";
+  }
+
+  async sendText(sourceAccountId: string, jid: string, text: string): Promise<void> {
+    await this.start(sourceAccountId);
+    const runtime = this.sessions.get(sourceAccountId);
+    if (!runtime?.socket || runtime.state !== "open") {
+      throw new Error("WhatsApp assistant account is not connected");
+    }
+    await runtime.socket.sendMessage(jid, { text });
+  }
+
   async startLinkedAccounts(): Promise<void> {
     const accountIds = await listWhatsappAutostartAccounts();
     await Promise.all(
@@ -229,6 +244,8 @@ export class WhatsappManager {
     const account = await getWhatsappAccount(runtime.sourceAccountId);
     if (!account) throw new Error("WhatsApp source account not found");
     if (!account.enabled) throw new Error("WhatsApp source account is disabled");
+    const assistantAccount = await getSolWhatsappAccountById(runtime.sourceAccountId);
+    const isAssistant = Boolean(assistantAccount);
 
     await runtime.authSaveChain.catch(() => undefined);
     runtime.generation += 1;
@@ -246,20 +263,17 @@ export class WhatsappManager {
         keys: makeCacheableSignalKeyStore(state.keys, logger),
       },
       logger,
-      browser: Browsers.windows("SOL"),
+      browser: Browsers.windows(isAssistant ? "SOL Assistant" : "SOL"),
       printQRInTerminal: false,
       markOnlineOnConnect: false,
-      syncFullHistory: true,
-      shouldSyncHistoryMessage: () => true,
+      syncFullHistory: !isAssistant,
+      shouldSyncHistoryMessage: () => !isAssistant,
       shouldIgnoreJid,
       emitOwnEvents: true,
     });
     runtime.socket = socket;
 
     socket.ev.on("creds.update", () => {
-      // Recover from a previous transient save failure before attempting the next
-      // credential snapshot. A failed save must be visible, but must not poison
-      // every future update in this session forever.
       runtime.authSaveChain = runtime.authSaveChain
         .catch(() => undefined)
         .then(saveCreds)
@@ -323,8 +337,25 @@ export class WhatsappManager {
     });
 
     socket.ev.on("messages.upsert", (upsert) => {
-      const origin = upsert.type === "notify" ? "realtime" : "history";
       this.enqueue(runtime, async () => {
+        if (isAssistant) {
+          if (upsert.type !== "notify") return;
+          for (const message of upsert.messages) {
+            await handleSolWhatsappInbound({
+              sourceAccountId: runtime.sourceAccountId,
+              householdId: account.householdId,
+              message,
+              reply: async (text) => {
+                const jid = message.key.remoteJid;
+                if (!jid) return;
+                await socket.sendMessage(jid, { text });
+              },
+            });
+          }
+          return;
+        }
+
+        const origin = upsert.type === "notify" ? "realtime" : "history";
         const currentAccount = await getWhatsappAccount(runtime.sourceAccountId);
         if (!currentAccount) return;
         for (const message of upsert.messages) {
@@ -340,6 +371,7 @@ export class WhatsappManager {
     });
 
     socket.ev.on("messaging-history.set", (history) => {
+      if (isAssistant) return;
       this.enqueue(runtime, async () => {
         const currentAccount = await getWhatsappAccount(runtime.sourceAccountId);
         if (!currentAccount) return;
@@ -369,6 +401,7 @@ export class WhatsappManager {
     });
 
     socket.ev.on("messaging-history.status", (historyStatus) => {
+      if (isAssistant) return;
       if (historyStatus.status === "complete") {
         void markWhatsappHistoryComplete(runtime.sourceAccountId).catch((error) =>
           console.error(`[whatsapp:${runtime.sourceAccountId}] history status failed`, error),
@@ -377,6 +410,7 @@ export class WhatsappManager {
     });
 
     socket.ev.on("chats.upsert", (chats) => {
+      if (isAssistant) return;
       this.enqueue(runtime, () =>
         updateWhatsappConversationTitles(
           runtime.sourceAccountId,
@@ -389,6 +423,7 @@ export class WhatsappManager {
     });
 
     socket.ev.on("chats.update", (chats) => {
+      if (isAssistant) return;
       this.enqueue(runtime, () =>
         updateWhatsappConversationTitles(
           runtime.sourceAccountId,
