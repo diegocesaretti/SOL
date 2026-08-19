@@ -13,6 +13,7 @@ export function renderOnboardingPage(): string {
     .brand { font-size: 14px; font-weight: 800; letter-spacing: .18em; opacity: .7; }
     h1 { margin: 12px 0 8px; font-size: clamp(36px, 7vw, 64px); letter-spacing: -.04em; }
     h2 { margin: 0 0 8px; font-size: 24px; }
+    h3 { margin: 24px 0 6px; font-size: 17px; }
     p { line-height: 1.55; opacity: .8; }
     .card { margin-top: 32px; padding: 28px; border: 1px solid color-mix(in srgb, CanvasText 18%, transparent); border-radius: 22px; background: color-mix(in srgb, Canvas 96%, CanvasText 4%); }
     .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
@@ -25,13 +26,16 @@ export function renderOnboardingPage(): string {
     .status { margin-top: 14px; min-height: 20px; font-size: 14px; }
     .error { color: #d33; }
     .muted { opacity: .62; }
-    .pill { display: inline-flex; align-items: center; gap: 8px; padding: 7px 11px; border-radius: 999px; border: 1px solid color-mix(in srgb, CanvasText 16%, transparent); font-size: 13px; }
+    .pill { display: inline-flex; align-items: center; gap: 8px; padding: 7px 11px; border-radius: 999px; border: 1px solid color-mix(in srgb, CanvasText 16%, transparent); font-size: 13px; white-space: nowrap; }
     .dot { width: 8px; height: 8px; border-radius: 50%; background: #2ca44f; }
     .row { display: flex; justify-content: space-between; gap: 20px; align-items: center; padding: 16px 0; border-top: 1px solid color-mix(in srgb, CanvasText 12%, transparent); }
     .row:first-of-type { border-top: 0; }
     .actions { display: flex; gap: 10px; flex-wrap: wrap; }
     .actions button { margin-top: 12px; }
-    @media (max-width: 620px) { main { padding: 36px 0; } .grid { grid-template-columns: 1fr; } label.full { grid-column: auto; } .card { padding: 22px; } }
+    details { margin-top: 18px; padding-top: 16px; border-top: 1px solid color-mix(in srgb, CanvasText 12%, transparent); }
+    summary { cursor: pointer; font-weight: 800; }
+    details form { margin-top: 16px; }
+    @media (max-width: 620px) { main { padding: 36px 0; } .grid { grid-template-columns: 1fr; } label.full { grid-column: auto; } .card { padding: 22px; } .row { align-items: flex-start; } }
   </style>
 </head>
 <body>
@@ -168,8 +172,15 @@ export function renderOnboardingPage(): string {
     async function homeView(state, member) {
       const household = state.households.find((item) => item.id === member.householdId);
       intro.textContent = 'Un solo núcleo familiar, con contexto y privacidad por miembro.';
-      const membersResult = await api('/v1/households/' + encodeURIComponent(member.householdId) + '/members');
+
+      const [membersResult, sourcesResult] = await Promise.all([
+        api('/v1/households/' + encodeURIComponent(member.householdId) + '/members'),
+        api('/v1/source-accounts'),
+      ]);
       const members = membersResult.response.ok ? membersResult.body.members : [];
+      const sources = sourcesResult.response.ok ? sourcesResult.body.sourceAccounts : [];
+      const manager = member.role === 'owner' || member.role === 'adult';
+
       const memberRows = members.map((item) => \`
         <div class="row">
           <div><strong>\${escapeHtml(item.displayName)}</strong><br><span class="muted">\${escapeHtml(item.role)}\${item.loginName ? ' · @' + escapeHtml(item.loginName) : ''}</span></div>
@@ -177,15 +188,79 @@ export function renderOnboardingPage(): string {
         </div>
       \`).join('');
 
+      const sourceRows = sources.length ? sources.map((item) => \`
+        <div class="row">
+          <div><strong>\${escapeHtml(item.label)}</strong><br><span class="muted">\${escapeHtml(item.provider)}\${item.ownerMemberId ? ' · personal' : ' · hogar'}</span></div>
+          <span class="pill">\${escapeHtml(item.status)}</span>
+        </div>
+      \`).join('') : '<p class="muted">Todavía no hay fuentes conectadas.</p>';
+
+      const roleOptions = member.role === 'owner'
+        ? '<option value="adult">Adulto</option><option value="member">Miembro</option><option value="child">Niño/a</option><option value="guest">Invitado</option>'
+        : '<option value="member">Miembro</option><option value="child">Niño/a</option><option value="guest">Invitado</option>';
+
+      const memberForm = manager ? \`
+        <details>
+          <summary>Agregar miembro</summary>
+          <form id="member-form">
+            <div class="grid">
+              <label>Nombre
+                <input name="displayName" required maxlength="120" />
+              </label>
+              <label>Rol
+                <select name="role">\${roleOptions}</select>
+              </label>
+              <label>Usuario
+                <input name="loginName" autocomplete="off" required minlength="3" maxlength="40" pattern="[A-Za-z0-9._-]+" />
+              </label>
+              <label>Contraseña inicial
+                <input name="password" type="password" autocomplete="new-password" required minlength="8" maxlength="256" />
+              </label>
+            </div>
+            <button type="submit">Agregar</button>
+            <div class="status" id="member-status"></div>
+          </form>
+        </details>
+      \` : '';
+
       app.innerHTML = \`
         <h2>\${escapeHtml(household?.name || 'SOL Home')}</h2>
         <p>Sesión: <strong>\${escapeHtml(member.displayName)}</strong> · \${escapeHtml(member.role)}</p>
-        <div class="row"><div><strong>Miembros</strong><br><span class="muted">Identidad familiar persistente</span></div><span class="pill">\${members.length}</span></div>
+        <h3>Miembros</h3>
         \${memberRows}
-        <div class="row"><div><strong>Fuentes</strong><br><span class="muted">WhatsApp, Google, Calendar, HA…</span></div><span class="pill">Próxima etapa</span></div>
+        \${memberForm}
+        <h3>Fuentes</h3>
+        \${sourceRows}
         <div class="row"><div><strong>AI Engine</strong><br><span class="muted">Codex OAuth / ChatGPT</span></div><span class="pill">Pendiente</span></div>
         <div class="actions"><button class="secondary" id="logout">Cerrar sesión</button></div>
       \`;
+
+      const memberFormElement = document.getElementById('member-form');
+      if (memberFormElement) {
+        memberFormElement.addEventListener('submit', async (event) => {
+          event.preventDefault();
+          const status = document.getElementById('member-status');
+          const button = memberFormElement.querySelector('button');
+          button.disabled = true;
+          status.className = 'status';
+          status.textContent = 'Creando miembro…';
+
+          const data = Object.fromEntries(new FormData(memberFormElement).entries());
+          data.locale = navigator.language || 'es-AR';
+          const { response, body } = await api('/v1/households/' + encodeURIComponent(member.householdId) + '/members', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(data),
+          });
+          if (!response.ok) {
+            status.className = 'status error';
+            status.textContent = body.error || 'No se pudo crear el miembro';
+            button.disabled = false;
+            return;
+          }
+          await load();
+        });
+      }
 
       document.getElementById('logout').addEventListener('click', async () => {
         await api('/v1/auth/logout', { method: 'POST' });
