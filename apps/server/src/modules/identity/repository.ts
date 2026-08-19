@@ -41,21 +41,29 @@ export class AlreadyConfiguredError extends Error {
   }
 }
 
-function requiredText(value: string, label: string, maxLength = 120): string {
+export class ValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ValidationError";
+  }
+}
+
+function requiredText(value: unknown, label: string, maxLength = 120): string {
+  if (typeof value !== "string") throw new ValidationError(`${label} is required`);
   const normalized = value.trim();
-  if (!normalized) throw new Error(`${label} is required`);
+  if (!normalized) throw new ValidationError(`${label} is required`);
   if (normalized.length > maxLength) {
-    throw new Error(`${label} must be ${maxLength} characters or fewer`);
+    throw new ValidationError(`${label} must be ${maxLength} characters or fewer`);
   }
   return normalized;
 }
 
-function validateTimezone(value: string): string {
+function validateTimezone(value: unknown): string {
   const timezone = requiredText(value, "timezone", 100);
   try {
     new Intl.DateTimeFormat("en-US", { timeZone: timezone }).format();
   } catch {
-    throw new Error("timezone must be a valid IANA timezone");
+    throw new ValidationError("timezone must be a valid IANA timezone");
   }
   return timezone;
 }
@@ -97,7 +105,10 @@ export async function bootstrapHousehold(input: BootstrapInput): Promise<Bootstr
   const householdName = requiredText(input.householdName, "householdName");
   const ownerName = requiredText(input.ownerName, "ownerName");
   const timezone = validateTimezone(input.timezone);
-  const ownerLocale = input.ownerLocale?.trim() || undefined;
+  const ownerLocale =
+    typeof input.ownerLocale === "string" && input.ownerLocale.trim()
+      ? input.ownerLocale.trim().slice(0, 35)
+      : undefined;
 
   const client = await db.connect();
   try {
