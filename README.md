@@ -15,6 +15,7 @@ SOL is a family-first personal information and automation system: one integrated
 - **Proposal before external action.** Semantic detection can be automatic; externally visible writes go through executive/action policy.
 - **Provider independence.** Codex via ChatGPT OAuth is the first reasoning engine, but SOL Core is provider-neutral.
 - **Modular monolith first.** One deployable system with strong module boundaries.
+- **Native-first infrastructure.** The current Windows target runs SOL and PostgreSQL directly; Docker/WSL/Hyper-V are not requirements.
 
 ## Implemented today
 
@@ -37,7 +38,7 @@ Google Calendars ──┘                                      │
 Current capabilities include:
 
 - household/member authentication and privacy boundaries;
-- PostgreSQL + pgvector data model and durable outbox;
+- native PostgreSQL data model and durable outbox;
 - Codex App Server + ChatGPT OAuth reasoning;
 - multiple private/shared WhatsApp linked-device accounts;
 - encrypted WhatsApp auth state in PostgreSQL;
@@ -75,28 +76,35 @@ SOL/
 │       │   └── executive/
 │       └── ui/
 ├── packages/database/migrations/
-├── docs/
-│   ├── ARCHITECTURE.md
-│   ├── CODEX.md
-│   ├── WHATSAPP.md
-│   ├── INTEGRATIONS.md
-│   ├── DATA_MODEL.md
-│   ├── SECURITY.md
-│   └── ROADMAP.md
-└── docker-compose.yml
+├── scripts/windows/             # native PostgreSQL setup/check helpers
+└── docs/
+    ├── ARCHITECTURE.md
+    ├── WINDOWS_NATIVE.md
+    ├── CODEX.md
+    ├── WHATSAPP.md
+    ├── INTEGRATIONS.md
+    ├── DATA_MODEL.md
+    ├── SECURITY.md
+    └── ROADMAP.md
 ```
 
-## Quick start
+## Quick start — Windows native (default)
 
-Requirements: Node.js 22+ (24 recommended), pnpm, Docker and the Codex CLI if the AI engine is enabled.
+Requirements: Node.js 22+ (24 recommended), pnpm, a native PostgreSQL installation, and the Codex CLI if the AI engine is enabled.
 
-```bash
-cp .env.example .env
+**Docker Desktop, WSL, Hyper-V, Redis and pgvector are not required.**
+
+After installing PostgreSQL for Windows and remembering the administrator (`postgres`) password:
+
+```powershell
 pnpm install
-pnpm db:up
+pnpm db:setup
+pnpm db:check
 pnpm db:migrate
 pnpm dev
 ```
+
+`pnpm db:setup` detects `psql.exe`, creates a dedicated `sol` PostgreSQL role/database, generates an application password and writes `DATABASE_URL` into the Git-ignored `.env` file. It may ask once for the PostgreSQL administrator password; SOL does not store that password.
 
 Open:
 
@@ -113,6 +121,14 @@ Useful screens:
 /whatsapp     WhatsApp source accounts
 /ai           Codex / ChatGPT
 ```
+
+See [docs/WINDOWS_NATIVE.md](docs/WINDOWS_NATIVE.md) for the full zero-virtualization setup and backup notes.
+
+## Database philosophy
+
+PostgreSQL is the only infrastructure service SOL currently requires. Sessions, durable outbox events, sync cursors, tasks, proposals, briefs and connector state all live there.
+
+Redis was removed because no current module used it. Semantic vector search is also deferred: the base schema no longer requires pgvector. When semantic retrieval becomes useful, pgvector can return as an optional dedicated migration rather than a prerequisite for every Windows installation.
 
 ## Google Calendar setup
 
@@ -180,4 +196,4 @@ SOL binds to `127.0.0.1` by default. Do not expose the development server direct
 
 ## Current status
 
-Phases 0–3 are implemented and the **core of Phase 4 (Calendar + executive loop) is implemented**. Real OAuth/linked-device integration tests still need to be run on the target SOL host. The next planned product phase is SOL's own WhatsApp communication channel, while nightly consolidation and richer proposal editing remain Phase 4 follow-ups.
+Phases 0–3 are implemented and the **core of Phase 4 (Calendar + executive loop) is implemented**. The preferred target-host architecture is now native Windows + native PostgreSQL with no virtualization requirement. Real OAuth/linked-device integration tests still need to be run on the target SOL host. The next planned product phase is SOL's own WhatsApp communication channel, while nightly consolidation and richer proposal editing remain Phase 4 follow-ups.
