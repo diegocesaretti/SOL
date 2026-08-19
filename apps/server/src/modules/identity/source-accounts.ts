@@ -59,6 +59,7 @@ export async function listSourceAccounts(
        label, status::text, auth_mode, last_sync_at
      FROM source_accounts
      WHERE household_id = $1
+       AND NOT (provider = 'whatsapp' AND auth_mode = 'linked-device-assistant')
        AND ($3::boolean OR owner_member_id = $2 OR owner_member_id IS NULL)
      ORDER BY created_at ASC`,
     [householdId, viewerMemberId, canSeeAll],
