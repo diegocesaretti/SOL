@@ -19,6 +19,8 @@ import {
   handleGoogleOAuthCallback,
 } from "./modules/connectors/google-calendar/routes.js";
 import { CalendarSyncScheduler } from "./modules/connectors/google-calendar/scheduler.js";
+import { handleSolWhatsappApi } from "./modules/connectors/sol-whatsapp/routes.js";
+import { registerSolWhatsappDelivery } from "./modules/connectors/sol-whatsapp/service.js";
 import { handleWhatsappApi } from "./modules/connectors/whatsapp/routes.js";
 import { whatsappManager } from "./modules/connectors/whatsapp/manager.js";
 import { handleExecutiveApi } from "./modules/executive/routes.js";
@@ -48,11 +50,13 @@ import { renderAiPage } from "./ui/ai.js";
 import { renderCalendarPage } from "./ui/calendar.js";
 import { renderExecutivePage } from "./ui/executive.js";
 import { renderOnboardingPage } from "./ui/onboarding.js";
+import { renderSolWhatsappPage } from "./ui/sol-whatsapp.js";
 import { renderWhatsappPage } from "./ui/whatsapp.js";
 
 export const eventBus = new InMemoryEventBus();
 const unregisterCandidateProcessor = registerCandidateProcessor(eventBus);
 const unregisterExecutiveProcessor = registerExecutiveProposalProcessor(eventBus);
+const unregisterSolWhatsappDelivery = registerSolWhatsappDelivery(eventBus, whatsappManager);
 const outboxDispatcher = new OutboxDispatcher(eventBus, config.outboxPollMs);
 const calendarScheduler = new CalendarSyncScheduler(config.calendarSyncMs);
 const executiveScheduler = new ExecutiveScheduler(config.executivePollMs);
@@ -101,7 +105,6 @@ function canCreateRole(principal: AuthPrincipal, role: NewMemberRole): boolean {
 async function handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
   const path = pathname(request);
 
-  // OAuth callback is authenticated by one-time state/PKCE rather than the SOL cookie.
   if (await handleGoogleOAuthCallback(request, response)) return;
 
   if (request.method === "GET" && path === "/") {
@@ -114,6 +117,10 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
   }
   if (request.method === "GET" && path === "/whatsapp") {
     sendHtml(response, 200, renderWhatsappPage());
+    return;
+  }
+  if (request.method === "GET" && path === "/sol-whatsapp") {
+    sendHtml(response, 200, renderSolWhatsappPage());
     return;
   }
   if (request.method === "GET" && path === "/calendar") {
@@ -140,12 +147,12 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     sendJson(response, 200, {
       name: "SOL",
       architecture: "family-first modular monolith",
-      version: "0.4.0",
+      version: "0.5.0",
       database,
       aiProvider: "codex",
       sources: ["whatsapp", "google_calendar"],
+      interfaces: ["web", "sol_whatsapp"],
       plannedSources: ["home_assistant", "mercadolibre"],
-      plannedInterfaces: ["sol_whatsapp"],
     });
     return;
   }
@@ -213,6 +220,11 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     const principal = await principalFor(request, response);
     if (!principal) return;
     if (await handleAiApi(path, request, response, principal)) return;
+  }
+  if (path.startsWith("/v1/sol-whatsapp")) {
+    const principal = await principalFor(request, response);
+    if (!principal) return;
+    if (await handleSolWhatsappApi(path, request, response, principal)) return;
   }
   if (path.startsWith("/v1/whatsapp/")) {
     const principal = await principalFor(request, response);
@@ -374,6 +386,7 @@ async function shutdown(signal: string): Promise<void> {
   outboxDispatcher.stop();
   calendarScheduler.stop();
   executiveScheduler.stop();
+  unregisterSolWhatsappDelivery();
   unregisterExecutiveProcessor();
   unregisterCandidateProcessor();
   await whatsappManager.stopAll().catch(() => undefined);
