@@ -6,8 +6,9 @@ The order is intentionally dependency-driven rather than feature-driven.
 
 - [x] Private repository initialized
 - [x] TypeScript/pnpm modular-monolith scaffold
-- [x] PostgreSQL-first local infrastructure
-- [x] Native Windows PostgreSQL setup/check workflow; no Docker/WSL/Hyper-V requirement
+- [x] Standard PostgreSQL-first infrastructure
+- [x] Neon-managed PostgreSQL profile with secure local `DATABASE_URL` configuration
+- [x] Native Windows PostgreSQL fallback; no Docker/WSL/Hyper-V requirement
 - [x] Redis removed until a demonstrated workload requires it
 - [x] pgvector deferred to an optional semantic-search migration
 - [x] Household/member/source-account data model
@@ -28,6 +29,9 @@ The order is intentionally dependency-driven rather than feature-driven.
 - [x] Multi-account source-account API with personal/shared ownership
 - [x] Unit tests for core visibility boundaries
 - [x] Durable event outbox storage and transactional writes
+- [x] Event-driven outbox wakeups through PostgreSQL `NOTIFY`
+- [x] Slow outbox recovery reconciliation instead of high-frequency polling
+- [x] Small/short-lived database pool for scale-to-zero compatibility
 - [x] Localhost-first pre-deployment security default
 
 ## Phase 2 — Codex reasoning adapter ✅
@@ -91,6 +95,7 @@ The order is intentionally dependency-driven rather than feature-driven.
 - [x] Schedule-conflict detection
 - [x] Persisted briefs reusable by future delivery channels
 - [x] Integrated `/calendar` and `/executive` UI
+- [x] Sparse Calendar/executive reconciliation defaults for managed scale-to-zero PostgreSQL
 
 ### Phase 4 follow-ups
 
@@ -154,7 +159,7 @@ The order is intentionally dependency-driven rather than feature-driven.
 Before SOL is intentionally exposed beyond localhost:
 
 - [ ] Register SOL Core as an always-on Windows service on the target host
-- [ ] Automated native PostgreSQL backup/restore workflow
+- [ ] Automated PostgreSQL backup/restore workflow for Neon and local profiles
 - [ ] HTTPS/reverse-proxy deployment profile
 - [ ] Login throttling / abuse controls
 - [ ] Session/device management UI
