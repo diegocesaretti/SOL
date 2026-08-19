@@ -153,17 +153,32 @@ The order is intentionally dependency-driven rather than feature-driven.
 - [ ] Automation rules and richer action-approval views
 - [ ] Daily/nightly Life → Knowledge consolidator to populate facts/relations/projects automatically
 
-## Planned first-class connectors
+## First-class connector — Home Assistant ✅ read-only core
 
-### Home Assistant
+- [x] Household Home Assistant `source_account` with Long-Lived Access Token
+- [x] AES-256-GCM token encryption using a SOL-host-only key
+- [x] REST `/api/states` entity discovery
+- [x] Explicit per-entity source selection
+- [x] `snapshot` vs `changes` persistence modes
+- [x] Numeric `sensor.*` discovery defaults to snapshot-only
+- [x] WebSocket authentication + `state_changed` subscription
+- [x] In-memory filtering before PostgreSQL for unselected entities
+- [x] Current-state reconciliation after SOL restart without inventing missed transitions
+- [x] Selected state changes represented as family Life/source items
+- [x] `/home-assistant` setup/entity-selection UI
+- [x] Separate future `selected_for_control` / control-grant model; no control endpoint yet
+- [x] Automatic reconnect with exponential backoff
 
-- [ ] Entity/device state ingestion
-- [ ] Presence, alarms and meaningful state-change events
-- [ ] Sensor/energy context where useful
-- [ ] Separate read permissions from control permissions
-- [ ] Audited actions with stronger approval for risky controls
+### Home Assistant follow-ups
 
-### Mercado Libre API
+- [ ] Real Home Assistant integration test on the target SOL host
+- [ ] Expose selected current HA state through SOL's permission-filtered reasoning context
+- [ ] Meaningful-domain policies for presence/alarm/energy summaries
+- [ ] Per-member read visibility for sensitive presence/security entities
+- [ ] Explicit audited control actions after per-entity/service grants
+- [ ] Stronger approvals for security/lock/alarm/door actions
+
+## Planned first-class connector — Mercado Libre API
 
 - [ ] OAuth/account connector
 - [ ] Orders/sales ingestion
@@ -172,7 +187,7 @@ The order is intentionally dependency-driven rather than feature-driven.
 - [ ] Business-scoped knowledge/projects
 - [ ] Explicitly authorized listing/reply/stock/price actions
 
-### Other sources
+## Other planned sources
 
 - [ ] Gmail
 - [ ] Google Drive/files
