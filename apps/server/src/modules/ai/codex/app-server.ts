@@ -30,6 +30,7 @@ export class CodexAppServerError extends Error {
 
 export class CodexAppServerClient {
   private process?: ChildProcessWithoutNullStreams;
+  private initialized = false;
   private startPromise?: Promise<void>;
   private nextId = 1;
   private readonly pending = new Map<number, PendingRequest>();
@@ -44,17 +45,25 @@ export class CodexAppServerClient {
     return Boolean(this.process && !this.process.killed && this.process.exitCode === null);
   }
 
+  get ready(): boolean {
+    return this.running && this.initialized;
+  }
+
   async start(): Promise<void> {
-    if (this.running) return;
-    if (!this.startPromise) {
-      this.startPromise = this.startProcess().finally(() => {
-        this.startPromise = undefined;
-      });
+    if (this.startPromise) {
+      await this.startPromise;
+      return;
     }
+    if (this.ready) return;
+
+    this.startPromise = this.startProcess().finally(() => {
+      this.startPromise = undefined;
+    });
     await this.startPromise;
   }
 
   private async startProcess(): Promise<void> {
+    this.initialized = false;
     const child = spawn(this.options.command, ["app-server"], {
       cwd: this.options.cwd,
       env: this.options.env ?? process.env,
@@ -65,6 +74,7 @@ export class CodexAppServerClient {
     child.on("error", (error) => this.handleProcessFailure(error));
     child.on("exit", (code, signal) => {
       if (this.process === child) this.process = undefined;
+      this.initialized = false;
       this.rejectAllPending(
         new CodexAppServerError(
           `Codex app-server exited (code=${String(code)}, signal=${String(signal)})`,
@@ -80,37 +90,43 @@ export class CodexAppServerClient {
     const lines = readline.createInterface({ input: child.stdout });
     lines.on("line", (line) => this.handleLine(line));
 
-    await new Promise<void>((resolve, reject) => {
-      const onSpawn = () => {
-        cleanup();
-        resolve();
-      };
-      const onError = (error: Error) => {
-        cleanup();
-        reject(error);
-      };
-      const cleanup = () => {
-        child.off("spawn", onSpawn);
-        child.off("error", onError);
-      };
-      child.once("spawn", onSpawn);
-      child.once("error", onError);
-    }).catch((error) => {
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const onSpawn = () => {
+          cleanup();
+          resolve();
+        };
+        const onError = (error: Error) => {
+          cleanup();
+          reject(error);
+        };
+        const cleanup = () => {
+          child.off("spawn", onSpawn);
+          child.off("error", onError);
+        };
+        child.once("spawn", onSpawn);
+        child.once("error", onError);
+      });
+
+      await this.requestRaw("initialize", {
+        clientInfo: {
+          name: "sol_core",
+          title: "SOL Family Assistant",
+          version: "0.2.0",
+        },
+      });
+      this.notifyRaw("initialized", {});
+      this.initialized = true;
+    } catch (error) {
+      this.initialized = false;
+      if (this.process === child) this.process = undefined;
+      if (!child.killed) child.kill("SIGTERM");
       throw new CodexAppServerError(
-        `Unable to start '${this.options.command} app-server': ${
+        `Unable to initialize '${this.options.command} app-server': ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
-    });
-
-    await this.requestRaw("initialize", {
-      clientInfo: {
-        name: "sol_core",
-        title: "SOL Family Assistant",
-        version: "0.2.0",
-      },
-    });
-    this.notifyRaw("initialized", {});
+    }
   }
 
   async request<TResult = unknown>(method: string, params?: unknown): Promise<TResult> {
@@ -161,8 +177,9 @@ export class CodexAppServerClient {
 
   async stop(): Promise<void> {
     const child = this.process;
-    if (!child) return;
+    this.initialized = false;
     this.process = undefined;
+    if (!child) return;
     child.kill("SIGTERM");
     this.rejectAllPending(new CodexAppServerError("Codex app-server stopped"));
   }
@@ -224,6 +241,7 @@ export class CodexAppServerClient {
   }
 
   private handleProcessFailure(error: Error): void {
+    this.initialized = false;
     this.rejectAllPending(
       new CodexAppServerError(`Codex app-server process error: ${error.message}`),
     );
