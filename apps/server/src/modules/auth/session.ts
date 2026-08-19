@@ -6,6 +6,9 @@ import { verifyPassword } from "./password.js";
 
 export const SESSION_COOKIE = "sol_session";
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const DUMMY_PASSWORD_HASH = `scrypt$${Buffer.alloc(16, 1).toString("base64url")}$${Buffer.alloc(64, 2).toString("base64url")}`;
+
 export interface AuthPrincipal {
   householdId: string;
   memberId: string;
@@ -61,7 +64,7 @@ export async function loginMember(
   password: string,
 ): Promise<{ principal: AuthPrincipal; token: string; maxAgeSeconds: number } | null> {
   const normalizedLogin = loginName.trim();
-  if (!normalizedLogin || typeof password !== "string") return null;
+  if (!UUID_PATTERN.test(householdId) || !normalizedLogin || !password) return null;
 
   const result = await db.query<{
     member_id: string;
@@ -88,7 +91,12 @@ export async function loginMember(
   );
 
   const row = result.rows[0];
-  if (!row || !(await verifyPassword(password, row.password_hash))) return null;
+  if (!row) {
+    // Keep the expensive password check on failed usernames too, reducing timing leakage.
+    await verifyPassword(password, DUMMY_PASSWORD_HASH);
+    return null;
+  }
+  if (!(await verifyPassword(password, row.password_hash))) return null;
 
   const token = randomBytes(32).toString("base64url");
   const maxAgeSeconds = config.sessionDays * 24 * 60 * 60;
