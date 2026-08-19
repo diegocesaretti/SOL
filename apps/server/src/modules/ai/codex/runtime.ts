@@ -8,6 +8,8 @@ import { CodexProvider } from "./provider.js";
 // session. File storage is deliberate here: CODEX_HOME is private, gitignored, and
 // can later be mounted/persisted explicitly when SOL moves to a server/container.
 mkdirSync(config.codexHome, { recursive: true, mode: 0o700 });
+mkdirSync(config.codexWorkingDirectory, { recursive: true, mode: 0o700 });
+
 const codexConfigPath = join(config.codexHome, "config.toml");
 if (!existsSync(codexConfigPath)) {
   writeFileSync(
