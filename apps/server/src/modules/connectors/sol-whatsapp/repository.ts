@@ -152,28 +152,46 @@ export async function verifyBindingChallenge(input: {
   primaryJid: string;
   alternateJid?: string;
 }): Promise<SolWhatsappBinding | null> {
-  const result = await db.query<BindingRow>(
-    `UPDATE sol_whatsapp_member_bindings b
-     SET primary_jid = $3,
-         alternate_jid = NULLIF($4, ''),
-         verified_at = now(),
-         verification_hash = NULL,
-         verification_expires_at = NULL,
-         disabled_at = NULL,
-         last_seen_at = now(),
-         updated_at = now()
-     FROM members m
-     WHERE b.source_account_id = $1
-       AND b.verification_hash = $2
-       AND b.verification_expires_at > now()
-       AND m.id = b.member_id
-       AND m.status = 'active'
-     RETURNING b.source_account_id, b.member_id, m.display_name, m.role::text AS role,
-               b.primary_jid, b.alternate_jid, b.verified_at,
-               b.verification_expires_at, b.disabled_at`,
-    [input.sourceAccountId, input.verificationHash, input.primaryJid, input.alternateJid ?? ""],
-  );
-  return result.rows[0] ? mapBinding(result.rows[0]) : null;
+  try {
+    const result = await db.query<BindingRow>(
+      `UPDATE sol_whatsapp_member_bindings b
+       SET primary_jid = $3,
+           alternate_jid = NULLIF($4, ''),
+           verified_at = now(),
+           verification_hash = NULL,
+           verification_expires_at = NULL,
+           disabled_at = NULL,
+           last_seen_at = now(),
+           updated_at = now()
+       FROM members m
+       WHERE b.source_account_id = $1
+         AND b.verification_hash = $2
+         AND b.verification_expires_at > now()
+         AND m.id = b.member_id
+         AND m.status = 'active'
+         AND NOT EXISTS (
+           SELECT 1
+           FROM sol_whatsapp_member_bindings other
+           WHERE other.source_account_id = b.source_account_id
+             AND other.member_id <> b.member_id
+             AND other.verified_at IS NOT NULL
+             AND other.disabled_at IS NULL
+             AND (
+               other.primary_jid = $3 OR other.alternate_jid = $3 OR
+               (NULLIF($4, '') IS NOT NULL AND
+                (other.primary_jid = NULLIF($4, '') OR other.alternate_jid = NULLIF($4, '')))
+             )
+         )
+       RETURNING b.source_account_id, b.member_id, m.display_name, m.role::text AS role,
+                 b.primary_jid, b.alternate_jid, b.verified_at,
+                 b.verification_expires_at, b.disabled_at`,
+      [input.sourceAccountId, input.verificationHash, input.primaryJid, input.alternateJid ?? ""],
+    );
+    return result.rows[0] ? mapBinding(result.rows[0]) : null;
+  } catch (error) {
+    if ((error as { code?: string }).code === "23505") return null;
+    throw error;
+  }
 }
 
 export async function resolveBindingByJids(
@@ -200,15 +218,28 @@ export async function refreshBindingJids(
   primaryJid: string,
   alternateJid?: string,
 ): Promise<void> {
-  await db.query(
-    `UPDATE sol_whatsapp_member_bindings
-     SET primary_jid = $3,
-         alternate_jid = COALESCE(NULLIF($4, ''), alternate_jid),
-         last_seen_at = now(), updated_at = now()
-     WHERE source_account_id = $1 AND member_id = $2
-       AND verified_at IS NOT NULL AND disabled_at IS NULL`,
-    [sourceAccountId, memberId, primaryJid, alternateJid ?? ""],
-  );
+  try {
+    await db.query(
+      `UPDATE sol_whatsapp_member_bindings
+       SET primary_jid = $3,
+           alternate_jid = COALESCE(NULLIF($4, ''), alternate_jid),
+           last_seen_at = now(), updated_at = now()
+       WHERE source_account_id = $1 AND member_id = $2
+         AND verified_at IS NOT NULL AND disabled_at IS NULL`,
+      [sourceAccountId, memberId, primaryJid, alternateJid ?? ""],
+    );
+  } catch (error) {
+    if ((error as { code?: string }).code === "23505") {
+      await db.query(
+        `UPDATE sol_whatsapp_member_bindings
+         SET last_seen_at = now(), updated_at = now()
+         WHERE source_account_id = $1 AND member_id = $2`,
+        [sourceAccountId, memberId],
+      );
+      return;
+    }
+    throw error;
+  }
 }
 
 export async function revokeSolWhatsappBinding(
