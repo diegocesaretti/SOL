@@ -14,6 +14,8 @@ import {
 } from "./modules/auth/session.js";
 import { handleAiApi } from "./modules/ai/routes.js";
 import { codexAppServer } from "./modules/ai/codex/runtime.js";
+import { handleWhatsappApi } from "./modules/connectors/whatsapp/routes.js";
+import { whatsappManager } from "./modules/connectors/whatsapp/manager.js";
 import {
   createMember,
   MemberValidationError,
@@ -28,6 +30,7 @@ import {
   listSourceAccounts,
   SourceAccountValidationError,
 } from "./modules/identity/source-accounts.js";
+import { registerCandidateProcessor } from "./modules/knowledge/candidate-processor.js";
 import {
   AlreadyConfiguredError,
   ValidationError,
@@ -36,8 +39,10 @@ import {
 } from "./modules/onboarding/service.js";
 import { renderAiPage } from "./ui/ai.js";
 import { renderOnboardingPage } from "./ui/onboarding.js";
+import { renderWhatsappPage } from "./ui/whatsapp.js";
 
 export const eventBus = new InMemoryEventBus();
+const unregisterCandidateProcessor = registerCandidateProcessor(eventBus);
 const outboxDispatcher = new OutboxDispatcher(eventBus, config.outboxPollMs);
 
 function pathname(request: IncomingMessage): string {
@@ -100,6 +105,11 @@ async function handleRequest(
     return;
   }
 
+  if (request.method === "GET" && path === "/whatsapp") {
+    sendHtml(response, 200, renderWhatsappPage());
+    return;
+  }
+
   if (request.method === "GET" && path === "/health") {
     const database = await checkDatabase();
     sendJson(response, database ? 200 : 503, {
@@ -115,9 +125,10 @@ async function handleRequest(
     sendJson(response, 200, {
       name: "SOL",
       architecture: "family-first modular monolith",
-      version: "0.2.0",
+      version: "0.3.0",
       database,
       aiProvider: "codex",
+      sources: ["whatsapp"],
     });
     return;
   }
@@ -213,6 +224,12 @@ async function handleRequest(
     if (await handleAiApi(path, request, response, principal)) return;
   }
 
+  if (path.startsWith("/v1/whatsapp/")) {
+    const principal = await principalFor(request, response);
+    if (!principal) return;
+    if (await handleWhatsappApi(path, request, response, principal)) return;
+  }
+
   if (path === "/v1/source-accounts") {
     const principal = await principalFor(request, response);
     if (!principal) return;
@@ -243,6 +260,13 @@ async function handleRequest(
         shared?: boolean;
       }>(request, response);
       if (!input) return;
+
+      if (input.provider?.trim().toLowerCase() === "whatsapp") {
+        sendJson(response, 400, {
+          error: "Use /v1/whatsapp/accounts so WhatsApp session policy is applied",
+        });
+        return;
+      }
 
       const manager = principal.role === "owner" || principal.role === "adult";
       const ownerMemberId = manager
@@ -349,6 +373,9 @@ const server = createServer((request, response) => {
 server.listen(config.port, config.host, () => {
   console.log(`SOL Core listening on http://${config.host}:${config.port}`);
   outboxDispatcher.start();
+  void whatsappManager.startLinkedAccounts().catch((error) => {
+    console.error("WhatsApp autostart failed", error);
+  });
   if (config.host !== "127.0.0.1" && config.host !== "localhost") {
     console.warn(
       "SOL is listening beyond localhost. Use HTTPS and review member authentication before exposing it broadly.",
@@ -359,6 +386,8 @@ server.listen(config.port, config.host, () => {
 async function shutdown(signal: string): Promise<void> {
   console.log(`Received ${signal}; shutting down SOL Core`);
   outboxDispatcher.stop();
+  unregisterCandidateProcessor();
+  await whatsappManager.stopAll().catch(() => undefined);
   await codexAppServer.stop().catch(() => undefined);
   server.close(async () => {
     await closeDatabase();
