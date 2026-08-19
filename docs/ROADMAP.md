@@ -2,7 +2,7 @@
 
 The order is intentionally dependency-driven rather than feature-driven.
 
-## Phase 0 — Foundation (current)
+## Phase 0 — Foundation ✅
 
 - [x] Private repository initialized
 - [x] TypeScript/pnpm modular-monolith scaffold
@@ -15,22 +15,26 @@ The order is intentionally dependency-driven rather than feature-driven.
 - [x] Provenance/source-link schema
 - [x] Action audit schema
 
-## Phase 1 — Persistence + onboarding
+## Phase 1 — Persistence + onboarding ✅
 
-- [ ] Add database client and migration runner
-- [ ] Repositories/services for household, member and source account
-- [ ] First-run household/member onboarding API
-- [ ] Authentication/session for SOL UI
-- [ ] Unit tests for visibility boundaries
-- [ ] Durable event outbox
+- [x] PostgreSQL client and explicit migration runner
+- [x] Repositories/services for household, member and source account
+- [x] First-run household/member onboarding API + UI
+- [x] Persistent member authentication/session for SOL UI
+- [x] Additional household-member creation with role policy
+- [x] Multi-account source-account API with personal/shared ownership
+- [x] Unit tests for core visibility boundaries
+- [x] Durable event outbox storage and transactional writes
+- [x] Localhost-first pre-deployment security default
 
-## Phase 2 — Codex reasoning adapter
+## Phase 2 — Codex reasoning adapter (next)
 
 - [ ] Implement `CodexProvider` behind `AiProvider`
 - [ ] ChatGPT OAuth/App Server login flow
 - [ ] Connection/status endpoint
 - [ ] Rate-limit/availability awareness
 - [ ] Structured reasoning jobs (classification/consolidation/planning)
+- [ ] Outbox dispatcher into SOL's runtime event bus
 
 ## Phase 3 — First source: WhatsApp
 
@@ -55,12 +59,22 @@ The order is intentionally dependency-driven rather than feature-driven.
 ## Phase 5 — Family UI
 
 - [ ] Responsive web/PWA shell
-- [ ] Household/member management
-- [ ] Per-member source connections
+- [ ] Full household/member management
+- [ ] Per-member source connection screens
 - [ ] Timeline
 - [ ] People/projects views
 - [ ] Privacy/visibility controls
 - [ ] Automations and action approvals
+
+## Deployment hardening
+
+Before SOL is intentionally exposed beyond localhost:
+
+- [ ] HTTPS/reverse-proxy deployment profile
+- [ ] Login throttling / abuse controls
+- [ ] Session/device management UI
+- [ ] Backup/restore strategy
+- [ ] Secret-store integration
 
 ## Later connectors
 
