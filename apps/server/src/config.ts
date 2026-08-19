@@ -36,6 +36,8 @@ function optionalEnv(name: string): string | undefined {
   return value || undefined;
 }
 
+const codexHome = optionalEnv("SOL_CODEX_HOME") ?? resolve(repoRoot, ".sol", "codex");
+
 export const config = {
   repoRoot,
   host: process.env.SOL_HOST ?? "127.0.0.1",
@@ -50,8 +52,11 @@ export const config = {
   codexBin: process.env.SOL_CODEX_BIN?.trim() || "codex",
   // SOL gets a dedicated Codex profile by default so logging SOL in/out does not
   // disturb the developer's normal Codex CLI/IDE session on the same machine.
-  codexHome: optionalEnv("SOL_CODEX_HOME") ?? resolve(repoRoot, ".sol", "codex"),
-  codexWorkingDirectory: optionalEnv("SOL_CODEX_CWD") ?? repoRoot,
+  codexHome,
+  // Reasoning runs from an empty SOL-owned directory by default, avoiding accidental
+  // pickup of repository AGENTS.md/instructions. Override only deliberately.
+  codexWorkingDirectory:
+    optionalEnv("SOL_CODEX_CWD") ?? resolve(codexHome, "workspace"),
   codexRequestTimeoutMs: integerEnv("SOL_CODEX_REQUEST_TIMEOUT_MS", 30_000),
   outboxPollMs: integerEnv("SOL_OUTBOX_POLL_MS", 2_000),
 } as const;
