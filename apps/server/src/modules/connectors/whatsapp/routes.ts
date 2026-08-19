@@ -82,6 +82,23 @@ function publicAccount(
   };
 }
 
+async function waitForPairingReady(sourceAccountId: string): Promise<void> {
+  await whatsappManager.start(sourceAccountId);
+  const deadline = Date.now() + 20_000;
+  while (Date.now() < deadline) {
+    const status = whatsappManager.getStatus(sourceAccountId);
+    if (status.state === "qr") return;
+    if (status.state === "open") {
+      throw new Error("This WhatsApp account is already linked");
+    }
+    if (status.state === "error" || status.state === "logged_out") {
+      throw new Error(status.lastError || "WhatsApp connection is not ready for pairing");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  }
+  throw new Error("WhatsApp did not become ready for pairing code; try QR linking instead");
+}
+
 export async function handleWhatsappApi(
   path: string,
   request: IncomingMessage,
@@ -205,6 +222,7 @@ export async function handleWhatsappApi(
     const body = await readJson<{ phoneNumber?: string }>(request, response);
     if (!body) return true;
     try {
+      await waitForPairingReady(account.id);
       const runtime = await whatsappManager.requestPairingCode(
         account.id,
         body.phoneNumber ?? "",
