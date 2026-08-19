@@ -9,7 +9,7 @@ export function renderOnboardingPage(): string {
     :root { color-scheme: light dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
     * { box-sizing: border-box; }
     body { margin: 0; min-height: 100vh; background: Canvas; color: CanvasText; }
-    main { width: min(720px, calc(100% - 32px)); margin: 0 auto; padding: 64px 0; }
+    main { width: min(760px, calc(100% - 32px)); margin: 0 auto; padding: 64px 0; }
     .brand { font-size: 14px; font-weight: 800; letter-spacing: .18em; opacity: .7; }
     h1 { margin: 12px 0 8px; font-size: clamp(36px, 7vw, 64px); letter-spacing: -.04em; }
     h2 { margin: 0 0 8px; font-size: 24px; }
@@ -18,16 +18,19 @@ export function renderOnboardingPage(): string {
     .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
     label { display: grid; gap: 7px; font-size: 13px; font-weight: 700; }
     label.full { grid-column: 1 / -1; }
-    input { width: 100%; padding: 12px 14px; border-radius: 12px; border: 1px solid color-mix(in srgb, CanvasText 22%, transparent); background: Canvas; color: CanvasText; font: inherit; }
+    input, select { width: 100%; padding: 12px 14px; border-radius: 12px; border: 1px solid color-mix(in srgb, CanvasText 22%, transparent); background: Canvas; color: CanvasText; font: inherit; }
     button { margin-top: 22px; padding: 12px 18px; border: 0; border-radius: 999px; font: inherit; font-weight: 800; cursor: pointer; background: CanvasText; color: Canvas; }
+    button.secondary { background: transparent; color: CanvasText; border: 1px solid color-mix(in srgb, CanvasText 20%, transparent); }
     button:disabled { opacity: .45; cursor: wait; }
     .status { margin-top: 14px; min-height: 20px; font-size: 14px; }
     .error { color: #d33; }
     .muted { opacity: .62; }
     .pill { display: inline-flex; align-items: center; gap: 8px; padding: 7px 11px; border-radius: 999px; border: 1px solid color-mix(in srgb, CanvasText 16%, transparent); font-size: 13px; }
     .dot { width: 8px; height: 8px; border-radius: 50%; background: #2ca44f; }
-    .household { display: flex; justify-content: space-between; gap: 20px; align-items: center; padding: 16px 0; border-top: 1px solid color-mix(in srgb, CanvasText 12%, transparent); }
-    .household:first-of-type { border-top: 0; }
+    .row { display: flex; justify-content: space-between; gap: 20px; align-items: center; padding: 16px 0; border-top: 1px solid color-mix(in srgb, CanvasText 12%, transparent); }
+    .row:first-of-type { border-top: 0; }
+    .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+    .actions button { margin-top: 12px; }
     @media (max-width: 620px) { main { padding: 36px 0; } .grid { grid-template-columns: 1fr; } label.full { grid-column: auto; } .card { padding: 22px; } }
   </style>
 </head>
@@ -35,7 +38,7 @@ export function renderOnboardingPage(): string {
   <main>
     <div class="brand">SOL</div>
     <h1>Tu hogar, conectado.</h1>
-    <p id="intro">Configurando el núcleo familiar de SOL…</p>
+    <p id="intro">Iniciando SOL…</p>
     <section class="card" id="app"><p class="muted">Cargando estado del sistema…</p></section>
   </main>
   <script>
@@ -48,32 +51,20 @@ export function renderOnboardingPage(): string {
       })[char]);
     }
 
-    function configuredView(state) {
-      intro.textContent = 'SOL ya tiene un hogar configurado. Las próximas integraciones se sumarán a este mismo núcleo.';
-      const households = state.households.map((household) => \`
-        <div class="household">
-          <div>
-            <strong>\${escapeHtml(household.name)}</strong><br />
-            <span class="muted">\${escapeHtml(household.timezone)} · \${household.memberCount} miembro(s)</span>
-          </div>
-          <span class="pill"><span class="dot"></span>Activo</span>
-        </div>
-      \`).join('');
-      app.innerHTML = \`
-        <h2>SOL está listo</h2>
-        <p>La identidad familiar y la base persistente ya están inicializadas.</p>
-        \${households}
-        <p class="muted">Siguiente etapa: autenticación de Codex y gestión de fuentes.</p>
-      \`;
+    async function api(path, options = {}) {
+      const response = await fetch(path, { cache: 'no-store', ...options });
+      let body = {};
+      try { body = await response.json(); } catch {}
+      return { response, body };
     }
 
     function onboardingView() {
-      intro.textContent = 'Primero definimos el hogar y a la primera persona administradora. Después iremos conectando fuentes y miembros.';
+      intro.textContent = 'Primero definimos el hogar y a la primera persona administradora. Después sumamos miembros y fuentes.';
       const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
       const locale = navigator.language || 'es-AR';
       app.innerHTML = \`
         <h2>Crear hogar</h2>
-        <p>Esto crea el espacio familiar base. No conecta todavía WhatsApp, Google ni Codex.</p>
+        <p>La cuenta owner administra SOL. Los demás miembros tendrán luego su propio acceso y sus propias fuentes.</p>
         <form id="setup-form">
           <div class="grid">
             <label class="full">Nombre del hogar
@@ -81,6 +72,12 @@ export function renderOnboardingPage(): string {
             </label>
             <label>Tu nombre
               <input name="ownerName" autocomplete="name" placeholder="Nombre" required maxlength="120" />
+            </label>
+            <label>Usuario
+              <input name="ownerLogin" autocomplete="username" placeholder="usuario" required minlength="3" maxlength="40" pattern="[A-Za-z0-9._-]+" />
+            </label>
+            <label>Contraseña
+              <input name="ownerPassword" type="password" autocomplete="new-password" required minlength="8" maxlength="256" />
             </label>
             <label>Zona horaria
               <input name="timezone" value="\${escapeHtml(timezone)}" required maxlength="100" />
@@ -103,13 +100,12 @@ export function renderOnboardingPage(): string {
 
         const data = Object.fromEntries(new FormData(form).entries());
         try {
-          const response = await fetch('/v1/onboarding', {
+          const { response, body } = await api('/v1/onboarding', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify(data),
           });
-          const result = await response.json();
-          if (!response.ok) throw new Error(result.error || 'No se pudo crear el hogar');
+          if (!response.ok) throw new Error(body.error || 'No se pudo crear el hogar');
           await load();
         } catch (error) {
           status.className = 'status error';
@@ -119,16 +115,100 @@ export function renderOnboardingPage(): string {
       });
     }
 
+    function loginView(state) {
+      intro.textContent = 'SOL reconoce a cada miembro del hogar por separado y aplica su contexto y permisos antes de consultar a la IA.';
+      const options = state.households.map((household) =>
+        \`<option value="\${escapeHtml(household.id)}">\${escapeHtml(household.name)}</option>\`
+      ).join('');
+
+      app.innerHTML = \`
+        <h2>Entrar a SOL</h2>
+        <form id="login-form">
+          <div class="grid">
+            <label class="full">Hogar
+              <select name="householdId">\${options}</select>
+            </label>
+            <label>Usuario
+              <input name="loginName" autocomplete="username" required maxlength="40" />
+            </label>
+            <label>Contraseña
+              <input name="password" type="password" autocomplete="current-password" required maxlength="256" />
+            </label>
+          </div>
+          <button type="submit">Entrar</button>
+          <div class="status" id="status"></div>
+        </form>
+      \`;
+
+      const form = document.getElementById('login-form');
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const button = form.querySelector('button');
+        const status = document.getElementById('status');
+        button.disabled = true;
+        status.textContent = 'Entrando…';
+        status.className = 'status';
+
+        const data = Object.fromEntries(new FormData(form).entries());
+        const { response, body } = await api('/v1/auth/login', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(data),
+        });
+        if (!response.ok) {
+          status.className = 'status error';
+          status.textContent = response.status === 401 ? 'Usuario o contraseña incorrectos.' : (body.error || 'No se pudo iniciar sesión');
+          button.disabled = false;
+          return;
+        }
+        await load();
+      });
+    }
+
+    async function homeView(state, member) {
+      const household = state.households.find((item) => item.id === member.householdId);
+      intro.textContent = 'Un solo núcleo familiar, con contexto y privacidad por miembro.';
+      const membersResult = await api('/v1/households/' + encodeURIComponent(member.householdId) + '/members');
+      const members = membersResult.response.ok ? membersResult.body.members : [];
+      const memberRows = members.map((item) => \`
+        <div class="row">
+          <div><strong>\${escapeHtml(item.displayName)}</strong><br><span class="muted">\${escapeHtml(item.role)}\${item.loginName ? ' · @' + escapeHtml(item.loginName) : ''}</span></div>
+          <span class="pill"><span class="dot"></span>\${escapeHtml(item.status)}</span>
+        </div>
+      \`).join('');
+
+      app.innerHTML = \`
+        <h2>\${escapeHtml(household?.name || 'SOL Home')}</h2>
+        <p>Sesión: <strong>\${escapeHtml(member.displayName)}</strong> · \${escapeHtml(member.role)}</p>
+        <div class="row"><div><strong>Miembros</strong><br><span class="muted">Identidad familiar persistente</span></div><span class="pill">\${members.length}</span></div>
+        \${memberRows}
+        <div class="row"><div><strong>Fuentes</strong><br><span class="muted">WhatsApp, Google, Calendar, HA…</span></div><span class="pill">Próxima etapa</span></div>
+        <div class="row"><div><strong>AI Engine</strong><br><span class="muted">Codex OAuth / ChatGPT</span></div><span class="pill">Pendiente</span></div>
+        <div class="actions"><button class="secondary" id="logout">Cerrar sesión</button></div>
+      \`;
+
+      document.getElementById('logout').addEventListener('click', async () => {
+        await api('/v1/auth/logout', { method: 'POST' });
+        await load();
+      });
+    }
+
     async function load() {
       try {
-        const response = await fetch('/v1/onboarding', { cache: 'no-store' });
-        const state = await response.json();
-        if (!response.ok) throw new Error(state.error || 'No se pudo consultar SOL');
-        if (state.configured) configuredView(state);
-        else onboardingView();
+        const stateResult = await api('/v1/onboarding');
+        if (!stateResult.response.ok) throw new Error(stateResult.body.error || 'No se pudo consultar SOL');
+        const state = stateResult.body;
+        if (!state.configured) {
+          onboardingView();
+          return;
+        }
+
+        const me = await api('/v1/auth/me');
+        if (me.response.ok) await homeView(state, me.body.member);
+        else loginView(state);
       } catch (error) {
         intro.textContent = 'SOL no pudo consultar su base de datos.';
-        app.innerHTML = \`<h2>Base no disponible</h2><p class="error">\${escapeHtml(error.message)}</p><p class="muted">Verificá PostgreSQL y ejecutá las migraciones.</p>\`;
+        app.innerHTML = \`<h2>Base no disponible</h2><p class="error">\${escapeHtml(error.message)}</p><p class="muted">Verificá PostgreSQL y ejecutá pnpm db:migrate.</p>\`;
       }
     }
 
