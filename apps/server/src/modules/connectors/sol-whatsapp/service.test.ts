@@ -24,6 +24,6 @@ test("recognizes agenda and creation intents", () => {
   assert.deepEqual(parseAssistantIntent("Recordame comprar filtros mañana"), { kind: "create" });
 });
 
-test("ordinary questions remain read-only conversation requests", () => {
-  assert.deepEqual(parseAssistantIntent("¿Cuántos pendientes tengo esta semana?"), { kind: "question" });
+test("routes pending-list questions deterministically", () => {
+  assert.deepEqual(parseAssistantIntent("¿Cuántos pendientes tengo esta semana?"), { kind: "pending" });
 });
