@@ -39,7 +39,9 @@ import {
   listSourceAccounts,
   SourceAccountValidationError,
 } from "./modules/identity/source-accounts.js";
+import { handleLifeApi } from "./modules/life/routes.js";
 import { registerCandidateProcessor } from "./modules/knowledge/candidate-processor.js";
+import { handleKnowledgeApi } from "./modules/knowledge/routes.js";
 import {
   AlreadyConfiguredError,
   ValidationError,
@@ -49,6 +51,7 @@ import {
 import { renderAiPage } from "./ui/ai.js";
 import { renderCalendarPage } from "./ui/calendar.js";
 import { renderExecutivePage } from "./ui/executive.js";
+import { renderLifePage } from "./ui/life.js";
 import { renderOnboardingPage } from "./ui/onboarding.js";
 import { renderSolWhatsappPage } from "./ui/sol-whatsapp.js";
 import { renderWhatsappPage } from "./ui/whatsapp.js";
@@ -131,6 +134,10 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     sendHtml(response, 200, renderExecutivePage());
     return;
   }
+  if (request.method === "GET" && path === "/life") {
+    sendHtml(response, 200, renderLifePage());
+    return;
+  }
 
   if (request.method === "GET" && path === "/health") {
     const database = await checkDatabase();
@@ -147,11 +154,12 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     sendJson(response, 200, {
       name: "SOL",
       architecture: "family-first modular monolith",
-      version: "0.5.0",
+      version: "0.6.0",
       database,
       aiProvider: "codex",
       sources: ["whatsapp", "google_calendar"],
       interfaces: ["web", "sol_whatsapp"],
+      views: ["life_timeline", "people", "projects", "executive"],
       plannedSources: ["home_assistant", "mercadolibre"],
     });
     return;
@@ -240,6 +248,16 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     const principal = await principalFor(request, response);
     if (!principal) return;
     if (await handleExecutiveApi(path, request, response, principal)) return;
+  }
+  if (path.startsWith("/v1/life/")) {
+    const principal = await principalFor(request, response);
+    if (!principal) return;
+    if (await handleLifeApi(path, request, response, principal)) return;
+  }
+  if (path.startsWith("/v1/knowledge/")) {
+    const principal = await principalFor(request, response);
+    if (!principal) return;
+    if (await handleKnowledgeApi(path, request, response, principal)) return;
   }
 
   if (path === "/v1/source-accounts") {
