@@ -47,6 +47,7 @@ SOL intentionally does **not** use the developer's normal `~/.codex` login by de
 
 ```text
 CODEX_HOME=<repo>/.sol/codex
+cwd=<repo>/.sol/codex/workspace
 ```
 
 and creates a private `config.toml` containing:
@@ -56,9 +57,14 @@ cli_auth_credentials_store = "file"
 forced_login_method = "chatgpt"
 ```
 
-The `.sol/` directory is gitignored. On platforms that honor POSIX modes SOL creates the directory as `0700` and the config as `0600`. The resulting `auth.json` must still be treated like a password because it contains access tokens.
+The `.sol/` directory is gitignored. On platforms that honor POSIX modes SOL creates private directories as `0700` and the config as `0600`. The resulting `auth.json` must still be treated like a password because it contains access tokens.
 
-This isolation means signing SOL in or out does not intentionally reuse or revoke the ordinary Codex CLI/IDE cache used for development. `SOL_CODEX_HOME` can point to another dedicated persistent location when SOL is moved to a server or container.
+This isolation has two purposes:
+
+- signing SOL in or out does not intentionally reuse/revoke the ordinary Codex CLI/IDE cache used for development;
+- reasoning threads start in an empty SOL-owned workspace, so they do not accidentally load repository `AGENTS.md` or other project-local instruction files.
+
+`SOL_CODEX_HOME` and `SOL_CODEX_CWD` can be overridden when SOL moves to a server/container, but the reasoning working directory should remain isolated unless there is a deliberate reason to expose files.
 
 ## Reasoning security boundary
 
@@ -69,6 +75,7 @@ This isolation means signing SOL in or out does not intentionally reuse or revok
 - no SOL write tools are granted
 - source/context text is wrapped as untrusted data
 - inbound WhatsApp/email/document text is never promoted to tool/system authority
+- concurrent turns are correlated by Codex `turnId` before their output is accepted
 
 This is only one layer. Before future source data reaches the provider, SOL's own household/member visibility filtering must already have removed unauthorized records.
 
