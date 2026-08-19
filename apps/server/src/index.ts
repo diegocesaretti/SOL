@@ -14,17 +14,24 @@ import {
 } from "./modules/auth/session.js";
 import { handleAiApi } from "./modules/ai/routes.js";
 import { codexAppServer } from "./modules/ai/codex/runtime.js";
+import {
+  handleCalendarApi,
+  handleGoogleOAuthCallback,
+} from "./modules/connectors/google-calendar/routes.js";
+import { CalendarSyncScheduler } from "./modules/connectors/google-calendar/scheduler.js";
 import { handleWhatsappApi } from "./modules/connectors/whatsapp/routes.js";
 import { whatsappManager } from "./modules/connectors/whatsapp/manager.js";
+import { handleExecutiveApi } from "./modules/executive/routes.js";
+import {
+  registerExecutiveProposalProcessor,
+} from "./modules/executive/proposals.js";
+import { ExecutiveScheduler } from "./modules/executive/scheduler.js";
 import {
   createMember,
   MemberValidationError,
   type NewMemberRole,
 } from "./modules/identity/members.js";
-import {
-  getOnboardingState,
-  listMembers,
-} from "./modules/identity/repository.js";
+import { getOnboardingState, listMembers } from "./modules/identity/repository.js";
 import {
   createSourceAccount,
   listSourceAccounts,
@@ -38,12 +45,17 @@ import {
   type BootstrapInput,
 } from "./modules/onboarding/service.js";
 import { renderAiPage } from "./ui/ai.js";
+import { renderCalendarPage } from "./ui/calendar.js";
+import { renderExecutivePage } from "./ui/executive.js";
 import { renderOnboardingPage } from "./ui/onboarding.js";
 import { renderWhatsappPage } from "./ui/whatsapp.js";
 
 export const eventBus = new InMemoryEventBus();
 const unregisterCandidateProcessor = registerCandidateProcessor(eventBus);
+const unregisterExecutiveProcessor = registerExecutiveProposalProcessor(eventBus);
 const outboxDispatcher = new OutboxDispatcher(eventBus, config.outboxPollMs);
+const calendarScheduler = new CalendarSyncScheduler(config.calendarSyncMs);
+const executiveScheduler = new ExecutiveScheduler(config.executivePollMs);
 
 function pathname(request: IncomingMessage): string {
   return new URL(request.url ?? "/", "http://sol.local").pathname;
@@ -55,10 +67,7 @@ function requireJson(request: IncomingMessage, response: ServerResponse): boolea
   return false;
 }
 
-async function jsonBody<T>(
-  request: IncomingMessage,
-  response: ServerResponse,
-): Promise<T | null> {
+async function jsonBody<T>(request: IncomingMessage, response: ServerResponse): Promise<T | null> {
   if (!requireJson(request, response)) return null;
   try {
     return await readJsonBody<T>(request);
@@ -89,24 +98,30 @@ function canCreateRole(principal: AuthPrincipal, role: NewMemberRole): boolean {
   return false;
 }
 
-async function handleRequest(
-  request: IncomingMessage,
-  response: ServerResponse,
-): Promise<void> {
+async function handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
   const path = pathname(request);
+
+  // OAuth callback is authenticated by one-time state/PKCE rather than the SOL cookie.
+  if (await handleGoogleOAuthCallback(request, response)) return;
 
   if (request.method === "GET" && path === "/") {
     sendHtml(response, 200, renderOnboardingPage());
     return;
   }
-
   if (request.method === "GET" && path === "/ai") {
     sendHtml(response, 200, renderAiPage());
     return;
   }
-
   if (request.method === "GET" && path === "/whatsapp") {
     sendHtml(response, 200, renderWhatsappPage());
+    return;
+  }
+  if (request.method === "GET" && path === "/calendar") {
+    sendHtml(response, 200, renderCalendarPage());
+    return;
+  }
+  if (request.method === "GET" && path === "/executive") {
+    sendHtml(response, 200, renderExecutivePage());
     return;
   }
 
@@ -125,10 +140,12 @@ async function handleRequest(
     sendJson(response, 200, {
       name: "SOL",
       architecture: "family-first modular monolith",
-      version: "0.3.0",
+      version: "0.4.0",
       database,
       aiProvider: "codex",
-      sources: ["whatsapp"],
+      sources: ["whatsapp", "google_calendar"],
+      plannedSources: ["home_assistant", "mercadolibre"],
+      plannedInterfaces: ["sol_whatsapp"],
     });
     return;
   }
@@ -141,24 +158,12 @@ async function handleRequest(
   if (request.method === "POST" && path === "/v1/onboarding") {
     const input = await jsonBody<BootstrapInput>(request, response);
     if (!input) return;
-
     try {
       const result = await bootstrapHousehold(input);
-      const login = await loginMember(
-        result.household.id,
-        result.owner.loginName,
-        input.ownerPassword,
-      );
+      const login = await loginMember(result.household.id, result.owner.loginName, input.ownerPassword);
       if (!login) throw new Error("Owner session could not be created");
-
-      response.setHeader(
-        "set-cookie",
-        sessionCookie(login.token, login.maxAgeSeconds),
-      );
-      sendJson(response, 201, {
-        household: result.household,
-        member: login.principal,
-      });
+      response.setHeader("set-cookie", sessionCookie(login.token, login.maxAgeSeconds));
+      sendJson(response, 201, { household: result.household, member: login.principal });
     } catch (error) {
       if (error instanceof AlreadyConfiguredError) {
         sendJson(response, 409, { error: error.message });
@@ -174,32 +179,18 @@ async function handleRequest(
   }
 
   if (request.method === "POST" && path === "/v1/auth/login") {
-    const input = await jsonBody<{
-      householdId?: string;
-      loginName?: string;
-      password?: string;
-    }>(request, response);
+    const input = await jsonBody<{ householdId?: string; loginName?: string; password?: string }>(request, response);
     if (!input) return;
-
     if (!input.householdId || !input.loginName || !input.password) {
       sendJson(response, 400, { error: "householdId, loginName and password are required" });
       return;
     }
-
-    const login = await loginMember(
-      input.householdId,
-      input.loginName,
-      input.password,
-    );
+    const login = await loginMember(input.householdId, input.loginName, input.password);
     if (!login) {
       sendJson(response, 401, { error: "invalid_credentials" });
       return;
     }
-
-    response.setHeader(
-      "set-cookie",
-      sessionCookie(login.token, login.maxAgeSeconds),
-    );
+    response.setHeader("set-cookie", sessionCookie(login.token, login.maxAgeSeconds));
     sendJson(response, 200, { member: login.principal });
     return;
   }
@@ -223,11 +214,20 @@ async function handleRequest(
     if (!principal) return;
     if (await handleAiApi(path, request, response, principal)) return;
   }
-
   if (path.startsWith("/v1/whatsapp/")) {
     const principal = await principalFor(request, response);
     if (!principal) return;
     if (await handleWhatsappApi(path, request, response, principal)) return;
+  }
+  if (path.startsWith("/v1/calendar/")) {
+    const principal = await principalFor(request, response);
+    if (!principal) return;
+    if (await handleCalendarApi(path, request, response, principal)) return;
+  }
+  if (path.startsWith("/v1/executive/")) {
+    const principal = await principalFor(request, response);
+    if (!principal) return;
+    if (await handleExecutiveApi(path, request, response, principal)) return;
   }
 
   if (path === "/v1/source-accounts") {
@@ -237,11 +237,7 @@ async function handleRequest(
     if (request.method === "GET") {
       const canSeeAll = principal.role === "owner" || principal.role === "adult";
       sendJson(response, 200, {
-        sourceAccounts: await listSourceAccounts(
-          principal.householdId,
-          principal.memberId,
-          canSeeAll,
-        ),
+        sourceAccounts: await listSourceAccounts(principal.householdId, principal.memberId, canSeeAll),
       });
       return;
     }
@@ -251,7 +247,6 @@ async function handleRequest(
         sendJson(response, 403, { error: "forbidden" });
         return;
       }
-
       const input = await jsonBody<{
         provider?: string;
         label?: string;
@@ -260,21 +255,19 @@ async function handleRequest(
         shared?: boolean;
       }>(request, response);
       if (!input) return;
-
-      if (input.provider?.trim().toLowerCase() === "whatsapp") {
+      const provider = input.provider?.trim().toLowerCase();
+      if (provider === "whatsapp" || provider === "google_calendar") {
         sendJson(response, 400, {
-          error: "Use /v1/whatsapp/accounts so WhatsApp session policy is applied",
+          error: `Use the dedicated /v1/${provider === "whatsapp" ? "whatsapp" : "calendar"}/accounts endpoint`,
         });
         return;
       }
-
       const manager = principal.role === "owner" || principal.role === "adult";
       const ownerMemberId = manager
         ? input.shared
           ? undefined
           : input.ownerMemberId ?? principal.memberId
         : principal.memberId;
-
       try {
         const sourceAccount = await createSourceAccount({
           householdId: principal.householdId,
@@ -301,24 +294,20 @@ async function handleRequest(
   if (membersMatch) {
     const principal = await principalFor(request, response);
     if (!principal) return;
-
     const householdId = membersMatch[1];
     if (!householdId || principal.householdId !== householdId) {
       sendJson(response, 403, { error: "forbidden" });
       return;
     }
-
     if (request.method === "GET") {
       sendJson(response, 200, { members: await listMembers(householdId) });
       return;
     }
-
     if (request.method === "POST") {
       if (!canManageMembers(principal)) {
         sendJson(response, 403, { error: "forbidden" });
         return;
       }
-
       const input = await jsonBody<{
         displayName?: string;
         loginName?: string;
@@ -328,12 +317,10 @@ async function handleRequest(
         timezone?: string;
       }>(request, response);
       if (!input) return;
-
       if (!input.role || !canCreateRole(principal, input.role)) {
         sendJson(response, 403, { error: "role_not_allowed" });
         return;
       }
-
       try {
         const member = await createMember({
           householdId,
@@ -362,17 +349,16 @@ async function handleRequest(
 const server = createServer((request, response) => {
   void handleRequest(request, response).catch((error) => {
     console.error("Unhandled request error", error);
-    if (!response.headersSent) {
-      sendJson(response, 500, { error: "internal_error" });
-    } else if (!response.writableEnded) {
-      response.end();
-    }
+    if (!response.headersSent) sendJson(response, 500, { error: "internal_error" });
+    else if (!response.writableEnded) response.end();
   });
 });
 
 server.listen(config.port, config.host, () => {
   console.log(`SOL Core listening on http://${config.host}:${config.port}`);
   outboxDispatcher.start();
+  calendarScheduler.start();
+  executiveScheduler.start();
   void whatsappManager.startLinkedAccounts().catch((error) => {
     console.error("WhatsApp autostart failed", error);
   });
@@ -386,6 +372,9 @@ server.listen(config.port, config.host, () => {
 async function shutdown(signal: string): Promise<void> {
   console.log(`Received ${signal}; shutting down SOL Core`);
   outboxDispatcher.stop();
+  calendarScheduler.stop();
+  executiveScheduler.stop();
+  unregisterExecutiveProcessor();
   unregisterCandidateProcessor();
   await whatsappManager.stopAll().catch(() => undefined);
   await codexAppServer.stop().catch(() => undefined);
