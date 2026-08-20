@@ -46,7 +46,7 @@ export function renderOnboardingPage(): string {
 <body>
   <main>
     <div class="brand">SOL</div>
-    <h1>Tu hogar, conectado.</h1>
+    <h1>Tu información, organizada.</h1>
     <p id="intro">Iniciando SOL…</p>
     <section class="card" id="app"><p class="muted">Cargando estado del sistema…</p></section>
   </main>
@@ -95,7 +95,7 @@ export function renderOnboardingPage(): string {
   }
 
   function loginView(state) {
-    intro.textContent = 'Cada miembro entra con su identidad. SOL filtra privacidad antes de consultar fuentes o IA.';
+    intro.textContent = 'Cada miembro entra con su identidad. SOL filtra privacidad antes de exponer información por UI, MCP o IA.';
     const options=state.households.map(h=>\`<option value="\${escapeHtml(h.id)}">\${escapeHtml(h.name)}</option>\`).join('');
     app.innerHTML=\`<h2>Entrar a SOL</h2><form id="login-form"><div class="grid">
       <label class="full">Hogar<select name="householdId">\${options}</select></label>
@@ -108,7 +108,7 @@ export function renderOnboardingPage(): string {
 
   async function homeView(state, member) {
     const household=state.households.find(item=>item.id===member.householdId);
-    intro.textContent='Una sola SOL: información, agenda, decisiones y automatizaciones del hogar.';
+    intro.textContent='SOL reúne Life + Knowledge y los expone de forma segura por MCP; las acciones siguen protegidas por Executive.';
     const [membersResult,sourcesResult,proposalResult]=await Promise.all([
       api('/v1/households/'+encodeURIComponent(member.householdId)+'/members'),
       api('/v1/source-accounts'),
@@ -126,18 +126,19 @@ export function renderOnboardingPage(): string {
     app.innerHTML=\`
       <div class="row"><div><h2>\${escapeHtml(household?.name||'SOL Home')}</h2><span class="muted">Sesión: \${escapeHtml(member.displayName)} · \${escapeHtml(member.role)}</span></div><span class="pill">\${pending} por confirmar</span></div>
       <div class="modules">
-        <a class="module primary" href="/sol-whatsapp"><strong>Hablar con SOL</strong><span>WhatsApp propio de SOL: preguntas, briefs, recordatorios y aprobaciones desde el teléfono.</span></a>
-        <a class="module primary" href="/executive"><strong>Día a día</strong><span>Brief de hoy, tareas, conflictos y propuestas que SOL necesita que confirmes.</span></a>
-        <a class="module primary" href="/life"><strong>Vida & Knowledge</strong><span>Timeline, personas y proyectos que SOL puede mostrar según tus permisos.</span></a>
+        <a class="module primary" href="/mcp"><strong>MCP · conectar un cerebro</strong><span>Acceso read-only por miembro a Timeline, Knowledge, casa y negocio para clientes MCP.</span></a>
+        <a class="module primary" href="/life"><strong>Vida & Knowledge</strong><span>Timeline, personas y proyectos que SOL organiza y puede mostrar según tus permisos.</span></a>
+        <a class="module" href="/sol-whatsapp"><strong>WhatsApp de SOL</strong><span>Interfaz móvil para preguntas, briefs y aprobaciones verificadas.</span></a>
+        <a class="module" href="/executive"><strong>Executive</strong><span>Propuestas, tareas y decisiones protegidas antes de ejecutar acciones externas.</span></a>
         <a class="module" href="/calendar"><strong>Calendar</strong><span>Cuentas personales y familiares, calendarios leídos y destino de escritura.</span></a>
         <a class="module" href="/whatsapp"><strong>Fuentes WhatsApp</strong><span>Cuentas observadas, mensajes almacenados y candidatos detectados.</span></a>
-        <a class="module" href="/home-assistant"><strong>Home Assistant</strong><span>Estados y cambios elegidos de la casa, en modo lectura y con selección explícita.</span></a>
+        <a class="module" href="/home-assistant"><strong>Home Assistant</strong><span>Estados y cambios elegidos de la casa, actualmente en modo lectura.</span></a>
         <a class="module" href="/mercadolibre"><strong>Mercado Libre</strong><span>Ventas, publicaciones y preguntas del negocio como fuente operativa de SOL.</span></a>
-        <a class="module" href="/ai"><strong>AI Engine</strong><span>Codex / ChatGPT OAuth, estado, cuota y prueba de razonamiento.</span></a>
+        <a class="module" href="/ai"><strong>AI enrichment</strong><span>Codex opcional para extracción, clasificación y futura consolidación de Knowledge.</span></a>
       </div>
       <h3>Miembros</h3>\${memberRows}\${memberForm}
       <h3>Fuentes</h3>\${sourceRows}
-      <div class="actions"><a class="action-link secondary" href="/life">Abrir Vida</a><a class="action-link secondary" href="/mercadolibre">Abrir negocio</a><a class="action-link secondary" href="/sol-whatsapp">Abrir WhatsApp de SOL</a><a class="action-link secondary" href="/executive">Abrir día a día</a><button class="secondary" id="logout">Cerrar sesión</button></div>
+      <div class="actions"><a class="action-link secondary" href="/mcp">Abrir MCP</a><a class="action-link secondary" href="/life">Abrir Vida</a><a class="action-link secondary" href="/mercadolibre">Abrir negocio</a><a class="action-link secondary" href="/executive">Abrir Executive</a><button class="secondary" id="logout">Cerrar sesión</button></div>
     \`;
 
     const mf=document.getElementById('member-form');
