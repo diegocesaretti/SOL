@@ -187,7 +187,7 @@ export function renderWhatsappPage(): string {
       const details = entry.details ? ' ' + JSON.stringify(entry.details) : '';
       return entry.at + ' [' + String(entry.level || '').toUpperCase() + '] ' + entry.event + ' — ' + entry.message + details;
     });
-    return header.concat(lines).join('\n');
+    return header.concat(lines).join('\\n');
   }
 
   async function loadLogs(accountId, target) {
