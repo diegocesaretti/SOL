@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { McpServer } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import * as z from "zod/v4";
+import { closeDatabase } from "../database/client.js";
 import { authenticateMcpToken } from "../modules/mcp/access.js";
 import {
   getMcpBusinessSummary,
@@ -26,11 +27,14 @@ function text(value: unknown) {
   };
 }
 
-const principal = await authenticateMcpToken(await loadToken());
-if (!principal) {
-  console.error("SOL MCP authentication failed: token is invalid, expired, revoked, or member is inactive");
-  process.exitCode = 1;
-} else {
+async function main(): Promise<void> {
+  const principal = await authenticateMcpToken(await loadToken());
+  if (!principal) {
+    throw new Error(
+      "SOL MCP authentication failed: token is invalid, expired, revoked, or member is inactive",
+    );
+  }
+
   serveStdio(() => {
     const server = new McpServer({ name: "sol", version: "0.9.0" });
 
@@ -124,3 +128,9 @@ if (!principal) {
     return server;
   });
 }
+
+void main().catch(async (error) => {
+  console.error(error instanceof Error ? error.message : String(error));
+  await closeDatabase().catch(() => undefined);
+  process.exit(1);
+});
