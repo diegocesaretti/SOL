@@ -7,12 +7,29 @@ SOL treats an integration by **role**, not only by provider. A provider can be a
 ```text
 external systems
       ↓
-Sources → Life → Knowledge → Executive → Actions
-                                  ↑
-                             Interfaces
+Sources → Life → Knowledge → Identity/Privacy → MCP → reasoning clients
+                              │
+                              └→ Executive → Actions
 ```
 
-Source adapters never become the executive brain. They normalize provider data into SOL. Actions are permissioned separately from reads. Interfaces identify the member who is interacting before retrieving private context or executing anything.
+Source adapters never become the executive brain. They normalize provider data into SOL. MCP exposes already-authorized context. Actions are permissioned separately from reads.
+
+## MCP — primary reasoning/client interface
+
+The first MCP server is local stdio and read-only. A revocable SOL token resolves to one active household member before any data query runs.
+
+Current MCP reads:
+
+- SOL/source status;
+- Life timeline;
+- Life text search;
+- People/Projects knowledge;
+- selected Home Assistant current state;
+- Mercado Libre business summary.
+
+MCP does not expose raw SQL, connector credentials or direct write actions. Future writes should create Executive proposals rather than bypassing policy.
+
+See `docs/MCP.md`.
 
 ## WhatsApp
 
@@ -20,34 +37,21 @@ WhatsApp has two deliberately different roles.
 
 ### Household WhatsApp source accounts
 
-These are linked-device accounts belonging to members or explicitly to the household:
+Linked-device accounts belonging to members or explicitly to the household feed messages/conversations into Life. Private accounts stay private to their owning member even when another member is household owner/admin.
 
-```text
-member WhatsApp  → personal source
-shared account   → family source
-```
+### SOL's own WhatsApp account
 
-They feed messages/conversations into Life. Private accounts stay private to their owning member even when another member is a household owner/admin.
+The dedicated household WhatsApp is an **interface and delivery/action channel**, not a canonical data source or canonical reasoning engine.
 
-### SOL's own WhatsApp account — implemented core
+It can:
 
-SOL can also have one dedicated household WhatsApp identity/account used to **communicate with household members**. This account is not an ordinary monitored source. It is an assistant interface plus delivery/action channel.
+- identify verified members through one-time binding;
+- deliver briefs/proposals;
+- receive questions and create requests;
+- accept deterministic proposal approvals;
+- audit outbound messages.
 
-Implemented responsibilities:
-
-- send persisted morning/tomorrow briefs;
-- deliver executive proposals to the member allowed to decide them;
-- receive direct questions from verified household members;
-- receive natural-language create requests that become pending proposals rather than immediate actions;
-- accept deterministic `sí/no` approval for the last proposal SOL explicitly asked that member about;
-- accept approve/reject commands by proposal reference;
-- audit outbound assistant messages through `action_log`.
-
-Member authentication uses a one-time challenge generated from an already authenticated SOL web session. The member sends that code from their own WhatsApp to SOL; the actual WhatsApp JID/LID seen by the protocol is then bound to the member. A phone/display name is not treated as sufficient authentication.
-
-Unknown senders, groups, broadcasts and messages observed in members' ordinary chats never gain command authority. The dedicated assistant account also skips normal WhatsApp history ingestion and candidate extraction so assistant conversations do not masquerade as source observations.
-
-See `docs/SOL_WHATSAPP.md`.
+Over time its read/question path should reuse the same data facade that MCP exposes so every interface sees consistent authorized context.
 
 ## Google Calendar — source + action target
 
@@ -56,51 +60,34 @@ See `docs/SOL_WHATSAPP.md`.
 - reading and writing selections are separate;
 - private source accounts produce private Life events;
 - shared source accounts produce family Life events;
-- external writes originate from approved executive proposals and are audited.
+- external writes originate from approved Executive proposals and are audited.
 
-## Home Assistant — implemented read-only source, future action target
+Calendar read tools can be added to MCP without exposing direct calendar-write capability.
+
+## Home Assistant — source, future action target
 
 Current role: **source**.
 
-The implemented connector provides:
+The connector provides encrypted credentials, entity discovery, explicit entity selection, snapshot/change persistence and selected realtime state changes. Selected current state is available through MCP's read-only facade.
 
-- household Home Assistant account with encrypted Long-Lived Access Token;
-- REST entity discovery/current-state reconciliation;
-- explicit entity selection;
-- `snapshot` versus `changes` persistence policy;
-- selected realtime `state_changed` stream;
-- Life/source items for selected meaningful state transitions;
-- no service-call/control endpoint.
+An entity being readable by SOL/MCP does not make it controllable. Future control requires per-entity/service grants, stronger approval for risky domains (locks/alarms/security) and `action_log` auditing.
 
-The schema intentionally keeps future control separate from source visibility. An entity being readable by SOL does not make it controllable. Future control must add per-entity/service grants, stronger approval for risky domains such as locks/alarms/security and `action_log` auditing.
-
-See `docs/HOME_ASSISTANT.md`.
-
-## Mercado Libre — implemented read-only business source, future action target
+## Mercado Libre — business source, future action target
 
 Current role: **business source**.
 
-The implemented connector provides:
+The connector provides OAuth/PKCE credentials, seller identity reconciliation, publication snapshots, recent orders/questions and a business dashboard. A compact permission-filtered summary is exposed through MCP.
 
-- personal or shared-business Mercado Libre source accounts;
-- Authorization Code OAuth with `state` + S256 PKCE;
-- encrypted rotating access/refresh credentials;
-- seller identity reconciliation;
-- bounded publication snapshots;
-- recent seller orders;
-- recent questions;
-- orders/questions represented in Life with source-matched privacy;
-- `/mercadolibre` local business dashboard;
-- periodic/manual reconciliation.
+Observed buyer questions/orders are business data, not commands. Private seller accounts remain private to their owner.
 
-The read-only connector deliberately does not expose listing, stock, price, shipping, payment or question-reply writes. Observed buyer questions/orders are business data, not commands to SOL.
+Future listing/stock/price/reply actions must route through Executive/action policy and audit.
 
-A private Mercado Libre account remains private to its owner. Household admins may see that a personal source exists in source inventory without gaining access to that account's seller identity, orders, questions or dashboard.
+## Codex / AI providers — optional enrichment
 
-Future Mercado Libre actions must be separate capabilities routed through Executive/action policy and `action_log`. A public HTTPS deployment can later add notification-driven reconciliation for orders/items/questions/shipments/payments/messages while retaining polling as recovery.
+Codex is the first `AiProvider`, useful for classification, extraction and consolidation of unstructured data. It is no longer the required consumer/frontend for SOL.
 
-See `docs/MERCADOLIBRE.md`.
+An MCP-capable client can reason over SOL without Codex being logged in. Conversely, SOL can still call Codex internally for selected background enrichment jobs.
 
 ## Other planned sources
 
-Gmail, files/Drive, contacts, voice and future sources should implement the same provider-neutral ingestion/action contracts. SOL's core data model and executive loop should not need provider-specific rewrites when one is added.
+Gmail, files/Drive, Contacts, voice and future sources should implement the same provider-neutral ingestion contracts. Once normalized into Life/Knowledge, they become available to authorized clients without provider-specific rewrites in each AI frontend.
