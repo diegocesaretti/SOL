@@ -2,54 +2,63 @@
 
 ## Architectural style
 
-SOL is a **family-first modular monolith**: one deployable core process and one primary PostgreSQL database, with explicit module boundaries. Operationally simple now, extractable later.
+SOL is a **family-first personal data/knowledge OS** implemented as a modular monolith: one deployable core process and one primary PostgreSQL database, with explicit module boundaries. Operationally simple now, extractable later.
+
+SOL's primary responsibility is no longer to be a proprietary conversational brain. It is to collect, normalize, organize, protect and expose useful household/business context.
 
 ## Default operational profile
 
-The current target host is **native Windows without virtualization**:
+The target host is native Windows without virtualization:
 
 ```text
 Windows
 ├── SOL Core (Node.js)
-├── Codex CLI / App Server
 ├── source connectors
-└── PostgreSQL Windows service
+├── MCP stdio server
+├── optional Codex CLI / App Server
+└── PostgreSQL via DATABASE_URL (Neon recommended; native PostgreSQL fallback)
 ```
 
-Docker Desktop, WSL, Hyper-V, Redis and pgvector are not architectural requirements. SOL depends on `DATABASE_URL`, not on how PostgreSQL is packaged. Redis can be introduced later only if measured queue/cache coordination needs justify another service; pgvector can be introduced later as an optional semantic-search extension.
+Docker Desktop, WSL, Hyper-V, Redis and pgvector are not architectural requirements. Redis can be introduced later only if measured queue/cache coordination needs justify it; pgvector remains optional until semantic retrieval needs it.
 
 ## End-to-end flow
 
 ```text
 SOURCES
-WhatsApp members / Google Calendar / future Gmail / Home Assistant / Mercado Libre / files / ...
+WhatsApp / Google Calendar / Home Assistant / Mercado Libre / future Gmail / files / ...
                                │
                                ▼
                           CONNECTORS
                                │
                                ▼
                               LIFE
-             source-backed timeline / messages / events
+               normalized records + provenance
                                │
                                ▼
                            KNOWLEDGE
-        entities / facts / relations / candidate extraction
+              entities / facts / relations / projects
                                │
                                ▼
-                           EXECUTIVE
-          proposals / tasks / planning / briefs / conflicts
-                    │                       ▲
-             approval policy                │
-                    ▼                       │
-                            ACTIONS          │
-               Calendar / WhatsApp / HA / ML / ...
-                                ▲            │
-                                │            │
-                           INTERFACES ────────┘
-                    Web / SOL WhatsApp / Voice / ...
+                    IDENTITY + PRIVACY POLICY
+                               │
+                  ┌────────────┴────────────┐
+                  ▼                         ▼
+                 MCP                    EXECUTIVE
+         read/context interface      proposal/action policy
+                  │                         │
+        ┌─────────┼─────────┐               ▼
+        ▼         ▼         ▼             ACTIONS
+      Codex    ChatGPT    other        Calendar / HA / ML / ...
+      client    client    agents
 ```
 
-A provider may occupy more than one role. Google Calendar is both a source and an action target. Home Assistant and Mercado Libre are planned as source/action integrations. SOL's future dedicated WhatsApp account is primarily an **assistant interface and delivery/action channel**, while household members' WhatsApp accounts are primarily sources.
+A provider may occupy more than one role. Google Calendar is both a source and an action target. Home Assistant and Mercado Libre start as sources and can later become action targets behind explicit policy.
+
+## Core rule
+
+**Models think. SOL owns data, identity, privacy, provenance and authorization.**
+
+No MCP client, LLM provider or source connector is trusted as the authority for household permissions.
 
 ## Household is the top-level boundary
 
@@ -65,15 +74,15 @@ Household
 │   ├── WhatsApp personal
 │   └── Google Calendar account(s)
 └── Shared
-    ├── Family WhatsApp source (optional)
-    └── Family Calendar account(s)
+    ├── Home Assistant
+    └── shared business/calendar sources
 ```
 
 A household owner manages the system but does **not** automatically gain read access to another member's private source content.
 
 ## Source accounts are provider identities, not people
 
-Members and external accounts are separate concepts. One member can own many source accounts and one household can own shared accounts. Connectors normalize each account's provider data so downstream modules do not depend on the number of sessions/accounts.
+Members and external accounts are separate concepts. One member can own many source accounts and one household can own shared accounts. Connectors normalize each provider's data so downstream Life/Knowledge/MCP consumers do not depend on provider-specific account layouts.
 
 ## Life vs Knowledge vs Executive
 
@@ -83,44 +92,69 @@ What actually happened, with provenance:
 
 - messages;
 - calendar events;
-- source items;
-- future HA state events, ML sales/orders, e-mails, files, etc.
+- Home Assistant state changes;
+- Mercado Libre sales/orders/questions;
+- tasks;
+- future e-mails, files and other observations.
+
+Life should remain source-backed and auditable.
 
 ### Knowledge
 
-What SOL derives from Life:
+What SOL understands/consolidates from Life:
 
+- people and aliases;
+- projects;
+- facts and relationships;
+- routines/schedules;
 - candidate commitments/tasks/events;
-- entities and relationships;
-- facts/projects/memories later.
+- durable memories derived from multiple source records.
 
-Knowledge is not authorization. Source text remains untrusted data.
+Knowledge is not authorization. Derived facts retain provenance/visibility rules and source text remains untrusted data.
 
 ### Executive
 
-What might require attention/action:
+Executive becomes a **small safety/action layer**, not the central conversational brain. It owns:
 
 - pending proposals;
 - confirmed tasks;
-- calendar destinations;
-- schedule conflicts;
-- morning/tomorrow briefs;
-- future reminder and automation policies.
+- approval policy;
+- action destinations;
+- conflict/risk checks;
+- action auditing.
 
-This layer is the safety boundary between automatic understanding and external writes.
+This is the boundary between automatic organization and external mutation.
+
+## MCP is the primary reasoning interface
+
+SOL exposes permission-filtered information through MCP so multiple clients can reason over the same data without SOL depending on one AI provider.
+
+Initial local profile:
+
+```text
+MCP token → member identity → privacy filter → read-only tools
+```
+
+Current tools include timeline, Life search, People, Projects, selected Home Assistant state and Mercado Libre business summary.
+
+The initial transport is local `stdio`. Remote MCP is deferred until HTTPS and remote authorization are hardened.
+
+See `docs/MCP.md`.
 
 ## Proposal before action
 
-An observed message can be interpreted automatically without gaining permission to act:
+Observed information can be interpreted automatically without acquiring permission to act:
 
 ```text
-message
+source observation
   ↓
-local filter
+normalization / optional extraction
   ↓
-Codex extraction
+Life / Knowledge
   ↓
-executive proposal
+MCP client or SOL rule proposes action
+  ↓
+Executive policy
   ↓
 member/role authorization
   ↓
@@ -129,48 +163,46 @@ action
 action_log
 ```
 
-Private proposals are decided by their owning member. Family proposals require an owner/adult. Action targets are validated independently from proposal visibility.
+Private proposals are decided by their owning member. Family proposals require appropriate household authority. Action targets are validated independently from data visibility.
 
 ## Event-driven internally, not distributed by default
 
-Modules communicate through domain events/outbox records. Current important events include:
+Modules communicate through domain events/outbox records. The durable PostgreSQL outbox gives at-least-once delivery; handlers must be idempotent. PostgreSQL remains the single persistence/co-ordination dependency for the current scale.
 
-- `source_account.created`
-- `whatsapp.candidate.detected`
-- `extraction.completed`
-- future action/delivery events.
+## AI is optional enrichment, not storage or authority
 
-The durable PostgreSQL outbox gives at-least-once delivery; handlers must be idempotent. PostgreSQL remains the single persistence/co-ordination dependency for the current scale; no external queue is required yet.
-
-## AI is a reasoning tool, not storage or authority
-
-SOL's state lives in PostgreSQL/source-backed storage. The domain depends on `AiProvider`; Codex is the first adapter.
+SOL state lives in PostgreSQL/source-backed storage. AI providers may help with unstructured-data jobs, but normal data access and MCP do not require Codex to be logged in.
 
 ```text
+optional AI enrichment
+        │
+        ├── classify candidate
+        ├── extract people/facts
+        ├── consolidate Life → Knowledge
+        └── summarize
+
 AiProvider
-  └── CodexProvider
-        └── Codex App Server
-              └── ChatGPT OAuth managed by Codex
+  └── CodexProvider (first adapter)
 ```
 
-Authorization and context filtering occur before data reaches Codex. Codex reasoning runs with restricted/read-only policy and cannot directly mutate SOL state.
+Authorization and context filtering occur before data reaches an AI provider. AI reasoning cannot directly mutate SOL state.
 
 ## Realtime + reconciliation
 
 Connectors use realtime feeds where useful and reconciliation jobs to repair missed events:
 
 - WhatsApp: realtime linked-device events + history reconciliation;
-- Calendar: periodic discovery + incremental `syncToken` reconciliation;
-- future Home Assistant: event/state stream + periodic state reconciliation;
-- future Mercado Libre: notifications/webhooks where available + API reconciliation.
+- Calendar: periodic discovery + incremental sync-token reconciliation;
+- Home Assistant: realtime state stream + current-state reconciliation;
+- Mercado Libre: bounded API reconciliation now, webhooks later.
 
-Daily/nightly consolidation is a separate future Knowledge process; it should operate over already-ingested Life data instead of rescanning every provider from scratch.
+A future daily/nightly Life → Knowledge consolidator should operate over already-ingested Life data instead of rescanning every provider from scratch.
 
 ## Interfaces
 
-Interfaces are not data owners. Web, voice and the planned SOL WhatsApp identity resolve the interacting member, apply authorization, retrieve allowed context and then call SOL Core.
+Interfaces are not data owners. Web, SOL WhatsApp, voice and MCP clients resolve an interacting member, apply authorization and retrieve only allowed context.
 
-The future SOL WhatsApp account therefore must be a distinct **system/interface session role**, not confused with Diego/Mariana/etc. monitored accounts. See `docs/INTEGRATIONS.md`.
+The dedicated SOL WhatsApp account remains an assistant interface/delivery channel, but it is no longer the canonical reasoning interface. It can itself consume the same SOL data facade used by MCP.
 
 ## Non-goals
 
@@ -178,6 +210,7 @@ The future SOL WhatsApp account therefore must be a distinct **system/interface 
 - No direct unrestricted LLM → SQL access.
 - No assumption that household members can read each other's private sources.
 - No source message becoming a command merely because it contains prompt-like text.
+- No MCP token becoming an admin bypass.
 - No credentials committed to Git.
 - No mandatory Docker/WSL/Hyper-V layer on the Windows target host.
 - No premature microservices/Kubernetes/Kafka.
