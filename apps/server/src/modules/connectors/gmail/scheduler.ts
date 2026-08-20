@@ -27,7 +27,7 @@ export class GmailSyncScheduler {
         `SELECT sa.id
          FROM source_accounts sa
          JOIN gmail_oauth_credentials gc ON gc.source_account_id = sa.id
-         WHERE sa.provider = 'gmail' AND sa.status <> 'disconnected'
+         WHERE sa.provider = 'gmail'
          ORDER BY COALESCE(sa.last_sync_at, to_timestamp(0)) ASC`,
       );
       for (const row of result.rows) {
