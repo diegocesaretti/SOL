@@ -51,6 +51,13 @@ function cleanText(value: unknown, field: string, max: number): string {
   return text;
 }
 
+function cleanBody(value: unknown, field: string, max: number): string {
+  if (typeof value !== "string") throw new Error(`${field} is required`);
+  const text = value.replace(/\r\n?/g, "\n").trim();
+  if (!text || text.length > max) throw new Error(`${field} must be between 1 and ${max} characters`);
+  return text;
+}
+
 function optionalText(value: unknown, max: number): string | undefined {
   if (typeof value !== "string") return undefined;
   const text = value.replace(/\s+/g, " ").trim();
@@ -350,6 +357,27 @@ async function consolidateSubmittedSchedule(
         [sourceItemId, factId],
       );
     }
+
+    await client.query(
+      `INSERT INTO knowledge_consolidation_items(
+         source_item_id, household_id, status, attempts, provider,
+         model_metadata, last_error, analyzed_at
+       ) VALUES ($1,$2,'analyzed',1,'deterministic:mcp_schedule',$3::jsonb,NULL,now())
+       ON CONFLICT(source_item_id)
+       DO UPDATE SET status = 'analyzed',
+                     attempts = knowledge_consolidation_items.attempts + 1,
+                     provider = EXCLUDED.provider,
+                     model_metadata = EXCLUDED.model_metadata,
+                     last_error = NULL,
+                     analyzed_at = now(),
+                     updated_at = now()`,
+      [
+        sourceItemId,
+        principal.householdId,
+        JSON.stringify({ processor: "mcp_schedule", version: 1 }),
+      ],
+    );
+
     await client.query("COMMIT");
     return { personEntityId, factsCreated, factsSuperseded };
   } catch (error) {
@@ -364,7 +392,7 @@ export async function submitMcpInformation(
   principal: AuthPrincipal,
   input: { title?: unknown; text?: unknown; context?: unknown; visibility?: unknown },
 ): Promise<Record<string, unknown>> {
-  const text = cleanText(input.text, "text", 24_000);
+  const text = cleanBody(input.text, "text", 24_000);
   const title = optionalText(input.title, 180) ?? "Información aportada por MCP";
   const context = optionalText(input.context, 1000);
   const scope = visibility(input.visibility);
