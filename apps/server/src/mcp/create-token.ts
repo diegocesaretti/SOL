@@ -29,7 +29,7 @@ if (!members.rows.length) {
 
 const rl = createInterface({ input, output });
 try {
-  console.log("\nSOL MCP · create member-scoped read token\n");
+  console.log("\nSOL MCP · create member-scoped token\n");
   members.rows.forEach((row, index) => {
     console.log(`${index + 1}. ${row.display_name} (${row.role}) · ${row.household_name}`);
   });
@@ -41,6 +41,8 @@ try {
 
   const labelRaw = await rl.question("Client label [Local MCP client]: ");
   const daysRaw = await rl.question("Expires in days [90]: ");
+  const submitRaw = await rl.question("Allow this client to submit information/schedules into SOL Life? [y/N]: ");
+  const allowSubmit = ["y", "yes", "s", "si", "sí"].includes(submitRaw.trim().toLowerCase());
   const principal: AuthPrincipal = {
     householdId: row.household_id,
     memberId: row.member_id,
@@ -51,11 +53,13 @@ try {
   const created = await createMcpAccessToken(principal, {
     label: labelRaw.trim() || "Local MCP client",
     expiresInDays: daysRaw.trim() ? Number(daysRaw) : 90,
+    allowSubmit,
   });
 
   console.log("\nToken created. Copy it now; SOL stores only its hash:\n");
   console.log(created.token);
-  console.log("\nGeneric MCP stdio configuration template:\n");
+  console.log(`\nScopes: ${created.access.scopes.join(", ")}\n`);
+  console.log("Generic MCP stdio configuration template:\n");
   console.log(JSON.stringify({
     mcpServers: {
       sol: {
@@ -65,7 +69,11 @@ try {
       },
     },
   }, null, 2));
-  console.log("\nThis token is read-only and inherits the selected member's SOL privacy boundary.\n");
+  console.log(
+    allowSubmit
+      ? "\nThis token can read permitted SOL data and submit provenance-bearing information/schedules. It cannot perform external actions.\n"
+      : "\nThis token is read-only and inherits the selected member's SOL privacy boundary.\n",
+  );
 } finally {
   rl.close();
   await closeDatabase();
