@@ -1,8 +1,8 @@
 {
   "name": "sol",
-  "version": "0.1.0",
+  "version": "0.9.0",
   "private": true,
-  "description": "Family-first personal information and automation system",
+  "description": "Family-first personal data, knowledge and MCP system",
   "packageManager": "pnpm@10.15.0",
   "engines": {
     "node": ">=22.0.0"
@@ -12,6 +12,7 @@
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
+    "mcp": "pnpm --filter @sol/server mcp",
     "db:configure": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows/configure-database.ps1",
     "db:setup": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows/setup-postgres.ps1",
     "db:check": "pnpm --filter @sol/server db:check",
