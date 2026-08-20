@@ -266,6 +266,42 @@ async function ingestMessage(
        ON CONFLICT(source_item_id) DO NOTHING`,
       [sourceItemId, conversationId, senderIdentityId, own],
     );
+
+    if (origin === "realtime" && text && intelligence.routes.includes("operational")) {
+      const candidate = await client.query<{ id: string }>(
+        `INSERT INTO extraction_candidates(
+           household_id, source_item_id, owner_member_id, source_provider, score, reasons
+         ) VALUES ($1,$2,$3,'gmail',$4,$5::jsonb)
+         ON CONFLICT(source_item_id) DO NOTHING
+         RETURNING id`,
+        [
+          account.householdId,
+          sourceItemId,
+          account.ownerMemberId ?? null,
+          intelligence.operationalScore,
+          JSON.stringify(intelligence.reasons),
+        ],
+      );
+      const candidateId = candidate.rows[0]?.id;
+      if (candidateId) {
+        await client.query(
+          `INSERT INTO event_outbox(
+             household_id, event_type, aggregate_type, aggregate_id, payload
+           ) VALUES ($1,'intelligence.candidate.detected','extraction_candidate',$2,$3::jsonb)`,
+          [
+            account.householdId,
+            candidateId,
+            JSON.stringify({
+              candidateId,
+              sourceItemId,
+              ownerMemberId: account.ownerMemberId ?? null,
+              sourceProvider: "gmail",
+            }),
+          ],
+        );
+      }
+    }
+
     await client.query("COMMIT");
     return true;
   } catch (error) {
