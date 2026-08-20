@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { db } from "../../../database/client.js";
+import { scoreIntelligenceCandidate } from "../../knowledge/intelligence-gate.js";
 import { gmailGet } from "./client.js";
 import {
   ensureGmailAccountRecord,
@@ -36,6 +37,8 @@ interface GmailMessage {
   internalDate?: string;
   payload?: GmailPart;
 }
+
+type GmailIngestOrigin = "history" | "realtime";
 
 function header(part: GmailPart | undefined, name: string): string | undefined {
   const wanted = name.toLowerCase();
@@ -136,6 +139,7 @@ async function ingestMessage(
   account: NonNullable<Awaited<ReturnType<typeof getGmailAccount>>>,
   profileEmail: string | undefined,
   message: GmailMessage,
+  origin: GmailIngestOrigin,
 ): Promise<boolean> {
   if (!message.id) return false;
   const existing = await db.query(
@@ -148,10 +152,27 @@ async function ingestMessage(
   const from = header(message.payload, "from");
   const to = header(message.payload, "to");
   const cc = header(message.payload, "cc");
+  const listUnsubscribe = header(message.payload, "list-unsubscribe");
+  const precedence = header(message.payload, "precedence");
+  const autoSubmitted = header(message.payload, "auto-submitted");
   const senderAddress = emailAddress(from);
   const own = Boolean(profileEmail && senderAddress && senderAddress === profileEmail.toLowerCase());
   const text = extractGmailText(message);
   const visibility = account.ownerMemberId ? "private" : "family";
+  const gateMetadata = {
+    from: from ?? null,
+    fromAddress: senderAddress ?? null,
+    labelIds: message.labelIds ?? [],
+    listUnsubscribe: listUnsubscribe ?? null,
+    precedence: precedence ?? null,
+    autoSubmitted: autoSubmitted ?? null,
+  };
+  const intelligence = scoreIntelligenceCandidate({
+    provider: "gmail",
+    title: subject,
+    bodyText: text,
+    metadata: gateMetadata,
+  });
   const senderIdentityId = await upsertEmailIdentity({
     householdId: account.householdId,
     ownerMemberId: account.ownerMemberId,
@@ -209,6 +230,7 @@ async function ingestMessage(
         contentHash(message, text),
         JSON.stringify({
           provider: "gmail",
+          origin,
           threadId: message.threadId ?? null,
           from: from ?? null,
           fromAddress: senderAddress ?? null,
@@ -220,6 +242,16 @@ async function ingestMessage(
           snippet: message.snippet?.slice(0, 1000) ?? null,
           hasText: Boolean(text),
           fromMe: own,
+          listUnsubscribe: listUnsubscribe ?? null,
+          precedence: precedence ?? null,
+          autoSubmitted: autoSubmitted ?? null,
+          intelligenceCandidate: intelligence.candidate,
+          intelligenceScore: intelligence.score,
+          intelligencePriority: intelligence.priority,
+          intelligenceRoutes: intelligence.routes,
+          intelligenceOperationalScore: intelligence.operationalScore,
+          intelligenceKnowledgeScore: intelligence.knowledgeScore,
+          intelligenceReasons: intelligence.reasons,
         }),
       ],
     );
@@ -274,7 +306,8 @@ export async function syncGmailAccount(sourceAccountId: string): Promise<{
   if (!account) throw new Error("Gmail source account not found");
   try {
     const profile = await gmailGet<GmailProfile>(sourceAccountId, "/users/me/profile");
-    const ids = await listRecentMessageIds(sourceAccountId, !account.lastSyncAt);
+    const initial = !account.lastSyncAt;
+    const ids = await listRecentMessageIds(sourceAccountId, initial);
     let imported = 0;
     for (const id of ids) {
       const exists = await db.query(
@@ -286,7 +319,7 @@ export async function syncGmailAccount(sourceAccountId: string): Promise<{
         sourceAccountId,
         `/users/me/messages/${encodeURIComponent(id)}?format=full`,
       );
-      if (await ingestMessage(account, profile.emailAddress, message)) imported += 1;
+      if (await ingestMessage(account, profile.emailAddress, message, initial ? "history" : "realtime")) imported += 1;
     }
     await markGmailSyncSuccess(sourceAccountId, {
       emailAddress: profile.emailAddress,
