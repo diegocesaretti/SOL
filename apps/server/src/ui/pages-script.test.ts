@@ -45,3 +45,10 @@ test("Inputs exposes Gmail as a read-only provider", () => {
   assert.match(html, /data-provider="gmail"/);
   assert.match(html, /permiso Gmail de lectura/);
 });
+
+test("Inputs exposes live WhatsApp ingestion diagnostics", () => {
+  const html = renderInputsPage();
+  assert.match(html, /Diagnóstico WhatsApp/);
+  assert.match(html, /Baileys todavía no entregó ningún mensaje/);
+  assert.match(html, /lastIngestError/);
+});
