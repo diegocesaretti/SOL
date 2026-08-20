@@ -1,7 +1,7 @@
 import { db } from "../../database/client.js";
 import { config } from "../../config.js";
 import type { DomainEvent, EventBus } from "../../core/event-bus.js";
-import { codexProvider } from "../ai/codex/runtime.js";
+import { aiProvider } from "../ai/runtime.js";
 import { KnowledgeConsolidationScheduler } from "./consolidator.js";
 
 const KINDS = new Set([
@@ -54,17 +54,17 @@ export function parseCandidateExtraction(value: string): CandidateExtraction {
   try {
     parsed = JSON.parse(stripCodeFence(value)) as Record<string, unknown>;
   } catch {
-    throw new Error("Codex candidate extraction did not return valid JSON");
+    throw new Error("AI candidate extraction did not return valid JSON");
   }
 
   const kind = typeof parsed.kind === "string" ? parsed.kind : "";
   if (!KINDS.has(kind as ExtractionKind)) {
-    throw new Error("Codex candidate extraction returned an invalid kind");
+    throw new Error("AI candidate extraction returned an invalid kind");
   }
 
   const confidence = Number(parsed.confidence);
   if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
-    throw new Error("Codex candidate extraction returned an invalid confidence");
+    throw new Error("AI candidate extraction returned an invalid confidence");
   }
 
   const title = stringOrNull(parsed.title) ?? "Información de WhatsApp";
@@ -169,7 +169,7 @@ async function processCandidate(candidateId: string): Promise<void> {
   const candidate = await loadCandidate(candidateId);
   if (!candidate || candidate.status !== "pending" || !candidate.body_text) return;
 
-  const result = await codexProvider.reason({
+  const result = await aiProvider.reason({
     householdId: candidate.household_id,
     memberId: candidate.owner_member_id ?? "household",
     purpose: "classification",
@@ -209,7 +209,7 @@ async function processCandidate(candidateId: string): Promise<void> {
 }
 
 async function processPendingRealtimeCandidates(limit = 12): Promise<number> {
-  if (!(await codexProvider.isAvailable())) return 0;
+  if (!(await aiProvider.isAvailable())) return 0;
   const result = await db.query<{ id: string }>(
     `SELECT ec.id
      FROM extraction_candidates ec
@@ -259,10 +259,10 @@ export function registerCandidateProcessor(eventBus: EventBus): () => void {
     async (event: DomainEvent<{ candidateId?: string }>) => {
       const candidateId = event.payload.candidateId;
       if (!candidateId) return;
-      // AI enrichment is optional. A disconnected Codex account must never keep
-      // the durable outbox hot or block ingestion; leave the candidate pending for
-      // the sparse recovery pass instead.
-      if (!(await codexProvider.isAvailable())) return;
+      // AI enrichment is optional. If every configured provider is unavailable,
+      // leave the candidate pending for the sparse recovery pass instead of
+      // keeping the durable outbox hot or blocking ingestion.
+      if (!(await aiProvider.isAvailable())) return;
       await processCandidate(candidateId);
     },
   );
