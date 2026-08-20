@@ -1,4 +1,4 @@
-export type SolSection = "home" | "inputs" | "life" | "executive" | "mcp" | "ai";
+export type SolSection = "home" | "inputs" | "outputs" | "life" | "executive" | "mcp" | "ai";
 
 export function solShellStyles(): string {
   return `
@@ -12,9 +12,9 @@ export function solShellStyles(): string {
 export function solSidebar(active: SolSection): string {
   const links: Array<[SolSection,string,string,string]> = [
     ["home","/","⌂","Inicio"],
-    ["inputs","/inputs","↳","Inputs"],
+    ["inputs","/inputs","↓","Inputs"],
+    ["outputs","/outputs","↑","Outputs"],
     ["life","/life","◫","Life"],
-    ["executive","/executive","✓","Acciones"],
     ["mcp","/mcp","◇","MCP"],
     ["ai","/ai","✦","AI"],
   ];
