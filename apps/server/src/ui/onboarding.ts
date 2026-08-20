@@ -131,11 +131,13 @@ export function renderOnboardingPage(): string {
         <a class="module primary" href="/life"><strong>Vida & Knowledge</strong><span>Timeline, personas y proyectos que SOL puede mostrar según tus permisos.</span></a>
         <a class="module" href="/calendar"><strong>Calendar</strong><span>Cuentas personales y familiares, calendarios leídos y destino de escritura.</span></a>
         <a class="module" href="/whatsapp"><strong>Fuentes WhatsApp</strong><span>Cuentas observadas, mensajes almacenados y candidatos detectados.</span></a>
+        <a class="module" href="/home-assistant"><strong>Home Assistant</strong><span>Estados y cambios elegidos de la casa, en modo lectura y con selección explícita.</span></a>
+        <a class="module" href="/mercadolibre"><strong>Mercado Libre</strong><span>Ventas, publicaciones y preguntas del negocio como fuente operativa de SOL.</span></a>
         <a class="module" href="/ai"><strong>AI Engine</strong><span>Codex / ChatGPT OAuth, estado, cuota y prueba de razonamiento.</span></a>
       </div>
       <h3>Miembros</h3>\${memberRows}\${memberForm}
       <h3>Fuentes</h3>\${sourceRows}
-      <div class="actions"><a class="action-link secondary" href="/life">Abrir Vida</a><a class="action-link secondary" href="/sol-whatsapp">Abrir WhatsApp de SOL</a><a class="action-link secondary" href="/executive">Abrir día a día</a><button class="secondary" id="logout">Cerrar sesión</button></div>
+      <div class="actions"><a class="action-link secondary" href="/life">Abrir Vida</a><a class="action-link secondary" href="/mercadolibre">Abrir negocio</a><a class="action-link secondary" href="/sol-whatsapp">Abrir WhatsApp de SOL</a><a class="action-link secondary" href="/executive">Abrir día a día</a><button class="secondary" id="logout">Cerrar sesión</button></div>
     \`;
 
     const mf=document.getElementById('member-form');
