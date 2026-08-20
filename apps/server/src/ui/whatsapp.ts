@@ -36,16 +36,28 @@ export function renderWhatsappPage(): string {
     .qr img { width: min(320px, 100%); aspect-ratio: 1; }
     .code { font: 800 26px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .12em; }
     .error { color: #d33; }
+    .warn { color: #b97800; }
     .muted { opacity: .62; }
+    .action-status { min-height: 20px; margin-top: 9px; font-size: 13px; overflow-wrap: anywhere; }
     .message, .candidate { padding: 12px 0; border-top: 1px solid color-mix(in srgb, CanvasText 10%, transparent); }
     .message:first-child, .candidate:first-child { border-top: 0; }
     .message time, .candidate time { font-size: 12px; opacity: .55; }
     .candidate-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 4px 0; }
     .candidate-title { font-weight: 800; }
     .candidate pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; opacity: .75; }
+    .diagnostic-toolbar { display:flex; gap:8px; flex-wrap:wrap; margin:12px 0; }
+    .diagnostic-summary { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; font-size:12px; margin:12px 0; }
+    .diagnostic-summary > div { padding:9px 10px; border:1px solid color-mix(in srgb,CanvasText 10%,transparent); border-radius:10px; overflow-wrap:anywhere; }
+    .logs { border:1px solid color-mix(in srgb,CanvasText 10%,transparent); border-radius:12px; overflow:hidden; }
+    .log { display:grid; grid-template-columns:150px 64px minmax(0,1fr); gap:9px; padding:9px 10px; border-top:1px solid color-mix(in srgb,CanvasText 8%,transparent); font:12px/1.35 ui-monospace,SFMono-Regular,Menlo,monospace; }
+    .log:first-child { border-top:0; }
+    .log .level { font-weight:800; text-transform:uppercase; }
+    .log.error-log .level { color:#d33; }
+    .log.warn-log .level { color:#b97800; }
+    .log-details { grid-column:3; opacity:.62; white-space:pre-wrap; overflow-wrap:anywhere; }
     details { margin-top: 18px; }
     summary { cursor: pointer; font-weight: 800; }
-    @media (max-width: 680px) { main { padding-top: 30px; } .grid { grid-template-columns: 1fr; } .full { grid-column: auto; } .row { flex-direction: column; } }
+    @media (max-width: 680px) { main { padding-top: 30px; } .grid { grid-template-columns: 1fr; } .full { grid-column: auto; } .row { flex-direction: column; } .diagnostic-summary{grid-template-columns:1fr}.log{grid-template-columns:1fr}.log-details{grid-column:1} }
   </style>
 </head>
 <body>
@@ -99,6 +111,7 @@ export function renderWhatsappPage(): string {
         <button class="secondary" data-action="pair" data-id="\${esc(account.id)}">Usar código</button>
         \${account.linkedAt ? '<button class="danger" data-action="logout" data-id="' + esc(account.id) + '">Desvincular</button>' : ''}
       </div>
+      <div class="action-status" id="action-status-\${esc(account.id)}"></div>
       <div id="pair-\${esc(account.id)}"></div>
     \` : '<p class="muted">Esta cuenta pertenece a otro miembro; su vinculación y contenido privado no están disponibles en tu sesión.</p>';
 
@@ -113,6 +126,7 @@ export function renderWhatsappPage(): string {
         </div>
         \${runtime.lastError ? '<p class="error">' + esc(runtime.lastError) + '</p>' : ''}
         \${qr}\${pairing}\${manage}
+        \${account.canManage ? '<details><summary>Diagnóstico / logs de conexión</summary><div data-logs="' + esc(account.id) + '"><p class="muted">Abrí para cargar el diagnóstico.</p></div></details>' : ''}
         \${account.canRead ? `
           <details><summary>Candidatos detectados por SOL</summary><div data-candidates="\${esc(account.id)}"><p class="muted">Abrí para cargar.</p></div></details>
           <details><summary>Últimos mensajes almacenados</summary><div data-messages="\${esc(account.id)}"><p class="muted">Abrí para cargar.</p></div></details>
@@ -160,6 +174,69 @@ export function renderWhatsappPage(): string {
     }).join('') : '<p class="muted">Todavía no hay candidatos. Un mensaje trivial se almacena pero no aparece acá.</p>';
   }
 
+  function diagnosticPlainText(data) {
+    const header = [
+      'SOL WhatsApp diagnostics',
+      'Account: ' + (data.account?.label || data.account?.id || ''),
+      'Runtime: ' + (data.runtime?.state || '') + ' / reconnect=' + (data.runtime?.reconnectAttempt || 0),
+      'Node: ' + (data.system?.node || '') + ' · ' + (data.system?.platform || '') + ' · ' + (data.system?.arch || ''),
+      'Persistence: ' + (data.persistence || ''),
+      ''
+    ];
+    const lines = (data.logs || []).slice().reverse().map((entry) => {
+      const details = entry.details ? ' ' + JSON.stringify(entry.details) : '';
+      return entry.at + ' [' + String(entry.level || '').toUpperCase() + '] ' + entry.event + ' — ' + entry.message + details;
+    });
+    return header.concat(lines).join('\n');
+  }
+
+  async function loadLogs(accountId, target) {
+    const result = await api('/v1/whatsapp/accounts/' + encodeURIComponent(accountId) + '/logs');
+    if (!result.response.ok) {
+      target.innerHTML = '<p class="error">' + esc(result.body.error || 'No se pudieron leer los logs') + '</p>';
+      return;
+    }
+    const data = result.body;
+    const runtime = data.runtime || {};
+    const acc = data.account || {};
+    const logs = data.logs || [];
+    target.innerHTML = \`
+      <p class="muted">Log técnico en memoria: no incluye QR, credenciales ni contenido de mensajes. Se reinicia cuando reiniciás SOL.</p>
+      <div class="diagnostic-summary">
+        <div><strong>Runtime</strong><br>\${esc(stateLabel(runtime.state))} · intentos \${esc(runtime.reconnectAttempt || 0)}</div>
+        <div><strong>Base</strong><br>\${esc(acc.sourceStatus || '—')} · linked \${esc(acc.linkedAt || 'no')}</div>
+        <div><strong>Última conexión</strong><br>\${esc(acc.lastConnectionAt || '—')}</div>
+        <div><strong>Entorno</strong><br>\${esc(data.system?.node || '')} · \${esc(data.system?.platform || '')} / \${esc(data.system?.arch || '')}</div>
+      </div>
+      \${runtime.lastError ? '<p class="error"><strong>Último error:</strong> ' + esc(runtime.lastError) + '</p>' : ''}
+      \${acc.lastError && acc.lastError !== runtime.lastError ? '<p class="error"><strong>Error persistido:</strong> ' + esc(acc.lastError) + '</p>' : ''}
+      <div class="diagnostic-toolbar"><button class="secondary" data-log-copy="\${esc(accountId)}">Copiar diagnóstico</button><button class="secondary" data-log-refresh="\${esc(accountId)}">Actualizar logs</button><button class="danger" data-log-clear="\${esc(accountId)}">Limpiar logs</button></div>
+      <div class="logs">\${logs.length ? logs.map((entry) => {
+        const details = entry.details ? JSON.stringify(entry.details, null, 2) : '';
+        return '<div class="log ' + esc(entry.level) + '-log"><time>' + esc(new Date(entry.at).toLocaleString()) + '</time><span class="level">' + esc(entry.level) + '</span><div><strong>' + esc(entry.event) + '</strong><br>' + esc(entry.message) + '</div>' + (details ? '<div class="log-details">' + esc(details) + '</div>' : '') + '</div>';
+      }).join('') : '<p class="muted" style="padding:12px">Todavía no hay eventos de diagnóstico.</p>'}</div>
+    \`;
+    const copy = target.querySelector('[data-log-copy]');
+    if (copy) copy.onclick = async () => {
+      try { await navigator.clipboard.writeText(diagnosticPlainText(data)); copy.textContent = 'Copiado'; }
+      catch { copy.textContent = 'No se pudo copiar'; }
+    };
+    const refresh = target.querySelector('[data-log-refresh]');
+    if (refresh) refresh.onclick = () => loadLogs(accountId, target);
+    const clear = target.querySelector('[data-log-clear]');
+    if (clear) clear.onclick = async () => {
+      await api('/v1/whatsapp/accounts/' + encodeURIComponent(accountId) + '/logs', { method:'DELETE' });
+      await loadLogs(accountId, target);
+    };
+  }
+
+  function showActionError(id, message) {
+    const status = document.getElementById('action-status-' + id);
+    if (!status) return;
+    status.className = 'action-status error';
+    status.textContent = message;
+  }
+
   function bindActions() {
     document.querySelectorAll('[data-action="connect"]').forEach((button) => {
       button.addEventListener('click', async () => {
@@ -168,7 +245,14 @@ export function renderWhatsappPage(): string {
         const account = document.querySelector('[data-account="' + id + '"]');
         const state = account?.querySelector('.pill')?.textContent;
         const endpoint = state === 'Conectado' ? 'restart' : 'connect';
-        await api('/v1/whatsapp/accounts/' + encodeURIComponent(id) + '/' + endpoint, { method:'POST' });
+        const result = await api('/v1/whatsapp/accounts/' + encodeURIComponent(id) + '/' + endpoint, { method:'POST' });
+        if (!result.response.ok) {
+          showActionError(id, result.body.error || ('Error de conexión HTTP ' + result.response.status));
+          button.disabled = false;
+          const logs = account?.querySelector('[data-logs]');
+          if (logs) await loadLogs(id, logs);
+          return;
+        }
         await load();
       });
     });
@@ -195,8 +279,12 @@ export function renderWhatsappPage(): string {
           const result = await api('/v1/whatsapp/accounts/' + encodeURIComponent(id) + '/pairing-code', {
             method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({phoneNumber})
           });
-          if (!result.response.ok) status.innerHTML = '<p class="error">' + esc(result.body.error || 'No se pudo generar') + '</p>';
-          else {
+          if (!result.response.ok) {
+            status.innerHTML = '<p class="error">' + esc(result.body.error || 'No se pudo generar') + '</p>';
+            const account = document.querySelector('[data-account="' + id + '"]');
+            const logs = account?.querySelector('[data-logs]');
+            if (logs) await loadLogs(id, logs);
+          } else {
             interactionLock = false;
             await load();
           }
@@ -208,7 +296,12 @@ export function renderWhatsappPage(): string {
       button.addEventListener('click', async () => {
         if (!confirm('¿Desvincular esta cuenta de WhatsApp de SOL? Se borrarán las credenciales de linked-device, pero no el historial ya almacenado.')) return;
         button.disabled = true;
-        await api('/v1/whatsapp/accounts/' + encodeURIComponent(button.dataset.id) + '/logout', { method:'POST' });
+        const result = await api('/v1/whatsapp/accounts/' + encodeURIComponent(button.dataset.id) + '/logout', { method:'POST' });
+        if (!result.response.ok) {
+          showActionError(button.dataset.id, result.body.error || 'No se pudo desvincular');
+          button.disabled = false;
+          return;
+        }
         await load();
       });
     });
@@ -219,8 +312,10 @@ export function renderWhatsappPage(): string {
         details.dataset.loaded = '1';
         const messages = details.querySelector('[data-messages]');
         const candidates = details.querySelector('[data-candidates]');
+        const logs = details.querySelector('[data-logs]');
         if (messages) void loadMessages(messages.dataset.messages, messages);
         if (candidates) void loadCandidates(candidates.dataset.candidates, candidates);
+        if (logs) void loadLogs(logs.dataset.logs, logs);
       });
     });
 
@@ -276,13 +371,19 @@ export function renderWhatsappPage(): string {
       event.preventDefault();
       const data = Object.fromEntries(new FormData(form).entries());
       const status = document.getElementById('new-status');
+      const submit = form.querySelector('button[type="submit"]');
+      submit.disabled = true;
+      status.className = 'meta';
       status.textContent = 'Creando…';
       const result = await api('/v1/whatsapp/accounts', {
         method:'POST', headers:{'content-type':'application/json'},
         body:JSON.stringify({label:data.label, shared:data.shared === 'true'})
       });
-      if (!result.response.ok) status.textContent = result.body.error || 'Error';
-      else await load();
+      if (!result.response.ok) {
+        status.className = 'action-status error';
+        status.textContent = result.body.error || ('Error HTTP ' + result.response.status);
+        submit.disabled = false;
+      } else await load();
     });
 
     bindActions();
