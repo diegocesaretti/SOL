@@ -14,6 +14,7 @@ export interface WhatsappRuntimeObservation {
   reconnectAttempt: number;
   updatedAt: string;
   lastError?: string;
+  lastDisconnectCode?: number;
 }
 
 const MAX_ENTRIES_PER_ACCOUNT = 250;
@@ -82,6 +83,7 @@ export function observeWhatsappRuntime(
     state: runtime.state,
     reconnectAttempt: runtime.reconnectAttempt,
     lastError: runtime.lastError ?? null,
+    lastDisconnectCode: runtime.lastDisconnectCode ?? null,
   });
   if (runtimeSignatures.get(sourceAccountId) === signature) return;
   runtimeSignatures.set(sourceAccountId, signature);
@@ -102,6 +104,7 @@ export function observeWhatsappRuntime(
     {
       state: runtime.state,
       reconnectAttempt: runtime.reconnectAttempt,
+      disconnectCode: runtime.lastDisconnectCode,
       runtimeUpdatedAt: runtime.updatedAt,
     },
   );
