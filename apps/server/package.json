@@ -1,6 +1,6 @@
 {
   "name": "@sol/server",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,13 +9,16 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "tsx --test src/**/*.test.ts",
     "db:check": "tsx src/database/check.ts",
-    "db:migrate": "tsx src/database/migrate.ts"
+    "db:migrate": "tsx src/database/migrate.ts",
+    "mcp": "tsx src/mcp/stdio.ts"
   },
   "dependencies": {
+    "@modelcontextprotocol/server": "2.0.0",
     "baileys": "7.0.0-rc13",
     "pg": "^8.16.3",
     "pino": "^9.6.0",
-    "qrcode": "1.5.4"
+    "qrcode": "1.5.4",
+    "zod": "4.4.3"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
