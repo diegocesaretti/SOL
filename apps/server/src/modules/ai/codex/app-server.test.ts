@@ -34,10 +34,18 @@ rl.on('line', line => {
     return;
   }
   if (msg.method === 'thread/start') {
+    if (msg.params?.sandbox !== 'read-only') {
+      send({ id: msg.id, error: { code: -32600, message: 'sandbox must be read-only' } });
+      return;
+    }
     send({ id: msg.id, result: { thread: { id: 'thr_test', modelProvider: 'openai' } } });
     return;
   }
   if (msg.method === 'turn/start') {
+    if (msg.params?.sandboxPolicy?.type !== 'read-only') {
+      send({ id: msg.id, error: { code: -32600, message: 'sandboxPolicy.type must be read-only' } });
+      return;
+    }
     send({ id: msg.id, result: { turn: { id: 'turn_test', status: 'inProgress' } } });
     setTimeout(() => {
       send({ method: 'item/completed', params: { threadId: 'thr_test', turnId: 'turn_test', item: { type: 'agentMessage', id: 'msg_1', text: 'Hola desde Codex', phase: 'final_answer' } } });
