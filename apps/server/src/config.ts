@@ -79,4 +79,9 @@ export const config = {
   calendarSyncMs: integerEnv("SOL_CALENDAR_SYNC_MS", 60 * 60 * 1000),
   mercadoLibreSyncMs: integerEnv("SOL_MERCADOLIBRE_SYNC_MS", 60 * 60 * 1000),
   executivePollMs: integerEnv("SOL_EXECUTIVE_POLL_MS", 30 * 60 * 1000),
+  // Knowledge consolidation is optional AI enrichment. Sparse batches keep Neon and
+  // ChatGPT/Codex usage low; ingestion/MCP continue normally when Codex is unavailable.
+  knowledgeConsolidationMs: integerEnv("SOL_KNOWLEDGE_CONSOLIDATION_MS", 6 * 60 * 60 * 1000),
+  knowledgeBatchesPerRun: integerEnv("SOL_KNOWLEDGE_BATCHES_PER_RUN", 2),
+  knowledgeBatchItems: integerEnv("SOL_KNOWLEDGE_BATCH_ITEMS", 12),
 } as const;
