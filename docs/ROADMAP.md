@@ -99,7 +99,7 @@ The consolidator should use deterministic normalization where possible and optio
 - [x] `get_home_state`
 - [x] `get_business_summary`
 - [x] No raw SQL/connector secrets/direct dangerous actions
-- [ ] Wire MCP access-management page into Web navigation
+- [x] MCP access-management page wired into Web navigation
 - [ ] Add MCP resources for stable canonical entities/projects
 - [ ] Better date/range filters for Life
 - [ ] Source/provenance drill-down tools
@@ -168,9 +168,9 @@ AI is not required for:
 - [x] Life + People + Projects
 - [x] connector setup pages
 - [x] Executive
+- [x] MCP token/access UI wired into navigation
 - [ ] unified PWA shell/navigation
 - [ ] user-facing privacy/grant controls
-- [ ] MCP token/access UI wired into navigation
 - [ ] member lifecycle management
 
 ### SOL WhatsApp ✅ core
