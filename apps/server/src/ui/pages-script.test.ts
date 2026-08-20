@@ -6,6 +6,7 @@ import { renderLifePage } from "./life.js";
 import { renderMcpPage } from "./mcp.js";
 import { renderMercadoLibrePage } from "./mercadolibre.js";
 import { renderOnboardingPage } from "./onboarding.js";
+import { renderOutputsPage } from "./outputs.js";
 
 function embeddedScript(html: string, label: string): string {
   const match = html.match(/<script>([\s\S]*?)<\/script>/i);
@@ -16,6 +17,7 @@ function embeddedScript(html: string, label: string): string {
 for (const [label, render, filename] of [
   ["Life page", renderLifePage, "life-inline.js"],
   ["Inputs page", renderInputsPage, "inputs-inline.js"],
+  ["Outputs page", renderOutputsPage, "outputs-inline.js"],
   ["Mercado Libre page", renderMercadoLibrePage, "mercadolibre-inline.js"],
   ["MCP page", renderMcpPage, "mcp-inline.js"],
   ["SOL home", renderOnboardingPage, "home-inline.js"],
@@ -34,4 +36,10 @@ test("Life family visibility confirmation keeps newline escaped in rendered Java
 test("Inputs explains destructive source removal before deleting", () => {
   const html = renderInputsPage();
   assert.match(html, /también borrará de SOL los datos importados/);
+});
+
+test("Inputs exposes Gmail as a read-only provider", () => {
+  const html = renderInputsPage();
+  assert.match(html, /data-provider="gmail"/);
+  assert.match(html, /permiso Gmail de lectura/);
 });
