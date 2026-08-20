@@ -47,7 +47,19 @@ function canRead(principal: AuthPrincipal, account: MercadoLibreAccount): boolea
 }
 
 function publicAccount(principal: AuthPrincipal, account: MercadoLibreAccount) {
-  return { ...account, canManage: canManage(principal, account), canRead: canRead(principal, account) };
+  const readable = canRead(principal, account);
+  const manageable = canManage(principal, account);
+  return {
+    ...account,
+    userId: readable ? account.userId : undefined,
+    nickname: readable ? account.nickname : undefined,
+    siteId: readable ? account.siteId : undefined,
+    countryId: readable ? account.countryId : undefined,
+    tokenExpiresAt: manageable ? account.tokenExpiresAt : undefined,
+    lastError: manageable ? account.lastError : undefined,
+    canManage: manageable,
+    canRead: readable,
+  };
 }
 
 export async function handleMercadoLibreOAuthCallback(
