@@ -10,7 +10,8 @@
     "test": "tsx --test src/**/*.test.ts",
     "db:check": "tsx src/database/check.ts",
     "db:migrate": "tsx src/database/migrate.ts",
-    "mcp": "tsx src/mcp/stdio.ts"
+    "mcp": "tsx src/mcp/stdio.ts",
+    "mcp:token": "tsx src/mcp/create-token.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "2.0.0",
