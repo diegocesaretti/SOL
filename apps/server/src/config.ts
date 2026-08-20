@@ -36,6 +36,13 @@ function optionalEnv(name: string): string | undefined {
   return value || undefined;
 }
 
+function enumEnv<const T extends readonly string[]>(name: string, allowed: T, fallback: T[number]): T[number] {
+  const raw = process.env[name]?.trim().toLowerCase();
+  if (!raw) return fallback;
+  if ((allowed as readonly string[]).includes(raw)) return raw as T[number];
+  throw new Error(`${name} must be one of: ${allowed.join(", ")}`);
+}
+
 const codexHome = optionalEnv("SOL_CODEX_HOME") ?? resolve(repoRoot, ".sol", "codex");
 const host = process.env.SOL_HOST ?? "127.0.0.1";
 const port = integerEnv("SOL_PORT", 3000);
@@ -57,6 +64,19 @@ export const config = {
   databaseConnectionTimeoutMs: integerEnv("SOL_DB_CONNECT_TIMEOUT_MS", 15_000),
   sessionDays: integerEnv("SOL_SESSION_DAYS", 30),
   cookieSecure: booleanEnv("SOL_COOKIE_SECURE", false),
+
+  // Optional AI enrichment. "auto" prefers OpenAI when an API key is configured,
+  // then falls back to the existing Codex/ChatGPT OAuth provider.
+  aiProvider: enumEnv("SOL_AI_PROVIDER", ["auto", "openai", "codex"] as const, "auto"),
+  openaiApiKey: optionalEnv("SOL_OPENAI_API_KEY") ?? optionalEnv("OPENAI_API_KEY"),
+  openaiBaseUrl: optionalEnv("SOL_OPENAI_BASE_URL") ?? "https://api.openai.com/v1",
+  // Use a very cheap model for high-volume classification and a stronger small model
+  // for consolidation/planning/conversation. Both remain user-configurable.
+  openaiFastModel: optionalEnv("SOL_OPENAI_FAST_MODEL") ?? "gpt-5.4-nano",
+  openaiModel: optionalEnv("SOL_OPENAI_MODEL") ?? "gpt-5.4-mini",
+  openaiRequestTimeoutMs: integerEnv("SOL_OPENAI_REQUEST_TIMEOUT_MS", 45_000),
+  openaiMaxOutputTokens: integerEnv("SOL_OPENAI_MAX_OUTPUT_TOKENS", 4_000),
+
   codexBin: process.env.SOL_CODEX_BIN?.trim() || "codex",
   codexHome,
   codexWorkingDirectory:
@@ -89,7 +109,7 @@ export const config = {
   mercadoLibreSyncMs: integerEnv("SOL_MERCADOLIBRE_SYNC_MS", 60 * 60 * 1000),
   executivePollMs: integerEnv("SOL_EXECUTIVE_POLL_MS", 30 * 60 * 1000),
   // Knowledge consolidation is optional AI enrichment. Sparse batches keep Neon and
-  // ChatGPT/Codex usage low; ingestion/MCP continue normally when Codex is unavailable.
+  // model usage low; ingestion/MCP continue normally when no AI provider is available.
   knowledgeConsolidationMs: integerEnv("SOL_KNOWLEDGE_CONSOLIDATION_MS", 6 * 60 * 60 * 1000),
   knowledgeBatchesPerRun: integerEnv("SOL_KNOWLEDGE_BATCHES_PER_RUN", 2),
   knowledgeBatchItems: integerEnv("SOL_KNOWLEDGE_BATCH_ITEMS", 12),
