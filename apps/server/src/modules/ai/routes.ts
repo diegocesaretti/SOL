@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { config } from "../../config.js";
 import { db } from "../../database/client.js";
 import { readJsonBody, sendJson } from "../../http.js";
 import type { AuthPrincipal } from "../auth/session.js";
@@ -7,8 +8,9 @@ import {
   logoutCodex,
   startCodexLogin,
 } from "./codex/account.js";
-import { codexAppServer, codexProvider } from "./codex/runtime.js";
+import { codexAppServer } from "./codex/runtime.js";
 import type { ReasoningRequest } from "./provider.js";
+import { aiProvider } from "./runtime.js";
 
 function canManageAi(principal: AuthPrincipal): boolean {
   return principal.role === "owner" || principal.role === "adult";
@@ -39,9 +41,30 @@ export async function handleAiApi(
   principal: AuthPrincipal,
 ): Promise<boolean> {
   if (request.method === "GET" && path === "/v1/ai/status") {
+    const [router, codex] = await Promise.all([
+      aiProvider.status(),
+      getCodexStatus(codexAppServer),
+    ]);
+    const openai = router.providers.find((item) => item.id === "openai");
+    const codexAvailability = router.providers.find((item) => item.id === "codex");
     sendJson(response, 200, {
-      provider: "codex",
-      ...(await getCodexStatus(codexAppServer)),
+      mode: router.mode,
+      activeProvider: router.activeProvider,
+      available: Boolean(router.activeProvider),
+      providers: {
+        openai: {
+          configured: openai?.configured ?? false,
+          available: openai?.available ?? false,
+          model: config.openaiModel,
+          fastModel: config.openaiFastModel,
+          baseUrl: config.openaiBaseUrl,
+        },
+        codex: {
+          ...codex,
+          configured: codexAvailability?.configured ?? true,
+          available: codexAvailability?.available ?? false,
+        },
+      },
     });
     return true;
   }
@@ -104,7 +127,7 @@ export async function handleAiApi(
       purpose: "conversation",
       instructions:
         body.message?.trim() ||
-        "Introduce yourself briefly as SOL and explain that you are connected as the household reasoning engine.",
+        "Introduce yourself briefly as SOL and explain that you are connected as an optional household reasoning engine.",
       context: {
         household: {
           name: household.name,
@@ -118,7 +141,7 @@ export async function handleAiApi(
     };
 
     try {
-      const result = await codexProvider.reason(requestData);
+      const result = await aiProvider.reason(requestData);
       sendJson(response, 200, { result });
     } catch (error) {
       sendJson(response, 503, {
