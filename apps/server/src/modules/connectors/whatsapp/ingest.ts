@@ -5,10 +5,10 @@ import {
   type WAMessage,
 } from "baileys";
 import { db } from "../../../database/client.js";
+import { scoreIntelligenceCandidate } from "../../knowledge/intelligence-gate.js";
 import {
   detectWhatsappMessageType,
   extractWhatsappText,
-  scoreWhatsappCandidate,
   whatsappTimestamp,
 } from "./message-content.js";
 import type { WhatsappAccountRecord } from "./repository.js";
@@ -95,7 +95,11 @@ export async function ingestWhatsappMessage(
   const occurredAt = whatsappTimestamp(message.messageTimestamp);
   const visibility = account.ownerMemberId ? "private" : "family";
   const externalId = `${remoteJid}:${messageId}`;
-  const signal = scoreWhatsappCandidate(bodyText);
+  const intelligence = scoreIntelligenceCandidate({
+    provider: "whatsapp",
+    bodyText,
+  });
+  const operationalCandidate = intelligence.routes.includes("operational");
 
   const client = await db.connect();
   try {
@@ -151,8 +155,15 @@ export async function ingestWhatsappMessage(
       pushName: message.pushName ?? null,
       messageType: messageType ?? null,
       hasText: Boolean(bodyText),
-      candidateScore: signal.score,
-      candidateReasons: signal.reasons,
+      candidateScore: intelligence.operationalScore,
+      candidateReasons: intelligence.reasons,
+      intelligenceCandidate: intelligence.candidate,
+      intelligenceScore: intelligence.score,
+      intelligencePriority: intelligence.priority,
+      intelligenceRoutes: intelligence.routes,
+      intelligenceOperationalScore: intelligence.operationalScore,
+      intelligenceKnowledgeScore: intelligence.knowledgeScore,
+      intelligenceReasons: intelligence.reasons,
     };
 
     const sourceResult = await client.query<{ id: string; inserted: boolean }>(
@@ -206,7 +217,7 @@ export async function ingestWhatsappMessage(
     );
 
     let candidateCreated = false;
-    if (signal.candidate && bodyText) {
+    if (operationalCandidate && bodyText) {
       const candidateResult = await client.query<{ id: string }>(
         `INSERT INTO extraction_candidates(
            household_id, source_item_id, owner_member_id, source_provider,
@@ -218,8 +229,8 @@ export async function ingestWhatsappMessage(
           account.householdId,
           sourceItem.id,
           account.ownerMemberId ?? null,
-          signal.score,
-          JSON.stringify(signal.reasons),
+          intelligence.operationalScore,
+          JSON.stringify(intelligence.reasons),
         ],
       );
 
