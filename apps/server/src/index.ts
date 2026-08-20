@@ -21,6 +21,11 @@ import {
 import { CalendarSyncScheduler } from "./modules/connectors/google-calendar/scheduler.js";
 import { homeAssistantManager } from "./modules/connectors/home-assistant/manager.js";
 import { handleHomeAssistantApi } from "./modules/connectors/home-assistant/routes.js";
+import {
+  handleMercadoLibreApi,
+  handleMercadoLibreOAuthCallback,
+} from "./modules/connectors/mercadolibre/routes.js";
+import { MercadoLibreSyncScheduler } from "./modules/connectors/mercadolibre/scheduler.js";
 import { handleSolWhatsappApi } from "./modules/connectors/sol-whatsapp/routes.js";
 import { registerSolWhatsappDelivery } from "./modules/connectors/sol-whatsapp/service.js";
 import { handleWhatsappApi } from "./modules/connectors/whatsapp/routes.js";
@@ -53,6 +58,7 @@ import { renderCalendarPage } from "./ui/calendar.js";
 import { renderExecutivePage } from "./ui/executive.js";
 import { renderHomeAssistantPage } from "./ui/home-assistant.js";
 import { renderLifePage } from "./ui/life.js";
+import { renderMercadoLibrePage } from "./ui/mercadolibre.js";
 import { renderOnboardingPage } from "./ui/onboarding.js";
 import { renderSolWhatsappPage } from "./ui/sol-whatsapp.js";
 import { renderWhatsappPage } from "./ui/whatsapp.js";
@@ -63,6 +69,7 @@ const unregisterExecutiveProcessor = registerExecutiveProposalProcessor(eventBus
 const unregisterSolWhatsappDelivery = registerSolWhatsappDelivery(eventBus, whatsappManager);
 const outboxDispatcher = new OutboxDispatcher(eventBus, config.outboxPollMs);
 const calendarScheduler = new CalendarSyncScheduler(config.calendarSyncMs);
+const mercadoLibreScheduler = new MercadoLibreSyncScheduler(config.mercadoLibreSyncMs);
 const executiveScheduler = new ExecutiveScheduler(config.executivePollMs);
 
 function pathname(request: IncomingMessage): string {
@@ -109,7 +116,9 @@ function canCreateRole(principal: AuthPrincipal, role: NewMemberRole): boolean {
 async function handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
   const path = pathname(request);
 
+  // OAuth callbacks are authenticated by one-time state/PKCE rather than the SOL cookie.
   if (await handleGoogleOAuthCallback(request, response)) return;
+  if (await handleMercadoLibreOAuthCallback(request, response)) return;
 
   if (request.method === "GET" && path === "/") {
     sendHtml(response, 200, renderOnboardingPage());
@@ -143,6 +152,10 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     sendHtml(response, 200, renderHomeAssistantPage());
     return;
   }
+  if (request.method === "GET" && path === "/mercadolibre") {
+    sendHtml(response, 200, renderMercadoLibrePage());
+    return;
+  }
 
   if (request.method === "GET" && path === "/health") {
     const database = await checkDatabase();
@@ -159,13 +172,13 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     sendJson(response, 200, {
       name: "SOL",
       architecture: "family-first modular monolith",
-      version: "0.7.0",
+      version: "0.8.0",
       database,
       aiProvider: "codex",
-      sources: ["whatsapp", "google_calendar", "home_assistant"],
+      sources: ["whatsapp", "google_calendar", "home_assistant", "mercadolibre"],
       interfaces: ["web", "sol_whatsapp"],
-      views: ["life_timeline", "people", "projects", "executive"],
-      plannedSources: ["mercadolibre"],
+      views: ["life_timeline", "people", "projects", "executive", "business"],
+      plannedSources: ["gmail", "google_drive", "contacts", "voice"],
     });
     return;
   }
@@ -254,6 +267,11 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     if (!principal) return;
     if (await handleHomeAssistantApi(path, request, response, principal)) return;
   }
+  if (path.startsWith("/v1/mercadolibre/")) {
+    const principal = await principalFor(request, response);
+    if (!principal) return;
+    if (await handleMercadoLibreApi(path, request, response, principal)) return;
+  }
   if (path.startsWith("/v1/executive/")) {
     const principal = await principalFor(request, response);
     if (!principal) return;
@@ -296,8 +314,11 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
       }>(request, response);
       if (!input) return;
       const provider = input.provider?.trim().toLowerCase();
-      if (provider === "whatsapp" || provider === "google_calendar" || provider === "home_assistant") {
-        const dedicated = provider === "whatsapp" ? "whatsapp" : provider === "google_calendar" ? "calendar" : "home-assistant";
+      if (["whatsapp", "google_calendar", "home_assistant", "mercadolibre"].includes(provider ?? "")) {
+        const dedicated =
+          provider === "whatsapp" ? "whatsapp" :
+          provider === "google_calendar" ? "calendar" :
+          provider === "home_assistant" ? "home-assistant" : "mercadolibre";
         sendJson(response, 400, { error: `Use the dedicated /v1/${dedicated}/accounts endpoint` });
         return;
       }
@@ -397,6 +418,7 @@ server.listen(config.port, config.host, () => {
   console.log(`SOL Core listening on http://${config.host}:${config.port}`);
   outboxDispatcher.start();
   calendarScheduler.start();
+  mercadoLibreScheduler.start();
   executiveScheduler.start();
   void whatsappManager.startLinkedAccounts().catch((error) => {
     console.error("WhatsApp autostart failed", error);
@@ -415,6 +437,7 @@ async function shutdown(signal: string): Promise<void> {
   console.log(`Received ${signal}; shutting down SOL Core`);
   outboxDispatcher.stop();
   calendarScheduler.stop();
+  mercadoLibreScheduler.stop();
   executiveScheduler.stop();
   unregisterSolWhatsappDelivery();
   unregisterExecutiveProcessor();
