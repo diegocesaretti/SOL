@@ -77,23 +77,26 @@ Executive remains the protected write/action boundary. Codex remains an optional
 - [x] Evidence-ID validation + `source_links` provenance for automatic entities/facts
 - [x] Sparse/bounded AI enrichment that skips cleanly when Codex is unavailable
 - [x] Manual `pnpm knowledge:consolidate` test/debug command
-- [ ] Deterministic provider-specific structured consolidators that require no AI
+- [x] First deterministic structured consolidator: MCP recurring schedules → `routine.schedule`
+- [x] Complete schedule replacement can supersede prior facts by person/scope/schedule name
+- [ ] More deterministic provider-specific structured consolidators that require no AI
 - [ ] Entity/alias merge and reconciliation beyond exact conservative matching
-- [ ] First-class routine/schedule model and query API (school/work/activities)
+- [ ] First-class routine/schedule query API (school/work/activities)
 - [ ] Facts/relations with provenance drill-down
-- [ ] Knowledge conflict/supersession model
+- [ ] General Knowledge conflict/supersession model beyond schedules
 - [ ] Structured import/review UI for recurring schedules
 - [ ] Explicit shared/project grant propagation during consolidation
 - [ ] Optional semantic retrieval profile after baseline search is proven
 
-The first consolidator intentionally handles only `private` and `family` text-bearing source items. It groups by household/source/privacy, requires exact evidence item IDs and preserves source provenance. See `docs/KNOWLEDGE.md`.
+The first AI consolidator intentionally handles only `private` and `family` text-bearing source items. MCP schedule submissions bypass AI for structured normalization, but still enter Life first and retain `source_links` provenance. See `docs/KNOWLEDGE.md` and `docs/MCP.md`.
 
-## MCP ✅ v0.9 read-only core
+## MCP ✅ v0.9 core
 
 - [x] MCP specification `2026-07-28` target
 - [x] TypeScript MCP SDK v2
 - [x] Local stdio transport with modern/legacy negotiation through `serveStdio`
 - [x] Member-scoped revocable/expiring tokens
+- [x] Independent `read` and `submit` scopes
 - [x] Clear token shown once; SHA-256 hash only in PostgreSQL
 - [x] Local token bootstrap command
 - [x] `sol_status`
@@ -103,6 +106,9 @@ The first consolidator intentionally handles only `private` and `family` text-be
 - [x] `list_projects`
 - [x] `get_home_state`
 - [x] `get_business_summary`
+- [x] `submit_information` → provenance-bearing Life observation
+- [x] `submit_schedule` → Life + deterministic schedule Knowledge
+- [x] Submission tools require an explicit `submit` token scope
 - [x] No raw SQL/connector secrets/direct dangerous actions
 - [x] MCP access-management page wired into Web navigation
 - [ ] Add MCP resources for stable canonical entities/projects
@@ -116,7 +122,7 @@ See `docs/MCP.md`.
 
 ## Executive / actions ✅ core, narrower role
 
-Executive is no longer the mandatory conversational brain. It remains the policy boundary for writes.
+Executive is no longer the mandatory conversational brain. It remains the policy boundary for externally visible writes.
 
 - [x] Pending proposals
 - [x] Explicit approve/reject
@@ -127,15 +133,17 @@ Executive is no longer the mandatory conversational brain. It remains the policy
 - [x] Conflict/brief primitives
 - [ ] Proposal editing/clarification
 - [ ] Rich reminder/snooze/reschedule policy
-- [ ] MCP proposal-oriented write tools
+- [ ] MCP proposal-oriented action tools
 - [ ] HA action grants + stronger security-domain approval
 - [ ] Mercado Libre externally visible action policy
 
-Future MCP write flow:
+Future external-action MCP flow:
 
 ```text
 client → propose_action → Executive → permission/risk/approval → action → action_log
 ```
+
+MCP `submit_information` / `submit_schedule` are not external actions: they are authenticated information ingress into Life, with provenance and separate scope control.
 
 ## AI providers 🟡 optional enrichment
 
@@ -162,6 +170,7 @@ AI is not required for:
 
 - database access;
 - MCP Life/Knowledge queries;
+- structured MCP schedule ingestion;
 - identity/privacy enforcement;
 - source ingestion;
 - authorization.
@@ -175,6 +184,7 @@ AI is not required for:
 - [x] connector setup pages
 - [x] Executive
 - [x] MCP token/access UI wired into navigation
+- [x] MCP `submit` scope opt-in shown during token creation
 - [ ] unified PWA shell/navigation
 - [ ] user-facing privacy/grant controls
 - [ ] member lifecycle management
@@ -220,9 +230,9 @@ Priority is determined by how much useful family context they add:
 
 ## Immediate development order
 
-1. Validate v0.9 MCP + migrations `0012/0013` end-to-end on the target Windows host.
-2. Add first-class schedule/routine Knowledge reads (school schedules are the first concrete case).
-3. Add deterministic provider-specific consolidation where structured data makes AI unnecessary.
-4. Expand MCP provenance/date-range reads.
+1. Validate MCP read + `submit` tools end-to-end on the target Windows/Codex host.
+2. Add first-class schedule/routine read tools (school schedules are the first concrete case).
+3. Expand MCP provenance/date-range reads.
+4. Add more deterministic structured consolidation where AI is unnecessary.
 5. Add Gmail/Drive/Contacts ingestion.
-6. Only then expose proposal-oriented MCP write tools.
+6. Only then expose proposal-oriented MCP external-action tools.
