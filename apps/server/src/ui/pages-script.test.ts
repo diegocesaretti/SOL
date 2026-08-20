@@ -4,6 +4,7 @@ import vm from "node:vm";
 import { renderLifePage } from "./life.js";
 import { renderMcpPage } from "./mcp.js";
 import { renderMercadoLibrePage } from "./mercadolibre.js";
+import { renderOnboardingPage } from "./onboarding.js";
 
 function embeddedScript(html: string, label: string): string {
   const match = html.match(/<script>([\s\S]*?)<\/script>/i);
@@ -24,6 +25,11 @@ test("Mercado Libre page renders syntactically valid embedded JavaScript", () =>
 test("MCP page renders syntactically valid embedded JavaScript", () => {
   const script = embeddedScript(renderMcpPage(), "MCP page");
   assert.doesNotThrow(() => new vm.Script(script, { filename: "mcp-inline.js" }));
+});
+
+test("SOL home renders syntactically valid embedded JavaScript", () => {
+  const script = embeddedScript(renderOnboardingPage(), "SOL home");
+  assert.doesNotThrow(() => new vm.Script(script, { filename: "home-inline.js" }));
 });
 
 test("Life family visibility confirmation keeps newline escaped in rendered JavaScript", () => {
