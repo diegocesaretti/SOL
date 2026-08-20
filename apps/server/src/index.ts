@@ -47,6 +47,7 @@ import {
 import { handleLifeApi } from "./modules/life/routes.js";
 import { registerCandidateProcessor } from "./modules/knowledge/candidate-processor.js";
 import { handleKnowledgeApi } from "./modules/knowledge/routes.js";
+import { handleMcpApi } from "./modules/mcp/routes.js";
 import {
   AlreadyConfiguredError,
   ValidationError,
@@ -58,6 +59,7 @@ import { renderCalendarPage } from "./ui/calendar.js";
 import { renderExecutivePage } from "./ui/executive.js";
 import { renderHomeAssistantPage } from "./ui/home-assistant.js";
 import { renderLifePage } from "./ui/life.js";
+import { renderMcpPage } from "./ui/mcp.js";
 import { renderMercadoLibrePage } from "./ui/mercadolibre.js";
 import { renderOnboardingPage } from "./ui/onboarding.js";
 import { renderSolWhatsappPage } from "./ui/sol-whatsapp.js";
@@ -148,6 +150,10 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     sendHtml(response, 200, renderLifePage());
     return;
   }
+  if (request.method === "GET" && path === "/mcp") {
+    sendHtml(response, 200, renderMcpPage());
+    return;
+  }
   if (request.method === "GET" && path === "/home-assistant") {
     sendHtml(response, 200, renderHomeAssistantPage());
     return;
@@ -171,13 +177,14 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     const database = await checkDatabase();
     sendJson(response, 200, {
       name: "SOL",
-      architecture: "family-first modular monolith",
-      version: "0.8.0",
+      architecture: "family-first data/knowledge OS + MCP",
+      version: "0.9.0",
       database,
-      aiProvider: "codex",
+      reasoningInterface: "mcp",
+      optionalAiProvider: "codex",
       sources: ["whatsapp", "google_calendar", "home_assistant", "mercadolibre"],
-      interfaces: ["web", "sol_whatsapp"],
-      views: ["life_timeline", "people", "projects", "executive", "business"],
+      interfaces: ["mcp_stdio", "web", "sol_whatsapp"],
+      views: ["life_timeline", "people", "projects", "executive", "business", "mcp_access"],
       plannedSources: ["gmail", "google_drive", "contacts", "voice"],
     });
     return;
@@ -286,6 +293,11 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     const principal = await principalFor(request, response);
     if (!principal) return;
     if (await handleKnowledgeApi(path, request, response, principal)) return;
+  }
+  if (path.startsWith("/v1/mcp/")) {
+    const principal = await principalFor(request, response);
+    if (!principal) return;
+    if (await handleMcpApi(path, request, response, principal)) return;
   }
 
   if (path === "/v1/source-accounts") {
