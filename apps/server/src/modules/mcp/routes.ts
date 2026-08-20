@@ -18,7 +18,9 @@ export async function handleMcpApi(
     sendJson(response, 200, {
       enabled: true,
       transport: "stdio",
-      protocol: "2026-07-28",
+      protocol: "2026-07-28 target · 2025-era compatible",
+      protocolTarget: "2026-07-28",
+      protocolNegotiation: "serveStdio",
       mode: "read-only",
       command: "pnpm mcp",
       repoRoot: config.repoRoot,
