@@ -75,9 +75,12 @@ if (!principal) {
       {
         description:
           "List or filter Person entities and their visible facts from SOL Knowledge for the authenticated member.",
-        inputSchema: z.object({ query: z.string().max(200).optional() }),
+        inputSchema: z.object({
+          query: z.string().max(200).optional(),
+          limit: z.number().int().min(1).max(100).optional(),
+        }),
       },
-      async ({ query }) => text(await listMcpKnowledge(principal, "person", query)),
+      async ({ query, limit }) => text(await listMcpKnowledge(principal, "person", query, limit)),
     );
 
     server.registerTool(
@@ -85,9 +88,12 @@ if (!principal) {
       {
         description:
           "List or filter Project entities and their visible facts from SOL Knowledge for the authenticated member.",
-        inputSchema: z.object({ query: z.string().max(200).optional() }),
+        inputSchema: z.object({
+          query: z.string().max(200).optional(),
+          limit: z.number().int().min(1).max(100).optional(),
+        }),
       },
-      async ({ query }) => text(await listMcpKnowledge(principal, "project", query)),
+      async ({ query, limit }) => text(await listMcpKnowledge(principal, "project", query, limit)),
     );
 
     server.registerTool(
