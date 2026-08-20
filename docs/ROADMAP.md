@@ -75,7 +75,7 @@ The order is intentionally dependency-driven rather than feature-driven.
 - [ ] Tune local Spanish candidate heuristics from real household traffic
 - [ ] Quota-aware historical candidate consolidation job
 - [ ] Rich media pipeline (voice transcription, document/image extraction) with explicit privacy policy
-- [ ] More complete LID/contact/entity reconciliation across several private observers
+- [ ] More complete LID/contact/entity reconciliation
 
 ## Phase 4 — Calendar + executive loop ✅ core
 
@@ -112,7 +112,7 @@ The order is intentionally dependency-driven rather than feature-driven.
 - [x] Treat SOL WhatsApp as an assistant interface/action channel, not an ordinary monitored source
 - [x] Exclude the assistant account from member WhatsApp source/history ingestion
 - [x] One-time member binding challenge → actual WhatsApp JID/LID
-- [x] Prevent one active WhatsApp identity from authenticating multiple members in app + database policy
+- [x] Prevent one active WhatsApp identity from authenticating multiple members
 - [x] Resolve incoming direct sender → authenticated active household member
 - [x] Reject unknown/group/broadcast senders as command authorities before AI
 - [x] Deliver persisted morning/tomorrow briefs through SOL WhatsApp
@@ -178,14 +178,35 @@ The order is intentionally dependency-driven rather than feature-driven.
 - [ ] Explicit audited control actions after per-entity/service grants
 - [ ] Stronger approvals for security/lock/alarm/door actions
 
-## Planned first-class connector — Mercado Libre API
+## First-class connector — Mercado Libre ✅ read-only core
 
-- [ ] OAuth/account connector
-- [ ] Orders/sales ingestion
-- [ ] Questions/messages and listing state
-- [ ] Stock/pricing/shipping/payment signals
-- [ ] Business-scoped knowledge/projects
-- [ ] Explicitly authorized listing/reply/stock/price actions
+- [x] Personal/shared Mercado Libre `source_account` model
+- [x] OAuth Authorization Code + `state` + S256 PKCE flow
+- [x] HTTPS/static redirect-URI requirement enforced before authorization
+- [x] AES-256-GCM access/refresh token encryption using a SOL-host-only key
+- [x] Single-use refresh-token rotation serialized transactionally per account
+- [x] Int64-safe external identifier parsing/storage
+- [x] Seller `/users/me` identity reconciliation
+- [x] Publication search + bounded item snapshot reconciliation
+- [x] Recent seller order reconciliation
+- [x] Recent question reconciliation
+- [x] Orders/questions represented as privacy-matched Life/source items
+- [x] Business dashboard for loaded sales, questions and publications
+- [x] Manual + sparse scheduled reconciliation
+- [x] Private seller metadata/dashboard hidden from household admins without read permission
+- [x] No stock/price/listing/reply write endpoint in the read-only core
+
+### Mercado Libre follow-ups
+
+- [ ] Real OAuth/API integration test with an actual Mercado Libre application/account
+- [ ] Hardened public HTTPS endpoint + Mercado Libre notifications/webhooks
+- [ ] Notification-driven reconciliation for orders/items/questions/shipments/payments/messages
+- [ ] Historical scan/import jobs beyond bounded prototype windows
+- [ ] Shipping/payment detail models without retaining unnecessary buyer-sensitive data
+- [ ] Business-scoped Knowledge consolidation/projects/metrics
+- [ ] Permission-filtered Mercado Libre context in SOL reasoning/briefs
+- [ ] Explicit audited question replies, stock/price and listing actions
+- [ ] Strong approval/policy layer for externally visible business changes
 
 ## Other planned sources
 
