@@ -81,7 +81,7 @@ export class CodexProvider implements AiProvider {
 
     const threadResult = await this.client.request<ThreadStartResult>("thread/start", {
       approvalPolicy: "never",
-      sandbox: "readOnly",
+      sandbox: "read-only",
       serviceName: "sol_core",
     });
     const threadId = threadResult.thread.id;
@@ -143,7 +143,7 @@ export class CodexProvider implements AiProvider {
         input: [{ type: "text", text: buildPrompt(request) }],
         approvalPolicy: "never",
         sandboxPolicy: {
-          type: "readOnly",
+          type: "read-only",
           access: {
             type: "restricted",
             includePlatformDefaults: true,
