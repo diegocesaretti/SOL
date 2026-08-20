@@ -216,10 +216,11 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     sendJson(response, 200, {
       name: "SOL",
       architecture: "family-first data/knowledge OS + MCP",
-      version: "0.10.0",
+      version: "0.11.0",
       database,
       reasoningInterface: "mcp",
-      optionalAiProvider: "codex",
+      aiProviderMode: config.aiProvider,
+      optionalAiProviders: ["openai", "codex"],
       sources: ["whatsapp", "gmail", "google_calendar", "home_assistant", "mercadolibre"],
       interfaces: ["mcp_stdio", "web", "sol_whatsapp", "windows_tray"],
       views: ["inputs", "outputs", "life_timeline", "people", "projects", "mcp_access"],
