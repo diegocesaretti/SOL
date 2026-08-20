@@ -38,6 +38,50 @@ function normalizedText(value: unknown, label: string, maxLength: number): strin
   return normalized;
 }
 
+function rowToSource(row: {
+  id: string;
+  household_id: string;
+  owner_member_id: string | null;
+  provider: string;
+  external_account_id: string | null;
+  label: string;
+  status: SourceAccountRecord["status"];
+  auth_mode: string | null;
+  last_sync_at: Date | null;
+}): SourceAccountRecord {
+  return {
+    id: row.id,
+    householdId: row.household_id,
+    ownerMemberId: row.owner_member_id ?? undefined,
+    provider: row.provider,
+    externalAccountId: row.external_account_id ?? undefined,
+    label: row.label,
+    status: row.status,
+    authMode: row.auth_mode ?? undefined,
+    lastSyncAt: row.last_sync_at?.toISOString(),
+  };
+}
+
+export async function getSourceAccount(sourceAccountId: string): Promise<SourceAccountRecord | null> {
+  const result = await db.query<{
+    id: string;
+    household_id: string;
+    owner_member_id: string | null;
+    provider: string;
+    external_account_id: string | null;
+    label: string;
+    status: SourceAccountRecord["status"];
+    auth_mode: string | null;
+    last_sync_at: Date | null;
+  }>(
+    `SELECT id, household_id, owner_member_id, provider, external_account_id,
+            label, status::text, auth_mode, last_sync_at
+     FROM source_accounts WHERE id = $1 LIMIT 1`,
+    [sourceAccountId],
+  );
+  return result.rows[0] ? rowToSource(result.rows[0]) : null;
+}
+
 export async function listSourceAccounts(
   householdId: string,
   viewerMemberId: string,
@@ -59,23 +103,14 @@ export async function listSourceAccounts(
        label, status::text, auth_mode, last_sync_at
      FROM source_accounts
      WHERE household_id = $1
+       AND provider <> 'mcp'
        AND NOT (provider = 'whatsapp' AND auth_mode = 'linked-device-assistant')
        AND ($3::boolean OR owner_member_id = $2 OR owner_member_id IS NULL)
      ORDER BY created_at ASC`,
     [householdId, viewerMemberId, canSeeAll],
   );
 
-  return result.rows.map((row) => ({
-    id: row.id,
-    householdId: row.household_id,
-    ownerMemberId: row.owner_member_id ?? undefined,
-    provider: row.provider,
-    externalAccountId: row.external_account_id ?? undefined,
-    label: row.label,
-    status: row.status,
-    authMode: row.auth_mode ?? undefined,
-    lastSyncAt: row.last_sync_at?.toISOString(),
-  }));
+  return result.rows.map(rowToSource);
 }
 
 export async function createSourceAccount(
@@ -119,13 +154,7 @@ export async function createSourceAccount(
        RETURNING
          id, household_id, owner_member_id, provider, external_account_id,
          label, status::text, auth_mode, last_sync_at`,
-      [
-        input.householdId,
-        input.ownerMemberId ?? null,
-        provider,
-        label,
-        authMode ?? null,
-      ],
+      [input.householdId, input.ownerMemberId ?? null, provider, label, authMode ?? null],
     );
 
     const row = result.rows[0];
@@ -147,22 +176,90 @@ export async function createSourceAccount(
     );
 
     await client.query("COMMIT");
-
-    return {
-      id: row.id,
-      householdId: row.household_id,
-      ownerMemberId: row.owner_member_id ?? undefined,
-      provider: row.provider,
-      externalAccountId: row.external_account_id ?? undefined,
-      label: row.label,
-      status: row.status,
-      authMode: row.auth_mode ?? undefined,
-      lastSyncAt: row.last_sync_at?.toISOString(),
-    };
+    return rowToSource(row);
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
   } finally {
     client.release();
   }
+}
+
+export async function updateSourceAccount(
+  sourceAccountId: string,
+  input: { householdId: string; label?: string; shared?: boolean; ownerMemberId: string },
+): Promise<SourceAccountRecord | null> {
+  const label = input.label === undefined ? undefined : normalizedText(input.label, "label", 120);
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    const existing = await client.query<{ owner_member_id: string | null }>(
+      `SELECT owner_member_id FROM source_accounts WHERE id = $1 AND household_id = $2 FOR UPDATE`,
+      [sourceAccountId, input.householdId],
+    );
+    if (!existing.rows[0]) {
+      await client.query("ROLLBACK");
+      return null;
+    }
+    const nextOwner = input.shared === undefined
+      ? existing.rows[0].owner_member_id
+      : input.shared
+        ? null
+        : input.ownerMemberId;
+    const result = await client.query<{
+      id: string;
+      household_id: string;
+      owner_member_id: string | null;
+      provider: string;
+      external_account_id: string | null;
+      label: string;
+      status: SourceAccountRecord["status"];
+      auth_mode: string | null;
+      last_sync_at: Date | null;
+    }>(
+      `UPDATE source_accounts
+       SET label = COALESCE($3, label), owner_member_id = $4, updated_at = now()
+       WHERE id = $1 AND household_id = $2
+       RETURNING id, household_id, owner_member_id, provider, external_account_id,
+                 label, status::text, auth_mode, last_sync_at`,
+      [sourceAccountId, input.householdId, label ?? null, nextOwner],
+    );
+    const row = result.rows[0];
+    if (!row) throw new Error("failed_to_update_source_account");
+
+    if (input.shared !== undefined) {
+      const visibility = input.shared ? "family" : "private";
+      await client.query(
+        `UPDATE source_items
+         SET owner_member_id = $2, visibility = $3::visibility_scope
+         WHERE source_account_id = $1`,
+        [sourceAccountId, nextOwner, visibility],
+      );
+      await client.query(
+        `UPDATE conversations
+         SET owner_member_id = $2, visibility = $3::visibility_scope, updated_at = now()
+         WHERE source_account_id = $1`,
+        [sourceAccountId, nextOwner, visibility],
+      );
+    }
+
+    await client.query("COMMIT");
+    return rowToSource(row);
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function deleteSourceAccount(
+  sourceAccountId: string,
+  householdId: string,
+): Promise<boolean> {
+  const result = await db.query(
+    `DELETE FROM source_accounts WHERE id = $1 AND household_id = $2`,
+    [sourceAccountId, householdId],
+  );
+  return Boolean(result.rowCount);
 }
