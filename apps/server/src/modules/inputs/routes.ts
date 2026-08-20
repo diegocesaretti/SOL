@@ -152,6 +152,11 @@ export async function handleInputsApi(
           pushName: row.raw_metadata?.pushName,
           messageType: row.raw_metadata?.messageType,
           candidateScore: row.raw_metadata?.candidateScore,
+          from: row.raw_metadata?.from,
+          fromAddress: row.raw_metadata?.fromAddress,
+          to: row.raw_metadata?.to,
+          labelIds: row.raw_metadata?.labelIds,
+          threadId: row.raw_metadata?.threadId,
         },
       })),
     });
