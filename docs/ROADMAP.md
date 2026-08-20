@@ -1,8 +1,12 @@
 # SOL roadmap
 
-SOL's direction is now **data/knowledge first**:
+SOL's direction is **data/knowledge first**:
 
-> Sources → Life → Knowledge → Identity/Privacy → MCP → reasoning clients
+> Inputs → Life → Knowledge → Identity/Privacy → MCP → reasoning clients
+
+External effects are separate:
+
+> reasoning client → proposal/policy → Outputs → audited action
 
 Executive remains the protected write/action boundary. Codex remains an optional enrichment provider rather than the required frontend/brain.
 
@@ -18,7 +22,7 @@ Executive remains the protected write/action boundary. Codex remains an optional
 - [x] Action audit schema
 - [x] Redis and pgvector deferred until measured need
 
-## Sources / Life ✅ core
+## Inputs / Life ✅ core
 
 ### WhatsApp
 
@@ -28,18 +32,39 @@ Executive remains the protected write/action boundary. Codex remains an optional
 - [x] Personal/shared privacy
 - [x] Local relevance gate
 - [x] Optional AI candidate classification with deferred recovery when AI is unavailable
-- [x] Connection diagnostics UI
+- [x] Connection diagnostics
+- [x] Source health/feed visible from unified Inputs
 - [ ] Real target-host integration/tuning
 - [ ] Rich media transcription/extraction
 - [ ] More complete contact/LID/entity reconciliation
 
+### Gmail
+
+- [x] OAuth Authorization Code + PKCE
+- [x] `gmail.readonly` only; no mailbox mutation
+- [x] Encrypted refresh/access credentials
+- [x] Personal/family source ownership
+- [x] Recent bounded mailbox sync + stable message-ID dedupe
+- [x] MIME text/plain extraction + HTML fallback
+- [x] Email/thread/message/identity mapping into generic SOL models
+- [x] Email source items visible immediately in Life
+- [x] Sparse scheduled sync + manual sync in Inputs
+- [ ] Real Google OAuth/Gmail API integration test on target account
+- [ ] Gmail push/watch notifications
+- [ ] Full historical import
+- [ ] Attachments / document extraction
+- [ ] Better quoted-text/signature reduction
+
+See `docs/GMAIL.md`.
+
 ### Google Calendar
 
 - [x] Multiple OAuth accounts/calendars
+- [x] Read capability represented as Input
 - [x] Separate read/write selection
 - [x] Incremental reconciliation
 - [x] Calendar events represented in Life
-- [x] Approved proposal → idempotent Calendar write
+- [x] Approved proposal → idempotent Calendar write Output
 - [ ] Real target-host OAuth integration test
 
 ### Home Assistant
@@ -50,8 +75,9 @@ Executive remains the protected write/action boundary. Codex remains an optional
 - [x] Snapshot vs changes modes
 - [x] Realtime selected `state_changed`
 - [x] Selected state exposed through MCP read facade
+- [x] Read capability surfaced as Input
 - [ ] Per-member sensitive entity visibility
-- [ ] Audited control actions behind explicit grants/proposals
+- [ ] Audited control Output behind explicit grants/proposals
 
 ### Mercado Libre
 
@@ -61,15 +87,17 @@ Executive remains the protected write/action boundary. Codex remains an optional
 - [x] Recent orders/questions
 - [x] Business dashboard/context
 - [x] Business summary exposed through MCP
+- [x] Read capability surfaced as Input
 - [ ] Real OAuth/API integration test
 - [ ] HTTPS webhooks/notifications
 - [ ] Historical import
-- [ ] Explicit audited business write proposals
+- [ ] Explicit audited business write Output
 
 ## Life + Knowledge 🟡 priority
 
 - [x] Privacy-filtered Life timeline
 - [x] People/Projects views
+- [x] Provider filters including WhatsApp/Gmail/Calendar/HA/MeLi/MCP
 - [x] WhatsApp identity → Person promotion
 - [x] Manual Person/Project creation
 - [x] Facts/aliases read model
@@ -88,9 +116,9 @@ Executive remains the protected write/action boundary. Codex remains an optional
 - [ ] Explicit shared/project grant propagation during consolidation
 - [ ] Optional semantic retrieval profile after baseline search is proven
 
-The first AI consolidator intentionally handles only `private` and `family` text-bearing source items. MCP schedule submissions bypass AI for structured normalization, but still enter Life first and retain `source_links` provenance. See `docs/KNOWLEDGE.md` and `docs/MCP.md`.
+The AI consolidator intentionally handles only compatible privacy scopes in each batch. Structured MCP schedules bypass AI but still enter Life first and retain provenance.
 
-## MCP ✅ v0.9 core
+## MCP ✅ core
 
 - [x] MCP specification `2026-07-28` target
 - [x] TypeScript MCP SDK v2
@@ -120,30 +148,37 @@ The first AI consolidator intentionally handles only `private` and `family` text
 
 See `docs/MCP.md`.
 
-## Executive / actions ✅ core, narrower role
+## Outputs / actions ✅ core model
 
-Executive is no longer the mandatory conversational brain. It remains the policy boundary for externally visible writes.
+The unified Outputs surface now separates what SOL can **do** from what SOL can merely **read**.
 
-- [x] Pending proposals
-- [x] Explicit approve/reject
+### Current
+
+- [x] WhatsApp de SOL as communication Output/interface
+- [x] Google Calendar selected write destination
+- [x] Executive pending proposals / approve / reject
 - [x] Private/family decision policy
 - [x] Approved local task creation
 - [x] Approved Calendar write
 - [x] Action audit
 - [x] Conflict/brief primitives
+- [x] Home Assistant control shown explicitly as unavailable rather than implied by read access
+- [x] Mercado Libre writes shown explicitly as unavailable rather than implied by read access
+
+### Next
+
 - [ ] Proposal editing/clarification
 - [ ] Rich reminder/snooze/reschedule policy
 - [ ] MCP proposal-oriented action tools
 - [ ] HA action grants + stronger security-domain approval
 - [ ] Mercado Libre externally visible action policy
+- [ ] Future Gmail send Output only with separate OAuth scope/policy; never implied by Gmail Input
 
 Future external-action MCP flow:
 
 ```text
-client → propose_action → Executive → permission/risk/approval → action → action_log
+client → propose_action → Executive → permission/risk/approval → Output → action_log
 ```
-
-MCP `submit_information` / `submit_schedule` are not external actions: they are authenticated information ingress into Life, with provenance and separate scope control.
 
 ## AI providers 🟡 optional enrichment
 
@@ -156,36 +191,32 @@ MCP `submit_information` / `submit_schedule` are not external actions: they are 
 - [x] Source prompt-injection boundary
 - [x] Missing/disconnected Codex no longer needs to keep realtime WhatsApp candidate outbox work hot
 
-### New role
-
-AI is optional for:
-
-- extraction from unstructured messages/documents;
-- entity/fact discovery;
-- Life → Knowledge consolidation;
-- alias/relation resolution;
-- summaries.
-
-AI is not required for:
-
-- database access;
-- MCP Life/Knowledge queries;
-- structured MCP schedule ingestion;
-- identity/privacy enforcement;
-- source ingestion;
-- authorization.
+AI is optional for extraction, entity/fact discovery, Life → Knowledge consolidation, alias/relation resolution and summaries. It is not required for source ingestion, database access, privacy enforcement or authorization.
 
 ## Interfaces
 
-### Web 🟡
+### Web ✅ v0.10 shell
 
+Primary navigation is intentionally small:
+
+```text
+Inicio
+Inputs
+Outputs
+Life
+MCP
+AI
+```
+
+- [x] Unified shell/navigation
+- [x] Inputs control center with source health, counters and raw feed
+- [x] Outputs control center with capability/status separation
+- [x] Legacy provider pages hidden from normal navigation and available only as advanced adapters
 - [x] onboarding/auth
 - [x] Life + People + Projects
-- [x] connector setup pages
-- [x] Executive
-- [x] MCP token/access UI wired into navigation
-- [x] MCP `submit` scope opt-in shown during token creation
-- [ ] unified PWA shell/navigation
+- [x] MCP token/access UI
+- [x] Windows notification-tray health indicator
+- [ ] Move remaining provider-specific advanced settings fully into Inputs/Outputs dialogs
 - [ ] user-facing privacy/grant controls
 - [ ] member lifecycle management
 
@@ -206,15 +237,12 @@ AI is not required for:
 - [ ] Generic MCP-host compatibility recipes
 - [ ] Mobile/PWA interaction improvements
 
-## Next sources
+## Next Inputs
 
-Priority is determined by how much useful family context they add:
-
-1. [ ] Gmail
-2. [ ] Google Drive/files
-3. [ ] Contacts
-4. [ ] richer local files/media
-5. [ ] additional business/household sources
+1. [ ] Google Drive/files
+2. [ ] Contacts
+3. [ ] richer local files/media
+4. [ ] additional business/household sources
 
 ## Deployment hardening
 
@@ -230,9 +258,10 @@ Priority is determined by how much useful family context they add:
 
 ## Immediate development order
 
-1. Validate MCP read + `submit` tools end-to-end on the target Windows/Codex host.
-2. Add first-class schedule/routine read tools (school schedules are the first concrete case).
-3. Expand MCP provenance/date-range reads.
-4. Add more deterministic structured consolidation where AI is unnecessary.
-5. Add Gmail/Drive/Contacts ingestion.
-6. Only then expose proposal-oriented MCP external-action tools.
+1. Validate v0.10 migration `0014_gmail` + Gmail OAuth/sync on the target Windows host.
+2. Diagnose/finish WhatsApp target-host ingestion using Inputs raw feed counters.
+3. Add first-class schedule/routine MCP reads.
+4. Move remaining advanced provider settings into the unified Inputs/Outputs UI.
+5. Add Drive/Contacts ingestion.
+6. Expand provenance/date-range reads and deterministic structured consolidation.
+7. Only then expose more proposal-oriented external Outputs.
