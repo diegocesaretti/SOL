@@ -67,7 +67,16 @@ export const config = {
   googleRedirectUri:
     optionalEnv("SOL_GOOGLE_REDIRECT_URI") ??
     `http://${host}:${port}/v1/google/callback`,
+  mercadoLibreClientId: optionalEnv("SOL_MERCADOLIBRE_CLIENT_ID"),
+  mercadoLibreClientSecret: optionalEnv("SOL_MERCADOLIBRE_CLIENT_SECRET"),
+  // Mercado Libre currently requires this URI to be HTTPS and to exactly match
+  // the static URI registered in the application configuration.
+  mercadoLibreRedirectUri: optionalEnv("SOL_MERCADOLIBRE_REDIRECT_URI"),
+  mercadoLibreAuthUrl:
+    optionalEnv("SOL_MERCADOLIBRE_AUTH_URL") ??
+    "https://auth.mercadolibre.com.ar/authorization",
   // Cloud-friendly defaults leave long idle windows so scale-to-zero can engage.
   calendarSyncMs: integerEnv("SOL_CALENDAR_SYNC_MS", 60 * 60 * 1000),
+  mercadoLibreSyncMs: integerEnv("SOL_MERCADOLIBRE_SYNC_MS", 60 * 60 * 1000),
   executivePollMs: integerEnv("SOL_EXECUTIVE_POLL_MS", 30 * 60 * 1000),
 } as const;
