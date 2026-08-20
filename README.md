@@ -22,8 +22,9 @@ SOL is a family-first personal information and automation system: one integrated
 ```text
 SOURCES
 member WhatsApps ─┐
-Google Calendars ─┼─→ Life → Knowledge → Executive → Actions
-future HA / ML ───┘        │        │          │
+Google Calendars ─┤
+Home Assistant ───┼─→ Life → Knowledge → Executive → Actions
+Mercado Libre ────┘        │        │          │
                            │        │          │
                            └── Timeline         │
                                 People/Projects │
@@ -49,10 +50,10 @@ SOL WhatsApp ↔ verified family members ────────┘
 - dedicated **WhatsApp de SOL** assistant account, separate from monitored sources;
 - one-time member → actual WhatsApp JID/LID binding;
 - questions, briefs, create requests and deterministic proposal approvals over SOL WhatsApp;
-- `/life` privacy-filtered timeline of source items, Life events and tasks;
-- `/life` People/Projects knowledge views with aliases/facts;
-- WhatsApp identities promoted to Person entities using source-matched privacy;
-- manual private/family Person and Project creation.
+- `/life` privacy-filtered Timeline + People + Projects;
+- Home Assistant read-only source with explicit entity selection, state snapshots and selected live changes;
+- Mercado Libre read-only seller source with OAuth/PKCE, publications, recent orders and questions;
+- private/shared business-account boundaries and a local business dashboard.
 
 ## Repository layout
 
@@ -70,41 +71,31 @@ SOL/
 │       │   ├── knowledge/
 │       │   ├── executive/
 │       │   ├── connectors/
-│       │   │   ├── whatsapp/          # monitored sources
-│       │   │   ├── sol-whatsapp/      # assistant interface
-│       │   │   └── google-calendar/
+│       │   │   ├── whatsapp/
+│       │   │   ├── sol-whatsapp/
+│       │   │   ├── google-calendar/
+│       │   │   ├── home-assistant/
+│       │   │   └── mercadolibre/
 │       │   └── ai/codex/
 │       └── ui/
 ├── packages/database/migrations/
 ├── scripts/windows/
 └── docs/
-    ├── ARCHITECTURE.md
-    ├── NEON.md
-    ├── WINDOWS_NATIVE.md
-    ├── CODEX.md
-    ├── WHATSAPP.md
-    ├── SOL_WHATSAPP.md
-    ├── INTEGRATIONS.md
-    ├── DATA_MODEL.md
-    ├── SECURITY.md
-    └── ROADMAP.md
 ```
 
-## Quick start — Neon (recommended prototype profile)
+## Quick start — Neon
 
 Requirements: Node.js 22+ (24 recommended), pnpm, internet access, and Codex CLI if AI reasoning is enabled.
-
-**Docker Desktop, WSL, Hyper-V, Redis, pgvector and a local PostgreSQL installation are not required.**
 
 ```powershell
 pnpm install
 pnpm db:configure
 pnpm db:check
 pnpm db:migrate
+pnpm test
+pnpm typecheck
 pnpm dev
 ```
-
-`pnpm db:configure` asks for a PostgreSQL connection string through a hidden PowerShell prompt and writes it only to the Git-ignored `.env` file.
 
 Open:
 
@@ -115,75 +106,56 @@ http://127.0.0.1:3000/
 Useful screens:
 
 ```text
-/               SOL Home
-/life           Timeline + People + Projects
-/sol-whatsapp   SOL's own WhatsApp interface + member binding
-/executive      brief + pending proposals
-/calendar       Google accounts/calendars
-/whatsapp       monitored WhatsApp source accounts
-/ai             Codex / ChatGPT
+/                 SOL Home
+/life             Timeline + People + Projects
+/sol-whatsapp     SOL's own WhatsApp interface + member binding
+/executive        brief + pending proposals
+/calendar         Google accounts/calendars
+/whatsapp         monitored WhatsApp source accounts
+/home-assistant   selected household states/events
+/mercadolibre     seller/business dashboard
+/ai               Codex / ChatGPT
 ```
 
-See [docs/NEON.md](docs/NEON.md), [docs/SOL_WHATSAPP.md](docs/SOL_WHATSAPP.md) and [docs/ROADMAP.md](docs/ROADMAP.md).
+## Home Assistant
 
-## Local PostgreSQL alternative
+The current connector is deliberately read-only. An owner/adult supplies a Long-Lived Access Token, which SOL encrypts with a host-local AES-256-GCM key. SOL discovers `/api/states`, stores only explicitly selected entities, and subscribes to selected `state_changed` events over the Home Assistant WebSocket API.
 
-If household data should remain on the SOL machine:
+High-frequency numeric `sensor.*` entities default to snapshot mode so they do not create a Life event for every small value update. Control permissions are modeled separately and no service-call route exists yet.
 
-```powershell
-pnpm install
-pnpm db:setup
-pnpm db:check
-pnpm db:migrate
-pnpm dev
-```
+See [docs/HOME_ASSISTANT.md](docs/HOME_ASSISTANT.md).
 
-Only `DATABASE_URL` changes; SOL application behavior is the same. See [docs/WINDOWS_NATIVE.md](docs/WINDOWS_NATIVE.md).
+## Mercado Libre
 
-## WhatsApp: source vs assistant
+The first Mercado Libre connector is also read-only:
 
 ```text
-Member's ordinary WhatsApp
-       ↓
-monitored SOURCE
-       ↓
-third-party text = untrusted data
-
-Dedicated WhatsApp de SOL
-       ↕
-verified MEMBER INTERFACE
-       ↓
-questions / proposals / approvals
+Mercado Libre OAuth + PKCE
+          ↓
+ seller identity / publications / recent orders / questions
+          ↓
+      PostgreSQL snapshots
+          ↓
+ orders + questions → Life
+          ↓
+       /mercadolibre
 ```
 
-The assistant account skips normal history ingestion. A member binds their direct WhatsApp identity by generating a short-lived code from an authenticated SOL web session and sending it to the dedicated SOL account. `sí/no` is scoped to the last proposal SOL explicitly asked that member about.
+OAuth access/refresh tokens are AES-256-GCM encrypted with a host-local key. Refresh is serialized because Mercado Libre refresh tokens are single-use and rotate on each refresh.
 
-## Life and Knowledge
+Mercado Libre currently requires the registered OAuth redirect URI to be **HTTPS** and static. Configure:
 
-`/life` is built from permission-filtered queries rather than fetching household data and hiding it afterwards.
-
-```text
-Timeline
-├── visible source items
-├── visible Life events
-└── visible tasks
-
-Knowledge
-├── People
-│   ├── aliases
-│   └── visible facts
-└── Projects
-    ├── aliases
-    └── visible facts
+```dotenv
+SOL_MERCADOLIBRE_CLIENT_ID=...
+SOL_MERCADOLIBRE_CLIENT_SECRET=...
+SOL_MERCADOLIBRE_REDIRECT_URI=https://your-sol-host.example/v1/mercadolibre/callback
+SOL_MERCADOLIBRE_AUTH_URL=https://auth.mercadolibre.com.ar/authorization
+SOL_MERCADOLIBRE_SYNC_MS=3600000
 ```
 
-Manual People/Projects may be `private` or `family`. WhatsApp-derived People inherit a conservative privacy scope from the source that first established the identity. More complete cross-source/entity consolidation remains a later Knowledge job.
+Enable PKCE in the Mercado Libre application settings. Until SOL has a public HTTPS notification endpoint, the connector reconciles periodically and can also be synced manually from `/mercadolibre`.
 
-## Database behavior
-
-PostgreSQL is SOL's only required infrastructure service. Notifications are wake signals; durable truth remains in `event_outbox`. A slow recovery pass handles missed wakeups. Redis and pgvector remain deferred until a measured need exists.
-
-Large photos/audio/video/PDF attachments should eventually live in local/object storage, with PostgreSQL keeping structured metadata and references.
+See [docs/MERCADOLIBRE.md](docs/MERCADOLIBRE.md).
 
 ## Google Calendar setup
 
@@ -203,16 +175,18 @@ SOL_GOOGLE_REDIRECT_URI=http://127.0.0.1:3000/v1/google/callback
 
 OAuth credentials are encrypted before PostgreSQL storage with a local key under `.sol/secrets/google-oauth.key`.
 
-## Planned first-class connectors
+## Database behavior
 
-Home Assistant and Mercado Libre API remain planned **source + action** connectors. They will feed the same Life → Knowledge → Executive flow and become available to Web, SOL WhatsApp and voice through the same permission layer.
+PostgreSQL is SOL's only required infrastructure service. Notifications are wake signals; durable truth remains in `event_outbox`. A slow recovery pass handles missed wakeups. Redis and pgvector remain deferred until a measured need exists.
 
-See [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md).
+Large photos/audio/video/PDF attachments should eventually live in local/object storage, with PostgreSQL keeping structured metadata and references.
 
 ## Security note
 
-SOL binds to `127.0.0.1` by default. Do not expose the development server directly to the internet. `.env`, `.sol/`, database credentials, Codex OAuth data, WhatsApp auth encryption keys and Google OAuth encryption keys are ignored by Git and must be protected like credentials.
+SOL binds to `127.0.0.1` by default. Do not expose the development server directly to the internet. `.env`, `.sol/`, database credentials, Codex OAuth data and connector encryption keys are ignored by Git and must be protected like credentials.
+
+A reverse proxy/public HTTPS endpoint for Mercado Libre OAuth or future webhooks must be hardened separately from the localhost development profile.
 
 ## Current status
 
-Phases 0–3 are implemented; Phase 4 (Calendar/executive) and Phase 5 (SOL WhatsApp) are implemented at core level. **Phase 6 is underway with the Timeline and People/Projects core already implemented.** Real Google OAuth and both WhatsApp linked-device flows still need integration tests on the target host.
+Phases 0–3 are implemented; Phase 4 (Calendar/executive) and Phase 5 (SOL WhatsApp) are implemented at core level. Phase 6 is underway with Timeline and People/Projects already implemented. Home Assistant and Mercado Libre now have **read-only source cores**; both still need real integration tests on the target SOL host.
