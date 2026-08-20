@@ -1,162 +1,18 @@
+import { solShellStyles, solSidebar } from "./shell.js";
+
 export function renderOnboardingPage(): string {
-  return `<!doctype html>
-<html lang="es">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>SOL · Inicio</title>
-  <style>
-    :root { color-scheme: light dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-    * { box-sizing: border-box; }
-    body { margin: 0; min-height: 100vh; background: Canvas; color: CanvasText; }
-    main { width: min(900px, calc(100% - 32px)); margin: 0 auto; padding: 52px 0 80px; }
-    .brand { font-size: 14px; font-weight: 850; letter-spacing: .18em; opacity: .7; }
-    h1 { margin: 12px 0 8px; font-size: clamp(36px, 7vw, 64px); letter-spacing: -.04em; }
-    h2 { margin: 0 0 8px; font-size: 24px; }
-    h3 { margin: 24px 0 6px; font-size: 17px; }
-    p { line-height: 1.55; opacity: .8; }
-    a { color: inherit; }
-    .card { margin-top: 28px; padding: 26px; border: 1px solid color-mix(in srgb, CanvasText 18%, transparent); border-radius: 22px; background: color-mix(in srgb, Canvas 96%, CanvasText 4%); }
-    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-    label { display: grid; gap: 7px; font-size: 13px; font-weight: 700; }
-    label.full { grid-column: 1 / -1; }
-    input, select { width: 100%; padding: 12px 14px; border-radius: 12px; border: 1px solid color-mix(in srgb, CanvasText 22%, transparent); background: Canvas; color: CanvasText; font: inherit; }
-    button, .action-link { margin-top: 18px; padding: 11px 16px; border: 0; border-radius: 999px; font: inherit; font-weight: 800; cursor: pointer; background: CanvasText; color: Canvas; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; }
-    button.secondary, .action-link.secondary { background: transparent; color: CanvasText; border: 1px solid color-mix(in srgb, CanvasText 20%, transparent); }
-    button:disabled { opacity: .45; cursor: wait; }
-    .status { margin-top: 14px; min-height: 20px; font-size: 14px; }
-    .error { color: #d33; }
-    .muted { opacity: .62; }
-    .pill { display: inline-flex; align-items: center; gap: 8px; padding: 7px 11px; border-radius: 999px; border: 1px solid color-mix(in srgb, CanvasText 16%, transparent); font-size: 13px; white-space: nowrap; }
-    .dot { width: 8px; height: 8px; border-radius: 50%; background: #2ca44f; }
-    .row { display: flex; justify-content: space-between; gap: 20px; align-items: center; padding: 15px 0; border-top: 1px solid color-mix(in srgb, CanvasText 12%, transparent); }
-    .row:first-of-type { border-top: 0; }
-    .actions { display: flex; gap: 10px; flex-wrap: wrap; }
-    .modules { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-top: 20px; }
-    .module { display: block; padding: 18px; border: 1px solid color-mix(in srgb, CanvasText 14%, transparent); border-radius: 17px; text-decoration: none; min-height: 105px; }
-    .module strong { display: block; margin-bottom: 6px; font-size: 17px; }
-    .module span { font-size: 13px; opacity: .66; line-height: 1.4; }
-    .module.primary { background: color-mix(in srgb, CanvasText 7%, Canvas); }
-    details { margin-top: 18px; padding-top: 16px; border-top: 1px solid color-mix(in srgb, CanvasText 12%, transparent); }
-    summary { cursor: pointer; font-weight: 800; }
-    details form { margin-top: 16px; }
-    @media (max-width: 680px) { main { padding: 34px 0 60px; } .grid, .modules { grid-template-columns: 1fr; } label.full { grid-column: auto; } .card { padding: 21px; } .row { align-items: flex-start; } }
-  </style>
-</head>
-<body>
-  <main>
-    <div class="brand">SOL</div>
-    <h1>Tu información, organizada.</h1>
-    <p id="intro">Iniciando SOL…</p>
-    <section class="card" id="app"><p class="muted">Cargando estado del sistema…</p></section>
-  </main>
-<script>
-  const app = document.getElementById('app');
-  const intro = document.getElementById('intro');
-
-  function escapeHtml(value) {
-    return String(value ?? '').replace(/[&<>'"]/g, (char) => ({
-      '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#039;', '"': '&quot;'
-    })[char]);
-  }
-
-  async function api(path, options = {}) {
-    const response = await fetch(path, { cache: 'no-store', ...options });
-    let body = {};
-    try { body = await response.json(); } catch {}
-    return { response, body };
-  }
-
-  function onboardingView() {
-    intro.textContent = 'Primero definimos el hogar y a la primera persona administradora. Después sumamos miembros y fuentes.';
-    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-    const locale = navigator.language || 'es-AR';
-    app.innerHTML = \`
-      <h2>Crear hogar</h2>
-      <p>El primer perfil será owner. Los demás miembros tendrán su propio acceso, privacidad y fuentes.</p>
-      <form id="setup-form"><div class="grid">
-        <label class="full">Nombre del hogar<input name="householdName" autocomplete="organization" required maxlength="120" /></label>
-        <label>Tu nombre<input name="ownerName" autocomplete="name" required maxlength="120" /></label>
-        <label>Usuario<input name="ownerLogin" autocomplete="username" required minlength="3" maxlength="40" pattern="[A-Za-z0-9._-]+" /></label>
-        <label>Contraseña<input name="ownerPassword" type="password" autocomplete="new-password" required minlength="8" maxlength="256" /></label>
-        <label>Zona horaria<input name="timezone" value="\${escapeHtml(timezone)}" required maxlength="100" /></label>
-      </div><input type="hidden" name="ownerLocale" value="\${escapeHtml(locale)}" />
-      <button>Crear SOL Home</button><div class="status" id="status"></div></form>
-    \`;
-    const form = document.getElementById('setup-form');
-    form.addEventListener('submit', async (event) => {
-      event.preventDefault(); const button=form.querySelector('button'); const status=document.getElementById('status');
-      button.disabled=true; status.textContent='Creando hogar…'; status.className='status';
-      const data=Object.fromEntries(new FormData(form).entries());
-      const result=await api('/v1/onboarding',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(data)});
-      if(!result.response.ok){status.className='status error';status.textContent=result.body.error||'No se pudo crear el hogar';button.disabled=false;return}
-      await load();
-    });
-  }
-
-  function loginView(state) {
-    intro.textContent = 'Cada miembro entra con su identidad. SOL filtra privacidad antes de exponer información por UI, MCP o IA.';
-    const options=state.households.map(h=>\`<option value="\${escapeHtml(h.id)}">\${escapeHtml(h.name)}</option>\`).join('');
-    app.innerHTML=\`<h2>Entrar a SOL</h2><form id="login-form"><div class="grid">
-      <label class="full">Hogar<select name="householdId">\${options}</select></label>
-      <label>Usuario<input name="loginName" autocomplete="username" required maxlength="40" /></label>
-      <label>Contraseña<input name="password" type="password" autocomplete="current-password" required maxlength="256" /></label>
-    </div><button>Entrar</button><div class="status" id="status"></div></form>\`;
-    const form=document.getElementById('login-form');
-    form.addEventListener('submit',async(event)=>{event.preventDefault();const button=form.querySelector('button');const status=document.getElementById('status');button.disabled=true;status.textContent='Entrando…';const data=Object.fromEntries(new FormData(form).entries());const result=await api('/v1/auth/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(data)});if(!result.response.ok){status.className='status error';status.textContent=result.response.status===401?'Usuario o contraseña incorrectos.':result.body.error||'No se pudo entrar';button.disabled=false;return}await load()});
-  }
-
-  async function homeView(state, member) {
-    const household=state.households.find(item=>item.id===member.householdId);
-    intro.textContent='SOL reúne Life + Knowledge y los expone de forma segura por MCP; las acciones siguen protegidas por Executive.';
-    const [membersResult,sourcesResult,proposalResult]=await Promise.all([
-      api('/v1/households/'+encodeURIComponent(member.householdId)+'/members'),
-      api('/v1/source-accounts'),
-      api('/v1/executive/proposals?status=pending')
-    ]);
-    const members=membersResult.response.ok?membersResult.body.members:[];
-    const sources=sourcesResult.response.ok?sourcesResult.body.sourceAccounts:[];
-    const pending=proposalResult.response.ok?(proposalResult.body.proposals||[]).length:0;
-    const manager=member.role==='owner'||member.role==='adult';
-    const memberRows=members.map(item=>\`<div class="row"><div><strong>\${escapeHtml(item.displayName)}</strong><br><span class="muted">\${escapeHtml(item.role)}\${item.loginName?' · @'+escapeHtml(item.loginName):''}</span></div><span class="pill"><span class="dot"></span>\${escapeHtml(item.status)}</span></div>\`).join('');
-    const sourceRows=sources.length?sources.map(item=>\`<div class="row"><div><strong>\${escapeHtml(item.label)}</strong><br><span class="muted">\${escapeHtml(item.provider)}\${item.ownerMemberId?' · personal':' · hogar'}</span></div><span class="pill">\${escapeHtml(item.status)}</span></div>\`).join(''):'<p class="muted">Todavía no hay fuentes conectadas.</p>';
-    const roleOptions=member.role==='owner'?'<option value="adult">Adulto</option><option value="member">Miembro</option><option value="child">Niño/a</option><option value="guest">Invitado</option>':'<option value="member">Miembro</option><option value="child">Niño/a</option><option value="guest">Invitado</option>';
-    const memberForm=manager?\`<details><summary>Agregar miembro</summary><form id="member-form"><div class="grid"><label>Nombre<input name="displayName" required maxlength="120" /></label><label>Rol<select name="role">\${roleOptions}</select></label><label>Usuario<input name="loginName" required minlength="3" maxlength="40" pattern="[A-Za-z0-9._-]+" /></label><label>Contraseña inicial<input name="password" type="password" required minlength="8" maxlength="256" /></label></div><button>Agregar</button><div class="status" id="member-status"></div></form></details>\`:'';
-
-    app.innerHTML=\`
-      <div class="row"><div><h2>\${escapeHtml(household?.name||'SOL Home')}</h2><span class="muted">Sesión: \${escapeHtml(member.displayName)} · \${escapeHtml(member.role)}</span></div><span class="pill">\${pending} por confirmar</span></div>
-      <div class="modules">
-        <a class="module primary" href="/mcp"><strong>MCP · conectar un cerebro</strong><span>Acceso read-only por miembro a Timeline, Knowledge, casa y negocio para clientes MCP.</span></a>
-        <a class="module primary" href="/life"><strong>Vida & Knowledge</strong><span>Timeline, personas y proyectos que SOL organiza y puede mostrar según tus permisos.</span></a>
-        <a class="module" href="/sol-whatsapp"><strong>WhatsApp de SOL</strong><span>Interfaz móvil para preguntas, briefs y aprobaciones verificadas.</span></a>
-        <a class="module" href="/executive"><strong>Executive</strong><span>Propuestas, tareas y decisiones protegidas antes de ejecutar acciones externas.</span></a>
-        <a class="module" href="/calendar"><strong>Calendar</strong><span>Cuentas personales y familiares, calendarios leídos y destino de escritura.</span></a>
-        <a class="module" href="/whatsapp"><strong>Fuentes WhatsApp</strong><span>Cuentas observadas, mensajes almacenados y candidatos detectados.</span></a>
-        <a class="module" href="/home-assistant"><strong>Home Assistant</strong><span>Estados y cambios elegidos de la casa, actualmente en modo lectura.</span></a>
-        <a class="module" href="/mercadolibre"><strong>Mercado Libre</strong><span>Ventas, publicaciones y preguntas del negocio como fuente operativa de SOL.</span></a>
-        <a class="module" href="/ai"><strong>AI enrichment</strong><span>Codex opcional para extracción, clasificación y futura consolidación de Knowledge.</span></a>
-      </div>
-      <h3>Miembros</h3>\${memberRows}\${memberForm}
-      <h3>Fuentes</h3>\${sourceRows}
-      <div class="actions"><a class="action-link secondary" href="/mcp">Abrir MCP</a><a class="action-link secondary" href="/life">Abrir Vida</a><a class="action-link secondary" href="/mercadolibre">Abrir negocio</a><a class="action-link secondary" href="/executive">Abrir Executive</a><button class="secondary" id="logout">Cerrar sesión</button></div>
-    \`;
-
-    const mf=document.getElementById('member-form');
-    if(mf)mf.addEventListener('submit',async(event)=>{event.preventDefault();const status=document.getElementById('member-status');const button=mf.querySelector('button');button.disabled=true;status.textContent='Creando miembro…';const data=Object.fromEntries(new FormData(mf).entries());data.locale=navigator.language||'es-AR';const result=await api('/v1/households/'+encodeURIComponent(member.householdId)+'/members',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(data)});if(!result.response.ok){status.className='status error';status.textContent=result.body.error||'No se pudo crear';button.disabled=false;return}await load()});
-    document.getElementById('logout').addEventListener('click',async()=>{await api('/v1/auth/logout',{method:'POST'});await load()});
-  }
-
-  async function load(){
-    try{
-      const stateResult=await api('/v1/onboarding');
-      if(!stateResult.response.ok)throw new Error(stateResult.body.error||'No se pudo consultar SOL');
-      const state=stateResult.body;
-      if(!state.configured){onboardingView();return}
-      const me=await api('/v1/auth/me');
-      if(me.response.ok)await homeView(state,me.body.member);else loginView(state);
-    }catch(error){intro.textContent='SOL no pudo consultar su base de datos.';app.innerHTML=\`<h2>Base no disponible</h2><p class="error">\${escapeHtml(error.message)}</p><p class="muted">Verificá PostgreSQL/Neon y ejecutá pnpm db:migrate.</p>\`}
-  }
-  load();
-</script>
-</body></html>`;
+  return `<!doctype html><html lang="es"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>SOL</title><style>${solShellStyles()}
+.authwrap{min-height:100vh;display:grid;place-items:center;padding:24px}.authbox{width:min(560px,100%)}.authbrand{display:flex;align-items:center;gap:12px;margin-bottom:28px}.authbrand .brandmark{width:42px;height:42px}.authcard{background:var(--panel);border:1px solid var(--line);border-radius:22px;padding:24px}.authcard h1{font-size:38px}.authcard .fieldrow{grid-template-columns:1fr 1fr}.dashboard-item{padding:12px 0;border-bottom:1px solid var(--line)}.dashboard-item:last-child{border-bottom:0}@media(max-width:680px){.authcard .fieldrow{grid-template-columns:1fr}}
+</style></head><body><div id="auth" class="authwrap"><div class="authbox"><div class="authbrand"><div class="brandmark">S</div><div><div class="eyebrow">SOL</div><div class="muted small">Personal data & knowledge OS</div></div></div><div id="auth-card" class="authcard"><div class="empty">Iniciando SOL…</div></div></div></div><div id="shell" class="app" style="display:none">${solSidebar("home")}<main class="main"><section class="page" id="dashboard"></section></main></div><script>
+const auth=document.getElementById('auth'),authCard=document.getElementById('auth-card'),shell=document.getElementById('shell'),dashboard=document.getElementById('dashboard');
+const esc=v=>String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#039;','"':'&quot;'}[c]));
+async function api(path,o={}){const c=new AbortController(),t=setTimeout(()=>c.abort(),12000);try{const r=await fetch(path,{cache:'no-store',...o,signal:c.signal});let b={};try{b=await r.json()}catch{}return{r,b}}catch(e){return{r:{ok:false,status:0},b:{error:e?.name==='AbortError'?'Tiempo de espera agotado':e?.message||'Error de conexión'}}}finally{clearTimeout(t)}}
+function fmt(v){if(!v)return '—';try{return new Intl.DateTimeFormat('es-AR',{dateStyle:'short',timeStyle:'short'}).format(new Date(v))}catch{return v}}
+function showAuth(){auth.style.display='grid';shell.style.display='none'}function showShell(){auth.style.display='none';shell.style.display='grid'}
+function onboarding(){showAuth();const tz=Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC',loc=navigator.language||'es-AR';authCard.innerHTML='<div class="eyebrow">Primera configuración</div><h1>Crear tu SOL.</h1><p class="lead">Definí el hogar y la primera identidad. Después conectás todos los Inputs desde una sola pantalla.</p><form id="setup"><label>Nombre del hogar<input name="householdName" required maxlength="120"></label><div class="fieldrow" style="margin-top:10px"><label>Tu nombre<input name="ownerName" required maxlength="120"></label><label>Usuario<input name="ownerLogin" required minlength="3" maxlength="40" pattern="[A-Za-z0-9._-]+"></label></div><div class="fieldrow" style="margin-top:10px"><label>Contraseña<input type="password" name="ownerPassword" required minlength="8"></label><label>Zona horaria<input name="timezone" value="'+esc(tz)+'" required></label></div><input type="hidden" name="ownerLocale" value="'+esc(loc)+'"><div class="cluster" style="margin-top:16px"><button class="primary">Crear SOL</button><span id="st" class="muted"></span></div></form>';document.getElementById('setup').onsubmit=async e=>{e.preventDefault();const st=document.getElementById('st'),d=Object.fromEntries(new FormData(e.currentTarget).entries());st.textContent='Creando…';const out=await api('/v1/onboarding',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(d)});if(!out.r.ok){st.className='error';st.textContent=out.b.error||'No se pudo crear';return}await load()}}
+function login(state){showAuth();const opts=(state.households||[]).map(h=>'<option value="'+esc(h.id)+'">'+esc(h.name)+'</option>').join('');authCard.innerHTML='<div class="eyebrow">Acceso</div><h1>Entrar a SOL.</h1><p class="lead">Cada miembro usa su propia identidad y límite de privacidad.</p><form id="login"><label>Hogar<select name="householdId">'+opts+'</select></label><div class="fieldrow" style="margin-top:10px"><label>Usuario<input name="loginName" required></label><label>Contraseña<input type="password" name="password" required></label></div><div class="cluster" style="margin-top:16px"><button class="primary">Entrar</button><span id="st" class="muted"></span></div></form>';document.getElementById('login').onsubmit=async e=>{e.preventDefault();const st=document.getElementById('st'),d=Object.fromEntries(new FormData(e.currentTarget).entries());st.textContent='Entrando…';const out=await api('/v1/auth/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(d)});if(!out.r.ok){st.className='error';st.textContent=out.r.status===401?'Usuario o contraseña incorrectos':out.b.error||'Error';return}await load()}}
+async function home(member,state){showShell();const [inputsR,lifeR,propR,membersR]=await Promise.all([api('/v1/inputs'),api('/v1/life/timeline?limit=12'),api('/v1/executive/proposals?status=pending'),api('/v1/households/'+encodeURIComponent(member.householdId)+'/members')]);const inputs=inputsR.r.ok?inputsR.b.inputs||[]:[],life=lifeR.r.ok?lifeR.b.items||[]:[],pending=propR.r.ok?(propR.b.proposals||[]).length:0,members=membersR.r.ok?membersR.b.members||[]:[];const active=inputs.filter(x=>['open','connected'].includes(x.runtime?.state||x.status)).length,total24=inputs.reduce((n,x)=>n+Number(x.stats?.items24h||0),0),house=(state.households||[]).find(h=>h.id===member.householdId);dashboard.innerHTML='<div class="toolbar"><div><div class="eyebrow">'+esc(house?.name||'SOL')+'</div><h1>Buen día, '+esc(member.displayName)+'.</h1><p class="lead">SOL organiza Inputs → Life → Knowledge y los expone por MCP. Acá ves si el sistema realmente está recibiendo información.</p></div><button id="logout">Cerrar sesión</button></div><div class="grid"><a class="card span4" href="/inputs" style="color:inherit;text-decoration:none"><div class="stat">'+active+'/'+inputs.length+'</div><div class="label">inputs activos</div></a><a class="card span4" href="/inputs" style="color:inherit;text-decoration:none"><div class="stat">'+total24.toLocaleString('es-AR')+'</div><div class="label">ítems recibidos · 24 h</div></a><a class="card span4" href="/executive" style="color:inherit;text-decoration:none"><div class="stat">'+pending+'</div><div class="label">acciones pendientes</div></a><div class="card span8"><div class="row between"><h2>Último en Life</h2><a class="button" href="/life">Abrir Life</a></div><div class="divider"></div>'+(life.length?life.slice(0,8).map(i=>'<div class="dashboard-item"><div class="row between"><strong>'+esc(i.title)+'</strong><span class="small muted">'+esc(fmt(i.occurredAt))+'</span></div><div class="small muted">'+esc(i.provider||i.type)+(i.sourceLabel?' · '+esc(i.sourceLabel):'')+'</div></div>').join(''):'<div class="empty">Todavía no hay elementos en Life.</div>')+'</div><div class="card span4"><div class="row between"><h2>Inputs</h2><a class="button primary" href="/inputs">Administrar</a></div><div class="divider"></div>'+(inputs.length?inputs.map(x=>{const s=x.runtime?.state||x.status,g=['open','connected'].includes(s)?'good':['error','logged_out'].includes(s)?'bad':'warn';return '<div class="dashboard-item"><div class="row between"><strong>'+esc(x.label)+'</strong><span class="dot '+g+'"></span></div><div class="small muted">'+esc(x.provider)+' · '+Number(x.stats?.items24h||0)+' en 24 h</div></div>'}).join(''):'<div class="empty">Sin inputs.</div>')+'</div><div class="card span12"><div class="row between"><div><h2>Miembros</h2><div class="small muted">'+members.length+' identidad(es) activas</div></div><a class="button" href="/mcp">MCP</a></div><div class="divider"></div><div class="cluster">'+members.map(m=>'<span class="badge">'+esc(m.displayName)+' · '+esc(m.role)+'</span>').join('')+'</div></div></div>';document.getElementById('logout').onclick=async()=>{await api('/v1/auth/logout',{method:'POST'});await load()}}
+async function load(){const stateR=await api('/v1/onboarding');if(!stateR.r.ok){showAuth();authCard.innerHTML='<div class="empty error">'+esc(stateR.b.error||'SOL no pudo consultar la base')+'</div>';return}const state=stateR.b;if(!state.configured){onboarding();return}const me=await api('/v1/auth/me');if(!me.r.ok){login(state);return}await home(me.b.member,state)}
+load();
+</script></body></html>`;
 }
