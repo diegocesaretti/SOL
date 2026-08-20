@@ -3,6 +3,7 @@ import type { PoolClient } from "pg";
 import { config } from "../../../config.js";
 import { db } from "../../../database/client.js";
 import { openMercadoLibreCredential, sealMercadoLibreCredential } from "./crypto.js";
+import { parseMercadoLibreJson } from "./json.js";
 
 const TOKEN_URL = "https://api.mercadolibre.com/oauth/token";
 
@@ -20,6 +21,7 @@ interface TokenResponse {
   expires_in?: number;
   token_type?: string;
   scope?: string;
+  user_id?: string | number;
   error?: string;
   message?: string;
   error_description?: string;
@@ -80,7 +82,7 @@ async function tokenRequest(params: URLSearchParams): Promise<TokenResponse> {
   const text = await response.text();
   let body: TokenResponse = {};
   try {
-    body = text ? (JSON.parse(text) as TokenResponse) : {};
+    body = text ? parseMercadoLibreJson<TokenResponse>(text) : {};
   } catch {
     throw new Error(`Mercado Libre OAuth returned invalid JSON (${response.status})`);
   }
@@ -237,7 +239,7 @@ export async function getMercadoLibreAccessToken(
   const client = await db.connect();
   try {
     await client.query("BEGIN");
-    // Refresh tokens are single-use. Serialize refreshes per account across all SOL processes.
+    // Mercado Libre refresh tokens are single-use. Serialize refreshes per account.
     await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`sol:mercadolibre:${sourceAccountId}`]);
     const result = await client.query<{ encrypted_payload: string }>(
       `SELECT encrypted_payload
