@@ -39,6 +39,8 @@ function optionalEnv(name: string): string | undefined {
 const codexHome = optionalEnv("SOL_CODEX_HOME") ?? resolve(repoRoot, ".sol", "codex");
 const host = process.env.SOL_HOST ?? "127.0.0.1";
 const port = integerEnv("SOL_PORT", 3000);
+const googleClientId = optionalEnv("SOL_GOOGLE_CLIENT_ID");
+const googleClientSecret = optionalEnv("SOL_GOOGLE_CLIENT_SECRET");
 
 export const config = {
   repoRoot,
@@ -62,11 +64,17 @@ export const config = {
   codexRequestTimeoutMs: integerEnv("SOL_CODEX_REQUEST_TIMEOUT_MS", 30_000),
   // PostgreSQL NOTIFY wakes the outbox immediately. This is only a recovery sweep.
   outboxPollMs: integerEnv("SOL_OUTBOX_RECOVERY_MS", 30 * 60 * 1000),
-  googleClientId: optionalEnv("SOL_GOOGLE_CLIENT_ID"),
-  googleClientSecret: optionalEnv("SOL_GOOGLE_CLIENT_SECRET"),
+  googleClientId,
+  googleClientSecret,
   googleRedirectUri:
     optionalEnv("SOL_GOOGLE_REDIRECT_URI") ??
     `http://${host}:${port}/v1/google/callback`,
+  // Gmail can reuse the same Google OAuth Web client. Register the Gmail callback too.
+  gmailClientId: optionalEnv("SOL_GMAIL_CLIENT_ID") ?? googleClientId,
+  gmailClientSecret: optionalEnv("SOL_GMAIL_CLIENT_SECRET") ?? googleClientSecret,
+  gmailRedirectUri:
+    optionalEnv("SOL_GMAIL_REDIRECT_URI") ??
+    `http://${host}:${port}/v1/gmail/callback`,
   mercadoLibreClientId: optionalEnv("SOL_MERCADOLIBRE_CLIENT_ID"),
   mercadoLibreClientSecret: optionalEnv("SOL_MERCADOLIBRE_CLIENT_SECRET"),
   // Mercado Libre currently requires this URI to be HTTPS and to exactly match
@@ -77,6 +85,7 @@ export const config = {
     "https://auth.mercadolibre.com.ar/authorization",
   // Cloud-friendly defaults leave long idle windows so scale-to-zero can engage.
   calendarSyncMs: integerEnv("SOL_CALENDAR_SYNC_MS", 60 * 60 * 1000),
+  gmailSyncMs: integerEnv("SOL_GMAIL_SYNC_MS", 15 * 60 * 1000),
   mercadoLibreSyncMs: integerEnv("SOL_MERCADOLIBRE_SYNC_MS", 60 * 60 * 1000),
   executivePollMs: integerEnv("SOL_EXECUTIVE_POLL_MS", 30 * 60 * 1000),
   // Knowledge consolidation is optional AI enrichment. Sparse batches keep Neon and
