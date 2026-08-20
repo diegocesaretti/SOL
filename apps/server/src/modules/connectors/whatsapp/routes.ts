@@ -3,6 +3,12 @@ import { readJsonBody, sendJson } from "../../../http.js";
 import type { AuthPrincipal } from "../../auth/session.js";
 import { createSourceAccount } from "../../identity/source-accounts.js";
 import { listRecentWhatsappCandidates } from "./candidates.js";
+import {
+  clearWhatsappDiagnostics,
+  listWhatsappDiagnostics,
+  logWhatsappDiagnostic,
+  observeWhatsappRuntime,
+} from "./diagnostics.js";
 import { whatsappManager } from "./manager.js";
 import {
   ensureWhatsappSessionRecord,
@@ -61,11 +67,16 @@ async function accountInHousehold(
   return account;
 }
 
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function publicAccount(
   principal: AuthPrincipal,
   account: WhatsappAccountRecord,
 ) {
   const runtime = whatsappManager.getStatus(account.id);
+  observeWhatsappRuntime(account.id, runtime);
   const canManage = canManageAccount(principal, account);
   return {
     ...account,
@@ -87,6 +98,7 @@ async function waitForPairingReady(sourceAccountId: string): Promise<void> {
   const deadline = Date.now() + 20_000;
   while (Date.now() < deadline) {
     const status = whatsappManager.getStatus(sourceAccountId);
+    observeWhatsappRuntime(sourceAccountId, status);
     if (status.state === "qr") return;
     if (status.state === "open") {
       throw new Error("This WhatsApp account is already linked");
@@ -135,23 +147,34 @@ export async function handleWhatsappApi(
       return true;
     }
 
-    const sourceAccount = await createSourceAccount({
-      householdId: principal.householdId,
-      ownerMemberId: shared ? undefined : principal.memberId,
-      provider: "whatsapp",
-      label: body.label?.trim() || (shared ? "WhatsApp familiar" : "WhatsApp personal"),
-      authMode: "linked-device",
-    });
-    await ensureWhatsappSessionRecord(sourceAccount.id);
-    const account = await getWhatsappAccount(sourceAccount.id);
-    sendJson(response, 201, {
-      account: account ? publicAccount(principal, account) : sourceAccount,
-    });
+    try {
+      const sourceAccount = await createSourceAccount({
+        householdId: principal.householdId,
+        ownerMemberId: shared ? undefined : principal.memberId,
+        provider: "whatsapp",
+        label: body.label?.trim() || (shared ? "WhatsApp familiar" : "WhatsApp personal"),
+        authMode: "linked-device",
+      });
+      await ensureWhatsappSessionRecord(sourceAccount.id);
+      logWhatsappDiagnostic(
+        sourceAccount.id,
+        "info",
+        "account_created",
+        "WhatsApp source account created and ready to link",
+        { shared, memberRole: principal.role },
+      );
+      const account = await getWhatsappAccount(sourceAccount.id);
+      sendJson(response, 201, {
+        account: account ? publicAccount(principal, account) : sourceAccount,
+      });
+    } catch (error) {
+      sendJson(response, 503, { error: errorText(error) });
+    }
     return true;
   }
 
   const match = path.match(
-    /^\/v1\/whatsapp\/accounts\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/(status|connect|restart|pairing-code|logout|messages|candidates))?$/i,
+    /^\/v1\/whatsapp\/accounts\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/(status|connect|restart|pairing-code|logout|messages|candidates|logs))?$/i,
   );
   if (!match) return false;
 
@@ -182,6 +205,47 @@ export async function handleWhatsappApi(
     return true;
   }
 
+  if (action === "logs") {
+    if (!canManageAccount(principal, account)) {
+      sendJson(response, 403, { error: "forbidden" });
+      return true;
+    }
+    if (request.method === "DELETE") {
+      clearWhatsappDiagnostics(account.id);
+      observeWhatsappRuntime(account.id, whatsappManager.getStatus(account.id));
+      logWhatsappDiagnostic(account.id, "info", "logs_cleared", "Diagnostic log cleared by account manager");
+      sendJson(response, 200, { ok: true });
+      return true;
+    }
+    if (request.method === "GET") {
+      const runtime = whatsappManager.getStatus(account.id);
+      observeWhatsappRuntime(account.id, runtime);
+      sendJson(response, 200, {
+        runtime,
+        account: {
+          id: account.id,
+          label: account.label,
+          sourceStatus: account.sourceStatus,
+          enabled: account.enabled,
+          linkedAt: account.linkedAt,
+          historySyncComplete: account.historySyncComplete,
+          lastConnectionAt: account.lastConnectionAt,
+          lastDisconnectAt: account.lastDisconnectAt,
+          lastError: account.lastError,
+        },
+        system: {
+          node: process.version,
+          platform: process.platform,
+          arch: process.arch,
+          uptimeSeconds: Math.round(process.uptime()),
+        },
+        logs: listWhatsappDiagnostics(account.id, 200),
+        persistence: "memory_only_until_SOL_restart",
+      });
+      return true;
+    }
+  }
+
   if (!canManageAccount(principal, account)) {
     sendJson(response, 403, { error: "forbidden" });
     return true;
@@ -195,25 +259,37 @@ export async function handleWhatsappApi(
   }
 
   if (action === "connect" && request.method === "POST") {
+    logWhatsappDiagnostic(account.id, "info", "connect_requested", "Manual WhatsApp connection requested");
     try {
       const runtime = await whatsappManager.start(account.id);
+      observeWhatsappRuntime(account.id, runtime);
+      logWhatsappDiagnostic(account.id, "info", "connect_started", `Connection start returned state ${runtime.state}`, {
+        state: runtime.state,
+        reconnectAttempt: runtime.reconnectAttempt,
+      });
       sendJson(response, 200, { runtime });
     } catch (error) {
-      sendJson(response, 503, {
-        error: error instanceof Error ? error.message : String(error),
-      });
+      const message = errorText(error);
+      logWhatsappDiagnostic(account.id, "error", "connect_failed", message);
+      sendJson(response, 503, { error: message });
     }
     return true;
   }
 
   if (action === "restart" && request.method === "POST") {
+    logWhatsappDiagnostic(account.id, "info", "restart_requested", "Manual WhatsApp connection restart requested");
     try {
       const runtime = await whatsappManager.restart(account.id);
+      observeWhatsappRuntime(account.id, runtime);
+      logWhatsappDiagnostic(account.id, "info", "restart_started", `Restart returned state ${runtime.state}`, {
+        state: runtime.state,
+        reconnectAttempt: runtime.reconnectAttempt,
+      });
       sendJson(response, 200, { runtime });
     } catch (error) {
-      sendJson(response, 503, {
-        error: error instanceof Error ? error.message : String(error),
-      });
+      const message = errorText(error);
+      logWhatsappDiagnostic(account.id, "error", "restart_failed", message);
+      sendJson(response, 503, { error: message });
     }
     return true;
   }
@@ -221,29 +297,34 @@ export async function handleWhatsappApi(
   if (action === "pairing-code" && request.method === "POST") {
     const body = await readJson<{ phoneNumber?: string }>(request, response);
     if (!body) return true;
+    logWhatsappDiagnostic(account.id, "info", "pairing_requested", "Pairing-code flow requested");
     try {
       await waitForPairingReady(account.id);
       const runtime = await whatsappManager.requestPairingCode(
         account.id,
         body.phoneNumber ?? "",
       );
+      observeWhatsappRuntime(account.id, runtime);
+      logWhatsappDiagnostic(account.id, "info", "pairing_code_ready", "WhatsApp returned a pairing code");
       sendJson(response, 200, { runtime });
     } catch (error) {
-      sendJson(response, 400, {
-        error: error instanceof Error ? error.message : String(error),
-      });
+      const message = errorText(error);
+      logWhatsappDiagnostic(account.id, "error", "pairing_failed", message);
+      sendJson(response, 400, { error: message });
     }
     return true;
   }
 
   if (action === "logout" && request.method === "POST") {
+    logWhatsappDiagnostic(account.id, "warn", "logout_requested", "WhatsApp unlink requested by account manager");
     try {
       await whatsappManager.logout(account.id);
+      logWhatsappDiagnostic(account.id, "info", "logout_complete", "WhatsApp linked-device credentials cleared");
       sendJson(response, 200, { ok: true });
     } catch (error) {
-      sendJson(response, 503, {
-        error: error instanceof Error ? error.message : String(error),
-      });
+      const message = errorText(error);
+      logWhatsappDiagnostic(account.id, "error", "logout_failed", message);
+      sendJson(response, 503, { error: message });
     }
     return true;
   }
