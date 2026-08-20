@@ -19,6 +19,7 @@ export function renderLifePage(): string {
     h2 { margin:0; font-size:21px; }
     p { line-height:1.55; }
     .muted { opacity:.62; }
+    .error { color:#d33; }
     .tabs { margin:24px 0 16px; }
     button { padding:10px 14px; border-radius:999px; border:1px solid color-mix(in srgb, CanvasText 18%, transparent); background:transparent; color:CanvasText; font:inherit; font-weight:800; cursor:pointer; }
     button.active, button.primary { background:CanvasText; color:Canvas; }
@@ -45,7 +46,18 @@ export function renderLifePage(): string {
   const content=document.getElementById('content');
   let current='timeline', nextBefore;
   function esc(v){return String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#039;','"':'&quot;'}[c]));}
-  async function api(path,options={}){const r=await fetch(path,{cache:'no-store',...options});let b={};try{b=await r.json()}catch{};return{r,b};}
+  async function api(path,options={}){
+    const controller=new AbortController();
+    const timer=setTimeout(()=>controller.abort(),12000);
+    try{
+      const r=await fetch(path,{cache:'no-store',...options,signal:controller.signal});
+      let b={};try{b=await r.json()}catch{}
+      return{r,b};
+    }catch(error){
+      const timeout=error&&error.name==='AbortError';
+      return{r:{ok:false,status:0},b:{error:timeout?'Tiempo de espera agotado al consultar SOL':(error?.message||'Error de conexión')}};
+    }finally{clearTimeout(timer);}
+  }
   function when(v){try{return new Intl.DateTimeFormat('es-AR',{dateStyle:'medium',timeStyle:'short'}).format(new Date(v))}catch{return v}}
   function visibility(v){return ({private:'privado',family:'familia',shared:'compartido',project:'proyecto',system:'sistema'})[v]||v;}
   function itemLabel(i){return i.type==='task'?'Tarea':i.type==='event'?'Evento':(i.provider==='whatsapp'?'WhatsApp':i.provider||'Fuente');}
@@ -54,7 +66,7 @@ export function renderLifePage(): string {
     if(!append){content.innerHTML='<p class="empty">Cargando timeline…</p>';nextBefore=undefined;}
     const q=new URLSearchParams({limit:'60'}); if(append&&nextBefore)q.set('before',nextBefore);
     const out=await api('/v1/life/timeline?'+q);
-    if(!out.r.ok){content.innerHTML='<p class="empty">'+esc(out.b.error||'No se pudo cargar')+'</p>';return;}
+    if(!out.r.ok){content.innerHTML='<p class="empty error">'+esc(out.b.error||'No se pudo cargar')+'</p>';return;}
     const html=(out.b.items||[]).map(timelineCard).join('');
     if(!append) content.innerHTML=html||'<p class="empty">Todavía no hay elementos visibles en tu timeline.</p>';
     else {const old=document.getElementById('more');if(old)old.remove();content.insertAdjacentHTML('beforeend',html);}
@@ -66,14 +78,14 @@ export function renderLifePage(): string {
   async function createEntity(kind){
     const label=kind==='project'?'proyecto':'persona';
     const name=prompt('Nombre de '+label+':'); if(!name||!name.trim())return;
-    const family=confirm('¿Querés que sea visible para la familia?\nAceptar = familia · Cancelar = privado');
+    const family=confirm('¿Querés que sea visible para la familia?\\nAceptar = familia · Cancelar = privado');
     const out=await api('/v1/knowledge/entities',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({kind,name:name.trim(),visibility:family?'family':'private'})});
     if(!out.r.ok){alert(out.b.error||'No se pudo crear');return;}
     await loadEntities(kind);
   }
-  async function loadEntities(kind){content.innerHTML='<p class="empty">Cargando…</p>';const out=await api('/v1/knowledge/entities?kind='+kind);if(!out.r.ok){content.innerHTML='<p class="empty">'+esc(out.b.error||'No se pudo cargar')+'</p>';return;}const entities=out.b.entities||[];const label=kind==='person'?'persona':'proyecto';const empty=entities.length?'':'<p class="empty">SOL todavía no tiene '+(kind==='person'?'personas':'proyectos')+' visibles para vos.</p>';content.innerHTML='<div class="toolbar"><span class="muted">'+entities.length+' '+(kind==='person'?'persona(s)':'proyecto(s)')+'</span><button class="primary" id="create-entity">Nuevo '+label+'</button></div>'+empty+(entities.length?'<div class="entity-grid">'+entities.map(entityCard).join('')+'</div>':'');document.getElementById('create-entity').onclick=()=>createEntity(kind);}
+  async function loadEntities(kind){content.innerHTML='<p class="empty">Cargando…</p>';const out=await api('/v1/knowledge/entities?kind='+kind);if(!out.r.ok){content.innerHTML='<p class="empty error">'+esc(out.b.error||'No se pudo cargar')+'</p>';return;}const entities=out.b.entities||[];const label=kind==='person'?'persona':'proyecto';const empty=entities.length?'':'<p class="empty">SOL todavía no tiene '+(kind==='person'?'personas':'proyectos')+' visibles para vos.</p>';content.innerHTML='<div class="toolbar"><span class="muted">'+entities.length+' '+(kind==='person'?'persona(s)':'proyecto(s)')+'</span><button class="primary" id="create-entity">Nuevo '+label+'</button></div>'+empty+(entities.length?'<div class="entity-grid">'+entities.map(entityCard).join('')+'</div>':'');document.getElementById('create-entity').onclick=()=>createEntity(kind);}
   async function select(tab){current=tab;document.querySelectorAll('[data-tab]').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));if(tab==='timeline')await loadTimeline();else await loadEntities(tab==='people'?'person':'project');}
   document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>select(b.dataset.tab));
-  select('timeline');
+  select('timeline').catch(error=>{content.innerHTML='<p class="empty error">Error al cargar Vida: '+esc(error?.message||error)+'</p>';});
 </script></body></html>`;
 }
