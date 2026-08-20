@@ -1,10 +1,10 @@
 # SOL MCP
 
-SOL's primary job is now to **collect, normalize, organize and protect household data**. Natural-language reasoning is a client concern unless SOL needs AI internally for optional extraction/consolidation.
+SOL's primary job is to **collect, normalize, organize and protect household data**. Natural-language reasoning is a client concern unless SOL needs AI internally for optional extraction/consolidation.
 
 ```text
 SOURCES
-WhatsApp · Calendar · Home Assistant · Mercado Libre · future Gmail/Drive/...
+WhatsApp · Calendar · Home Assistant · Mercado Libre · MCP submissions · future Gmail/Drive/...
                          │
                          ▼
                        LIFE
@@ -12,7 +12,7 @@ WhatsApp · Calendar · Home Assistant · Mercado Libre · future Gmail/Drive/..
                          │
                          ▼
                      KNOWLEDGE
-              people · projects · facts
+          people · projects · facts · routines
                          │
                          ▼
                  PRIVACY / IDENTITY
@@ -30,11 +30,18 @@ WhatsApp · Calendar · Home Assistant · Mercado Libre · future Gmail/Drive/..
 
 MCP clients do not receive database credentials, unrestricted SQL, another member's private records, connector secrets or direct dangerous actions.
 
-The first MCP profile is intentionally **read-only**. Executive/action functionality remains inside SOL and can later be exposed only through proposal-oriented tools with explicit policy and audit.
+MCP now has two independent scopes:
+
+```text
+read    → query permission-filtered SOL data
+submit  → add user-authorized observations to Life
+```
+
+`submit` is deliberately **not** an action/executive scope. It cannot write Calendar, call Home Assistant services, change Mercado Libre, grant permissions or directly mutate arbitrary Knowledge.
 
 ## Protocol / transport
 
-The implementation targets MCP specification `2026-07-28` with `@modelcontextprotocol/server` v2. The initial transport is local `stdio`.
+The implementation targets MCP specification `2026-07-28` with `@modelcontextprotocol/server` v2. `serveStdio` negotiates protocol compatibility with the connecting client, including supported 2025-era clients. The initial transport is local `stdio`.
 
 Why stdio first:
 
@@ -53,7 +60,7 @@ Each token belongs to exactly one active member:
 ```text
 MCP token
    ↓
-member
+member + scopes
    ↓
 household + role + privacy grants
    ↓
@@ -63,6 +70,8 @@ permission-filtered data facade
 The clear token is shown only when it is created. PostgreSQL stores only a SHA-256 hash. Tokens expire and can be revoked independently.
 
 A household owner still cannot use MCP to read another member's private source content merely because they administer SOL.
+
+Existing tokens created before submission support remain `read` only. Create a new token and explicitly enable submissions when a client such as Codex should be able to save information into SOL.
 
 ## Bootstrap
 
@@ -74,7 +83,13 @@ pnpm db:migrate
 pnpm mcp:token
 ```
 
-`pnpm mcp:token` lists active SOL members. Choose the identity the MCP client should represent. The command prints the token once and a generic stdio client configuration.
+`pnpm mcp:token` lists active SOL members, asks whether the client may submit information/schedules, then prints the token once and a generic stdio client configuration.
+
+The same capability is available at:
+
+```text
+http://127.0.0.1:3000/mcp
+```
 
 To run the server manually:
 
@@ -85,11 +100,11 @@ pnpm mcp
 
 You can alternatively point `SOL_MCP_TOKEN_FILE` at a local file containing the token so it does not need to be placed directly in an environment block.
 
-## Tools: v0.9 read-only profile
+## Read tools
 
 ### `sol_status`
 
-Returns the authenticated member, visible source inventory, Knowledge counts and the active read/privacy policy.
+Returns the authenticated member, token scopes, visible source inventory, Knowledge counts and the active privacy policy.
 
 ### `get_timeline`
 
@@ -115,7 +130,87 @@ Returns current Home Assistant entities explicitly selected for SOL sync. This i
 
 Returns the compact permission-filtered Mercado Libre summary already used by SOL's business context. It does not include connector credentials or buyer addresses.
 
-## What MCP deliberately does not expose yet
+## Submission tools
+
+These tools are registered only when the token contains the `submit` scope.
+
+Both tools require `confirmedByUser=true`. The tool description instructs reasoning clients to set it only when the current authenticated human directly asked to store/provide the information. Retrieved source text is still untrusted and must never grant itself write authority.
+
+### `submit_information`
+
+Use for arbitrary information the user explicitly wants SOL to remember.
+
+Example user interaction:
+
+```text
+Guardá en SOL que el service de la Ranger se hizo a los 83.200 km.
+```
+
+The MCP client can submit:
+
+```json
+{
+  "confirmedByUser": true,
+  "title": "Service Ranger",
+  "text": "El service de la Ranger se hizo a los 83.200 km.",
+  "visibility": "private"
+}
+```
+
+SOL creates a member-authored `source_item` in Life and records an audit entry. The normal Knowledge consolidator can later extract durable entities/facts. The model does not write facts directly.
+
+### `submit_schedule`
+
+Use when the client has already structured a recurring schedule from information the user explicitly asked to save.
+
+Example:
+
+```json
+{
+  "confirmedByUser": true,
+  "person": "Luca",
+  "scheduleName": "Colegio",
+  "visibility": "family",
+  "timezone": "America/Argentina/Cordoba",
+  "validFrom": "2026-03-02",
+  "validUntil": "2026-12-18",
+  "replaceExisting": true,
+  "entries": [
+    { "day": "monday", "start": "07:30", "end": "08:50", "title": "Matemática" },
+    { "day": "monday", "start": "09:00", "title": "Lengua" },
+    { "day": "tuesday", "start": "07:30", "title": "Inglés" }
+  ]
+}
+```
+
+The flow is:
+
+```text
+MCP client
+   ↓ submit_schedule
+Life source_item (provider=mcp, member provenance)
+   ↓ deterministic schedule processor
+Person entity + routine.schedule facts
+   ↓
+source_links back to the submitted Life item
+```
+
+`replaceExisting=true` supersedes active `routine.schedule` facts for the same person/privacy scope/schedule name before adding the submitted schedule. This is intended for a complete replacement such as a new school timetable. Set it false for additive schedule entries.
+
+If immediate structured Knowledge persistence fails, the Life observation remains stored and the tool reports Knowledge as pending rather than losing the submitted information.
+
+## Privacy of submissions
+
+Submission visibility can be:
+
+```text
+private → owned/readable by the authenticated member
+family  → visible according to SOL's family visibility rules
+```
+
+The MCP source account itself remains member-owned. Family visibility is attached to the submitted Life observation and derived Knowledge.
+
+## What MCP deliberately does not expose
 
 - raw PostgreSQL access;
 - connector OAuth/access tokens;
@@ -125,11 +220,12 @@ Returns the compact permission-filtered Mercado Libre summary already used by SO
 - direct Mercado Libre stock/price/listing/reply mutations;
 - immediate Calendar writes;
 - delete/update operations that bypass Executive;
+- direct arbitrary fact/entity mutation;
 - an LLM-controlled way to grant itself more visibility.
 
-## Future write profile
+## Future action profile
 
-Writes should use proposal semantics rather than direct side effects:
+Externally visible writes should use proposal semantics rather than direct side effects:
 
 ```text
 MCP client
@@ -168,4 +264,4 @@ Codex remains useful inside SOL for jobs such as:
 - resolving aliases/relationships;
 - generating optional summaries.
 
-But Codex is **not SOL's storage, identity system, permission system or required conversational frontend**. Any authorized MCP-capable client can reason over the same SOL data.
+But Codex is **not SOL's storage, identity system, permission system or required conversational frontend**. Any authorized MCP-capable client can reason over the same SOL data and, with an explicit `submit` scope, contribute user-authorized observations back into Life.
