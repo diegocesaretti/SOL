@@ -12,7 +12,7 @@ DECLARE
   identity_row identities%ROWTYPE;
   account_owner uuid;
   entity_visibility visibility_scope;
-  entity_id uuid;
+  v_entity_id uuid;
   source_account_id uuid;
 BEGIN
   SELECT * INTO identity_row FROM identities WHERE id = p_identity_id;
@@ -31,9 +31,9 @@ BEGIN
   END;
 
   IF source_account_id IS NOT NULL THEN
-    SELECT owner_member_id INTO account_owner
-    FROM source_accounts
-    WHERE id = source_account_id AND household_id = identity_row.household_id;
+    SELECT sa.owner_member_id INTO account_owner
+    FROM source_accounts AS sa
+    WHERE sa.id = source_account_id AND sa.household_id = identity_row.household_id;
   END IF;
 
   -- An identity explicitly mapped to a SOL member is owned by that member. Otherwise
@@ -56,15 +56,15 @@ BEGIN
       'provider', identity_row.provider,
       'externalValue', identity_row.external_value
     )
-  ) RETURNING id INTO entity_id;
+  ) RETURNING id INTO v_entity_id;
 
   INSERT INTO identity_entity_links(identity_id, entity_id)
-  VALUES (identity_row.id, entity_id)
+  VALUES (identity_row.id, v_entity_id)
   ON CONFLICT(identity_id) DO NOTHING;
 
   INSERT INTO entity_aliases(entity_id, alias, normalized_alias, source)
   VALUES (
-    entity_id,
+    v_entity_id,
     identity_row.external_value,
     lower(identity_row.external_value),
     'whatsapp_identity'
@@ -73,7 +73,7 @@ BEGIN
   IF identity_row.label IS NOT NULL AND btrim(identity_row.label) <> '' THEN
     INSERT INTO entity_aliases(entity_id, alias, normalized_alias, source)
     VALUES (
-      entity_id,
+      v_entity_id,
       btrim(identity_row.label),
       lower(btrim(identity_row.label)),
       'whatsapp_push_name'
@@ -102,13 +102,13 @@ EXECUTE FUNCTION sol_identity_person_entity_trigger();
 -- Backfill identities already observed before this migration. Each call is idempotent.
 DO $$
 DECLARE
-  identity_id uuid;
+  v_identity_id uuid;
 BEGIN
-  FOR identity_id IN
-    SELECT id FROM identities
-    WHERE provider = 'whatsapp' AND kind = 'whatsapp_jid'
+  FOR v_identity_id IN
+    SELECT i.id FROM identities AS i
+    WHERE i.provider = 'whatsapp' AND i.kind = 'whatsapp_jid'
   LOOP
-    PERFORM sol_ensure_identity_person_entity(identity_id);
+    PERFORM sol_ensure_identity_person_entity(v_identity_id);
   END LOOP;
 END;
 $$;
