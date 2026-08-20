@@ -39,6 +39,7 @@ export interface WhatsappRuntimeStatus {
   phoneJid?: string;
   displayName?: string;
   lastError?: string;
+  lastDisconnectCode?: number;
   reconnectAttempt: number;
   updatedAt: string;
 }
@@ -54,6 +55,7 @@ interface RuntimeSession {
   phoneJid?: string;
   displayName?: string;
   lastError?: string;
+  lastDisconnectCode?: number;
   reconnectAttempt: number;
   updatedAt: Date;
   manualStop: boolean;
@@ -98,6 +100,13 @@ function disconnectMessage(error: unknown): string | undefined {
   return undefined;
 }
 
+function formattedDisconnectError(statusCode: number | undefined, message: string | undefined): string | undefined {
+  if (statusCode === undefined) return message;
+  if (!message) return `WhatsApp disconnected (status ${statusCode})`;
+  if (message.includes(`status ${statusCode}`)) return message;
+  return `${message} (status ${statusCode})`;
+}
+
 function publicStatus(runtime: RuntimeSession): WhatsappRuntimeStatus {
   return {
     sourceAccountId: runtime.sourceAccountId,
@@ -107,6 +116,7 @@ function publicStatus(runtime: RuntimeSession): WhatsappRuntimeStatus {
     phoneJid: runtime.phoneJid,
     displayName: runtime.displayName,
     lastError: runtime.lastError,
+    lastDisconnectCode: runtime.lastDisconnectCode,
     reconnectAttempt: runtime.reconnectAttempt,
     updatedAt: runtime.updatedAt.toISOString(),
   };
@@ -320,6 +330,7 @@ export class WhatsappManager {
         runtime.pairingCode = undefined;
         runtime.reconnectAttempt = 0;
         runtime.lastError = undefined;
+        runtime.lastDisconnectCode = undefined;
         runtime.phoneJid = socket.user?.id;
         runtime.displayName = socket.user?.name ?? undefined;
         runtime.updatedAt = new Date();
@@ -462,9 +473,11 @@ export class WhatsappManager {
 
     const statusCode = disconnectStatusCode(error);
     const message = disconnectMessage(error);
+    const diagnosticMessage = formattedDisconnectError(statusCode, message);
+    runtime.lastDisconnectCode = statusCode;
 
     if (statusCode !== undefined && NON_RECONNECTABLE.has(statusCode)) {
-      runtime.lastError = message ?? `WhatsApp disconnected (${statusCode})`;
+      runtime.lastError = diagnosticMessage ?? `WhatsApp disconnected (status ${statusCode})`;
       runtime.state = statusCode === DisconnectReason.loggedOut ? "logged_out" : "error";
       await markWhatsappDisconnected(runtime.sourceAccountId, runtime.lastError);
 
@@ -481,8 +494,8 @@ export class WhatsappManager {
 
     runtime.reconnectAttempt += 1;
     runtime.state = "reconnecting";
-    runtime.lastError = message;
-    await markWhatsappDisconnected(runtime.sourceAccountId, message);
+    runtime.lastError = diagnosticMessage;
+    await markWhatsappDisconnected(runtime.sourceAccountId, diagnosticMessage);
 
     const delayMs =
       statusCode === DisconnectReason.restartRequired
