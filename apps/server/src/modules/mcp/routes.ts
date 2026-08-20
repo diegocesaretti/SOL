@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { config } from "../../config.js";
 import { readJsonBody, sendJson } from "../../http.js";
 import type { AuthPrincipal } from "../auth/session.js";
 import {
@@ -20,6 +21,7 @@ export async function handleMcpApi(
       protocol: "2026-07-28",
       mode: "read-only",
       command: "pnpm mcp",
+      repoRoot: config.repoRoot,
       tools: [
         "sol_status",
         "get_timeline",
