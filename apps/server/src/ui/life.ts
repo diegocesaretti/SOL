@@ -1,91 +1,32 @@
+import { solPage } from "./shell.js";
+
 export function renderLifePage(): string {
-  return `<!doctype html>
-<html lang="es">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>SOL · Vida</title>
-  <style>
-    :root { color-scheme: light dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-    * { box-sizing:border-box; }
-    body { margin:0; min-height:100vh; background:Canvas; color:CanvasText; }
-    main { width:min(980px, calc(100% - 28px)); margin:auto; padding:38px 0 80px; }
-    .top,.row,.tabs,.toolbar { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
-    .top,.row,.toolbar { justify-content:space-between; }
-    .brand { font-size:13px; font-weight:900; letter-spacing:.17em; opacity:.65; }
-    nav { display:flex; gap:14px; font-size:14px; flex-wrap:wrap; }
-    a { color:inherit; }
-    h1 { font-size:clamp(38px,7vw,64px); letter-spacing:-.05em; margin:15px 0 7px; }
-    h2 { margin:0; font-size:21px; }
-    p { line-height:1.55; }
-    .muted { opacity:.62; }
-    .error { color:#d33; }
-    .tabs { margin:24px 0 16px; }
-    button { padding:10px 14px; border-radius:999px; border:1px solid color-mix(in srgb, CanvasText 18%, transparent); background:transparent; color:CanvasText; font:inherit; font-weight:800; cursor:pointer; }
-    button.active, button.primary { background:CanvasText; color:Canvas; }
-    .card { padding:18px 20px; border:1px solid color-mix(in srgb, CanvasText 14%, transparent); border-radius:18px; margin:10px 0; }
-    .meta { display:flex; gap:8px; flex-wrap:wrap; align-items:center; font-size:12px; opacity:.62; margin-top:7px; }
-    .badge { border:1px solid color-mix(in srgb, CanvasText 16%, transparent); padding:4px 7px; border-radius:999px; }
-    .body { white-space:pre-wrap; overflow-wrap:anywhere; opacity:.82; margin:10px 0 0; }
-    .entity-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
-    .fact { padding:8px 0; border-top:1px solid color-mix(in srgb, CanvasText 9%, transparent); font-size:13px; }
-    .fact:first-child { border-top:0; }
-    .empty { padding:38px 10px; text-align:center; opacity:.6; }
-    .more { margin-top:18px; }
-    @media(max-width:680px){ main{padding-top:28px}.entity-grid{grid-template-columns:1fr}.top{align-items:flex-start} }
-  </style>
-</head>
-<body><main>
-  <div class="top"><div class="brand">SOL · VIDA</div><nav><a href="/">Inicio</a><a href="/executive">Día a día</a><a href="/sol-whatsapp">WhatsApp de SOL</a></nav></div>
-  <h1>Lo que SOL sabe.</h1>
-  <p class="muted">Timeline y conocimiento visible para tu perfil. Los registros privados de otros miembros no se recuperan para construir esta pantalla.</p>
-  <div class="tabs"><button class="active" data-tab="timeline">Timeline</button><button data-tab="people">Personas</button><button data-tab="projects">Proyectos</button></div>
-  <section id="content"><p class="empty">Cargando…</p></section>
-</main>
-<script>
-  const content=document.getElementById('content');
-  let current='timeline', nextBefore;
-  function esc(v){return String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#039;','"':'&quot;'}[c]));}
-  async function api(path,options={}){
-    const controller=new AbortController();
-    const timer=setTimeout(()=>controller.abort(),12000);
-    try{
-      const r=await fetch(path,{cache:'no-store',...options,signal:controller.signal});
-      let b={};try{b=await r.json()}catch{}
-      return{r,b};
-    }catch(error){
-      const timeout=error&&error.name==='AbortError';
-      return{r:{ok:false,status:0},b:{error:timeout?'Tiempo de espera agotado al consultar SOL':(error?.message||'Error de conexión')}};
-    }finally{clearTimeout(timer);}
-  }
-  function when(v){try{return new Intl.DateTimeFormat('es-AR',{dateStyle:'medium',timeStyle:'short'}).format(new Date(v))}catch{return v}}
-  function visibility(v){return ({private:'privado',family:'familia',shared:'compartido',project:'proyecto',system:'sistema'})[v]||v;}
-  function itemLabel(i){return i.type==='task'?'Tarea':i.type==='event'?'Evento':(i.provider==='whatsapp'?'WhatsApp':i.provider||'Fuente');}
-  function timelineCard(i){return '<article class="card"><div class="row"><h2>'+esc(i.title)+'</h2><span class="badge">'+esc(itemLabel(i))+'</span></div>'+(i.summary?'<div class="body">'+esc(i.summary)+'</div>':'')+'<div class="meta"><span>'+esc(when(i.occurredAt))+'</span><span class="badge">'+esc(visibility(i.visibility))+'</span>'+(i.sourceLabel?'<span>'+esc(i.sourceLabel)+'</span>':'')+'</div></article>';}
-  async function loadTimeline(append=false){
-    if(!append){content.innerHTML='<p class="empty">Cargando timeline…</p>';nextBefore=undefined;}
-    const q=new URLSearchParams({limit:'60'}); if(append&&nextBefore)q.set('before',nextBefore);
-    const out=await api('/v1/life/timeline?'+q);
-    if(!out.r.ok){content.innerHTML='<p class="empty error">'+esc(out.b.error||'No se pudo cargar')+'</p>';return;}
-    const html=(out.b.items||[]).map(timelineCard).join('');
-    if(!append) content.innerHTML=html||'<p class="empty">Todavía no hay elementos visibles en tu timeline.</p>';
-    else {const old=document.getElementById('more');if(old)old.remove();content.insertAdjacentHTML('beforeend',html);}
-    nextBefore=out.b.nextBefore;
-    if(nextBefore){content.insertAdjacentHTML('beforeend','<button id="more" class="more">Cargar anteriores</button>');document.getElementById('more').onclick=()=>loadTimeline(true);}
-  }
-  function valueText(v){if(v===undefined||v===null)return ''; if(typeof v==='string')return v; try{return JSON.stringify(v)}catch{return String(v)}}
-  function entityCard(e){const aliases=(e.aliases||[]).length?'<div class="meta">También: '+esc(e.aliases.join(', '))+'</div>':'';const facts=(e.facts||[]).slice(0,8).map(f=>'<div class="fact"><strong>'+esc(f.predicate)+'</strong>: '+esc(valueText(f.value)||f.objectEntityId||'—')+'</div>').join('');return '<article class="card"><div class="row"><h2>'+esc(e.name)+'</h2><span class="badge">'+esc(visibility(e.visibility))+'</span></div>'+aliases+(facts?'<div style="margin-top:12px">'+facts+'</div>':'<p class="muted">Sin hechos consolidados todavía.</p>')+'</article>';}
-  async function createEntity(kind){
-    const label=kind==='project'?'proyecto':'persona';
-    const name=prompt('Nombre de '+label+':'); if(!name||!name.trim())return;
-    const family=confirm('¿Querés que sea visible para la familia?\\nAceptar = familia · Cancelar = privado');
-    const out=await api('/v1/knowledge/entities',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({kind,name:name.trim(),visibility:family?'family':'private'})});
-    if(!out.r.ok){alert(out.b.error||'No se pudo crear');return;}
-    await loadEntities(kind);
-  }
-  async function loadEntities(kind){content.innerHTML='<p class="empty">Cargando…</p>';const out=await api('/v1/knowledge/entities?kind='+kind);if(!out.r.ok){content.innerHTML='<p class="empty error">'+esc(out.b.error||'No se pudo cargar')+'</p>';return;}const entities=out.b.entities||[];const label=kind==='person'?'persona':'proyecto';const empty=entities.length?'':'<p class="empty">SOL todavía no tiene '+(kind==='person'?'personas':'proyectos')+' visibles para vos.</p>';content.innerHTML='<div class="toolbar"><span class="muted">'+entities.length+' '+(kind==='person'?'persona(s)':'proyecto(s)')+'</span><button class="primary" id="create-entity">Nuevo '+label+'</button></div>'+empty+(entities.length?'<div class="entity-grid">'+entities.map(entityCard).join('')+'</div>':'');document.getElementById('create-entity').onclick=()=>createEntity(kind);}
-  async function select(tab){current=tab;document.querySelectorAll('[data-tab]').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));if(tab==='timeline')await loadTimeline();else await loadEntities(tab==='people'?'person':'project');}
-  document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>select(b.dataset.tab));
-  select('timeline').catch(error=>{content.innerHTML='<p class="empty error">Error al cargar Vida: '+esc(error?.message||error)+'</p>';});
-</script></body></html>`;
+  const body = `<section class="page">
+    <div class="eyebrow">SOL · Life</div><h1>Todo lo que entró.</h1><p class="lead">Life es el registro cronológico real. Acá deberían aparecer los mensajes y demás observaciones aunque todavía no hayan sido convertidos en Knowledge.</p>
+    <div class="toolbar" style="margin-bottom:16px"><div class="seg" id="tabs"><button class="active" data-tab="timeline">Timeline</button><button data-tab="people">Personas</button><button data-tab="projects">Proyectos</button></div><div class="cluster"><span class="badge" id="live-badge"><span class="dot good"></span>actualización automática</span><a class="button" href="/inputs">Administrar inputs</a></div></div>
+    <section id="timeline-tools" class="card" style="margin-bottom:14px"><div class="toolbar"><div class="cluster" id="providers"><button class="active" data-provider="all">Todo</button><button data-provider="whatsapp">WhatsApp</button><button data-provider="google_calendar">Calendar</button><button data-provider="home_assistant">Home Assistant</button><button data-provider="mercadolibre">Mercado Libre</button><button data-provider="mcp">MCP</button></div><input id="search" placeholder="Buscar en lo cargado…" style="max-width:260px"></div></section>
+    <section id="content"><div class="empty">Cargando Life…</div></section>
+  </section>`;
+
+  const script = `
+const content=document.getElementById('content'),tools=document.getElementById('timeline-tools'),search=document.getElementById('search');let current='timeline',provider='all',nextBefore,items=[];
+const esc=v=>String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#039;','"':'&quot;'}[c]));
+async function api(path,o={}){const c=new AbortController(),t=setTimeout(()=>c.abort(),12000);try{const r=await fetch(path,{cache:'no-store',...o,signal:c.signal});let b={};try{b=await r.json()}catch{}return{r,b}}catch(e){return{r:{ok:false,status:0},b:{error:e?.name==='AbortError'?'Tiempo de espera agotado':e?.message||'Error de conexión'}}}finally{clearTimeout(t)}}
+function when(v){try{return new Intl.DateTimeFormat('es-AR',{dateStyle:'medium',timeStyle:'short'}).format(new Date(v))}catch{return v}}
+function vis(v){return({private:'privado',family:'familia',shared:'compartido',project:'proyecto',system:'sistema'})[v]||v}
+function pname(p){return({whatsapp:'WhatsApp',google_calendar:'Calendar',home_assistant:'Home Assistant',mercadolibre:'Mercado Libre',mcp:'MCP'})[p]||p||'SOL'}
+function glyph(i){if(i.type==='task')return '✓';if(i.type==='event')return '◷';return({whatsapp:'W',google_calendar:'C',home_assistant:'H',mercadolibre:'M',mcp:'S'})[i.provider]||'•'}
+function filtered(){const q=search.value.trim().toLowerCase();return items.filter(i=>(provider==='all'||i.provider===provider)&&(!q||[i.title,i.summary,i.sourceLabel,pname(i.provider)].some(v=>String(v||'').toLowerCase().includes(q))))}
+function card(i){return '<article class="card" style="margin-bottom:9px"><div class="row between"><div class="cluster"><div style="width:34px;height:34px;border-radius:10px;background:#202632;display:grid;place-items:center;font-weight:900">'+esc(glyph(i))+'</div><div><h2>'+esc(i.title)+'</h2><div class="small muted">'+esc(pname(i.provider))+(i.sourceLabel?' · '+esc(i.sourceLabel):'')+'</div></div></div><span class="small muted">'+esc(when(i.occurredAt))+'</span></div>'+(i.summary?'<div style="white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.5;margin:12px 0 2px">'+esc(i.summary)+'</div>':'')+'<div class="cluster" style="margin-top:10px"><span class="badge">'+esc(i.type)+'</span><span class="badge">'+esc(vis(i.visibility))+'</span>'+(i.metadata?.candidateScore!==undefined?'<span class="badge">score '+esc(i.metadata.candidateScore)+'</span>':'')+'</div></article>'}
+function renderTimeline(){const list=filtered();content.innerHTML=list.length?list.map(card).join(''):'<div class="empty">No hay elementos con este filtro. Si esperabas mensajes de WhatsApp, abrí <a href="/inputs">Inputs</a> y revisá el feed crudo de esa cuenta.</div>';if(nextBefore&&provider==='all'&&!search.value.trim()){content.insertAdjacentHTML('beforeend','<button id="more" style="margin-top:12px">Cargar anteriores</button>');document.getElementById('more').onclick=()=>loadTimeline(true)}}
+async function loadTimeline(append=false,silent=false){if(!append&&!silent)content.innerHTML='<div class="empty">Cargando timeline…</div>';const q=new URLSearchParams({limit:'80'});if(append&&nextBefore)q.set('before',nextBefore);const out=await api('/v1/life/timeline?'+q);if(!out.r.ok){if(!silent)content.innerHTML='<div class="empty error">'+esc(out.b.error||'No se pudo cargar')+'</div>';return}if(append)items.push(...(out.b.items||[]));else items=out.b.items||[];nextBefore=out.b.nextBefore;renderTimeline()}
+function val(v){if(v===undefined||v===null)return '';if(typeof v==='string')return v;try{return JSON.stringify(v)}catch{return String(v)}}
+function entityCard(e){const facts=(e.facts||[]).map(f=>'<div class="feeditem"><strong>'+esc(f.predicate)+'</strong><div class="small" style="margin-top:4px">'+esc(val(f.value)||f.objectEntityId||'—')+'</div></div>').join('');return '<article class="card"><div class="row between"><h2>'+esc(e.name)+'</h2><span class="badge">'+esc(vis(e.visibility))+'</span></div>'+(e.aliases?.length?'<div class="small muted" style="margin-top:5px">También: '+esc(e.aliases.join(', '))+'</div>':'')+'<div class="divider"></div>'+(facts||'<div class="muted small">Sin hechos consolidados todavía.</div>')+'</article>'}
+async function loadEntities(kind){content.innerHTML='<div class="empty">Cargando…</div>';const out=await api('/v1/knowledge/entities?kind='+kind);if(!out.r.ok){content.innerHTML='<div class="empty error">'+esc(out.b.error||'Error')+'</div>';return}const list=out.b.entities||[];content.innerHTML='<div class="toolbar" style="margin-bottom:12px"><span class="muted">'+list.length+' '+(kind==='person'?'persona(s)':'proyecto(s)')+'</span><button class="primary" id="create">+ '+(kind==='person'?'Persona':'Proyecto')+'</button></div>'+(list.length?'<div class="grid">'+list.map(e=>'<div class="span6">'+entityCard(e)+'</div>').join('')+'</div>':'<div class="empty">Todavía no hay '+(kind==='person'?'personas':'proyectos')+' visibles.</div>');document.getElementById('create').onclick=()=>createEntity(kind)}
+async function createEntity(kind){const name=prompt('Nombre:');if(!name?.trim())return;const family=confirm('¿Visible para la familia?\\nAceptar = familia · Cancelar = privado');const out=await api('/v1/knowledge/entities',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({kind,name:name.trim(),visibility:family?'family':'private'})});if(!out.r.ok){alert(out.b.error||'No se pudo crear');return}await loadEntities(kind)}
+async function select(tab){current=tab;document.querySelectorAll('[data-tab]').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));tools.style.display=tab==='timeline'?'block':'none';if(tab==='timeline')await loadTimeline();else await loadEntities(tab==='people'?'person':'project')}
+document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>select(b.dataset.tab));document.querySelectorAll('[data-provider]').forEach(b=>b.onclick=()=>{provider=b.dataset.provider;document.querySelectorAll('[data-provider]').forEach(x=>x.classList.toggle('active',x===b));renderTimeline()});search.oninput=()=>renderTimeline();
+select('timeline');setInterval(()=>{if(current==='timeline'&&!document.hidden)loadTimeline(false,true).catch(()=>{})},10000);
+`;
+  return solPage("life", "Life", body, script);
 }
