@@ -145,18 +145,21 @@ export async function listMcpKnowledge(
   principal: AuthPrincipal,
   kind: KnowledgeViewKind,
   query?: string,
+  limit = 50,
 ) {
   const entities = await listKnowledgeEntities(principal, kind);
   const needle = query?.trim().toLocaleLowerCase("es-AR");
-  if (!needle) return entities;
-  return entities.filter((entity) =>
-    entity.name.toLocaleLowerCase("es-AR").includes(needle) ||
-    entity.aliases.some((alias) => alias.toLocaleLowerCase("es-AR").includes(needle)) ||
-    entity.facts.some((fact) =>
-      fact.predicate.toLocaleLowerCase("es-AR").includes(needle) ||
-      JSON.stringify(fact.value ?? "").toLocaleLowerCase("es-AR").includes(needle),
-    ),
-  );
+  const filtered = !needle
+    ? entities
+    : entities.filter((entity) =>
+        entity.name.toLocaleLowerCase("es-AR").includes(needle) ||
+        entity.aliases.some((alias) => alias.toLocaleLowerCase("es-AR").includes(needle)) ||
+        entity.facts.some((fact) =>
+          fact.predicate.toLocaleLowerCase("es-AR").includes(needle) ||
+          JSON.stringify(fact.value ?? "").toLocaleLowerCase("es-AR").includes(needle),
+        ),
+      );
+  return filtered.slice(0, Math.max(1, Math.min(100, Math.trunc(limit))));
 }
 
 export async function getMcpHomeState(
