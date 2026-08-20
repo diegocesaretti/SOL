@@ -1,6 +1,10 @@
 import type { PoolClient } from "pg";
 import { db } from "../../database/client.js";
 import { aiProvider } from "../ai/runtime.js";
+import {
+  scoreIntelligenceCandidate,
+  type IntelligenceGateDecision,
+} from "./intelligence-gate.js";
 
 const ENTITY_KINDS = new Set([
   "person",
@@ -31,10 +35,12 @@ interface SourceItemRow {
   owner_member_id: string | null;
   visibility: ConsolidationVisibility;
   occurred_at: Date;
+  observed_at: Date;
   provider: string;
   source_label: string;
   title: string | null;
   body_text: string;
+  raw_metadata: Record<string, unknown>;
 }
 
 export interface ConsolidatedEntity {
@@ -163,11 +169,44 @@ function consolidationKey(item: SourceItemRow): string {
   return `${item.household_id}:${item.source_account_id}:${item.visibility}:${owner}`;
 }
 
+function gateDecision(item: SourceItemRow): IntelligenceGateDecision {
+  return scoreIntelligenceCandidate({
+    provider: item.provider,
+    title: item.title,
+    bodyText: item.body_text,
+    metadata: item.raw_metadata,
+  });
+}
+
+async function markIgnoredByGate(
+  rows: Array<{ item: SourceItemRow; gate: IntelligenceGateDecision }>,
+): Promise<void> {
+  for (const { item, gate } of rows) {
+    await db.query(
+      `INSERT INTO knowledge_consolidation_items(
+         source_item_id, household_id, status, attempts, provider,
+         model_metadata, last_error, analyzed_at, updated_at
+       ) VALUES ($1,$2,'ignored',1,$3,$4::jsonb,NULL,now(),now())
+       ON CONFLICT(source_item_id)
+       DO UPDATE SET status='ignored', attempts=knowledge_consolidation_items.attempts+1,
+                     provider=EXCLUDED.provider, model_metadata=EXCLUDED.model_metadata,
+                     last_error=NULL, analyzed_at=now(), updated_at=now()`,
+      [
+        item.id,
+        item.household_id,
+        item.provider,
+        JSON.stringify({ gate, reason: "deterministic_intelligence_gate" }),
+      ],
+    );
+  }
+}
+
 async function loadNextBatch(maxItems: number): Promise<SourceItemRow[]> {
   const result = await db.query<SourceItemRow>(
     `SELECT si.id, si.household_id, si.source_account_id, si.owner_member_id,
-            si.visibility::text, si.occurred_at, sa.provider, sa.label AS source_label,
-            si.title, si.body_text
+            si.visibility::text, si.occurred_at, si.observed_at,
+            sa.provider, sa.label AS source_label,
+            si.title, si.body_text, si.raw_metadata
      FROM source_items si
      JOIN source_accounts sa ON sa.id = si.source_account_id
      LEFT JOIN knowledge_consolidation_items kc ON kc.source_item_id = si.id
@@ -181,12 +220,33 @@ async function loadNextBatch(maxItems: number): Promise<SourceItemRow[]> {
          OR (kc.status = 'failed' AND kc.attempts < 3 AND kc.updated_at < now() - interval '2 hours')
        )
      ORDER BY si.observed_at ASC
-     LIMIT 120`,
+     LIMIT 300`,
   );
-  const first = result.rows[0];
+  if (!result.rows.length) return [];
+
+  const scored = result.rows.map((item) => ({ item, gate: gateDecision(item) }));
+  const ignored = scored.filter(({ gate }) => !gate.routes.includes("knowledge"));
+  if (ignored.length) await markIgnoredByGate(ignored);
+
+  const eligible = scored.filter(({ gate }) => gate.routes.includes("knowledge"));
+  if (!eligible.length) return [];
+  eligible.sort((a, b) => {
+    const priority = Number(b.gate.priority === "high") - Number(a.gate.priority === "high");
+    if (priority) return priority;
+    if (b.gate.knowledgeScore !== a.gate.knowledgeScore) {
+      return b.gate.knowledgeScore - a.gate.knowledgeScore;
+    }
+    return a.item.observed_at.getTime() - b.item.observed_at.getTime();
+  });
+
+  const first = eligible[0]?.item;
   if (!first) return [];
   const key = consolidationKey(first);
-  return result.rows.filter((row) => consolidationKey(row) === key).slice(0, maxItems);
+  return eligible
+    .filter(({ item }) => consolidationKey(item) === key)
+    .sort((a, b) => a.item.observed_at.getTime() - b.item.observed_at.getTime())
+    .slice(0, maxItems)
+    .map(({ item }) => item);
 }
 
 async function findOrCreateEntity(
@@ -402,6 +462,10 @@ export async function consolidateNextKnowledgeBatch(
         privacyScope: first.visibility,
         sourceProvider: first.provider,
         sourceLabel: first.source_label,
+        intelligenceGate: batch.map((item) => ({
+          id: item.id,
+          ...gateDecision(item),
+        })),
         items: batch.map((item) => ({
           id: item.id,
           occurredAt: item.occurred_at.toISOString(),
@@ -414,6 +478,7 @@ export async function consolidateNextKnowledgeBatch(
     const persisted = await persistExtraction(batch, extraction, {
       provider: result.provider,
       model: result.model,
+      gate: batch.map((item) => ({ id: item.id, ...gateDecision(item) })),
       ...result.metadata,
     });
     return { processed: batch.length, ...persisted };
@@ -460,7 +525,7 @@ export class KnowledgeConsolidationScheduler {
           const result = await consolidateNextKnowledgeBatch(this.batchItems);
           if (!result) break;
           console.log(
-            `[knowledge] consolidated ${result.processed} source items → ${result.entities} entities / ${result.facts} new facts`,
+            `[knowledge] consolidated ${result.processed} gated source items → ${result.entities} entities / ${result.facts} new facts`,
           );
         } catch (error) {
           console.error("[knowledge] consolidation batch failed", error);
