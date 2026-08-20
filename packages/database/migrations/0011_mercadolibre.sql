@@ -75,7 +75,7 @@ CREATE TABLE mercadolibre_orders (
   PRIMARY KEY(source_account_id, order_id)
 );
 CREATE INDEX mercadolibre_orders_time_idx
-  ON mercadolibre_orders(source_account_id, COALESCE(date_closed, date_created) DESC);
+  ON mercadolibre_orders(source_account_id, (COALESCE(date_closed, date_created)) DESC);
 CREATE INDEX mercadolibre_orders_status_idx
   ON mercadolibre_orders(source_account_id, status);
 
