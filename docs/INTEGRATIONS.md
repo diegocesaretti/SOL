@@ -23,9 +23,8 @@ WhatsApp has two deliberately different roles.
 These are linked-device accounts belonging to members or explicitly to the household:
 
 ```text
-Diego WhatsApp    → personal source
-Mariana WhatsApp  → personal source
-shared account    → family source
+member WhatsApp  → personal source
+shared account   → family source
 ```
 
 They feed messages/conversations into Life. Private accounts stay private to their owning member even when another member is a household owner/admin.
@@ -48,11 +47,9 @@ Member authentication uses a one-time challenge generated from an already authen
 
 Unknown senders, groups, broadcasts and messages observed in members' ordinary chats never gain command authority. The dedicated assistant account also skips normal WhatsApp history ingestion and candidate extraction so assistant conversations do not masquerade as source observations.
 
-See `docs/SOL_WHATSAPP.md` for setup, binding and command details.
+See `docs/SOL_WHATSAPP.md`.
 
-## Google Calendar
-
-Current role: **source + action target**.
+## Google Calendar — source + action target
 
 - multiple Google accounts per member/household;
 - multiple calendars discovered per account;
@@ -61,35 +58,49 @@ Current role: **source + action target**.
 - shared source accounts produce family Life events;
 - external writes originate from approved executive proposals and are audited.
 
-## Home Assistant — planned source/action target
+## Home Assistant — implemented read-only source, future action target
 
-Home Assistant will be a first-class source of household state/events, not a special AI tool bolted onto prompts.
+Current role: **source**.
 
-Candidate source data includes:
+The implemented connector provides:
 
-- device/entity state changes;
-- presence/occupancy events;
-- alarms and important automations;
-- environmental/sensor history where useful;
-- energy and household infrastructure data.
+- household Home Assistant account with encrypted Long-Lived Access Token;
+- REST entity discovery/current-state reconciliation;
+- explicit entity selection;
+- `snapshot` versus `changes` persistence policy;
+- selected realtime `state_changed` stream;
+- Life/source items for selected meaningful state transitions;
+- no service-call/control endpoint.
 
-It can also be an action target. Read and write capabilities must remain separate so an entity can be visible to SOL without automatically being controllable. Riskier actions require stronger approval policies than harmless reads.
+The schema intentionally keeps future control separate from source visibility. An entity being readable by SOL does not make it controllable. Future control must add per-entity/service grants, stronger approval for risky domains such as locks/alarms/security and `action_log` auditing.
 
-## Mercado Libre API — planned source/action target
+See `docs/HOME_ASSISTANT.md`.
 
-Mercado Libre will be a business source tied to the relevant household member/business context rather than mixed indiscriminately with family/private data.
+## Mercado Libre — implemented read-only business source, future action target
 
-Candidate source data includes:
+Current role: **business source**.
 
-- orders/sales;
-- messages/questions;
-- listings;
-- stock and pricing signals;
-- shipping/payment state;
-- business alerts and metrics.
+The implemented connector provides:
 
-Future actions (listing updates, replies, pricing/stock changes, etc.) must use explicit permissions and `action_log`. Business visibility scopes/projects can keep this context separate from unrelated household information.
+- personal or shared-business Mercado Libre source accounts;
+- Authorization Code OAuth with `state` + S256 PKCE;
+- encrypted rotating access/refresh credentials;
+- seller identity reconciliation;
+- bounded publication snapshots;
+- recent seller orders;
+- recent questions;
+- orders/questions represented in Life with source-matched privacy;
+- `/mercadolibre` local business dashboard;
+- periodic/manual reconciliation.
+
+The read-only connector deliberately does not expose listing, stock, price, shipping, payment or question-reply writes. Observed buyer questions/orders are business data, not commands to SOL.
+
+A private Mercado Libre account remains private to its owner. Household admins may see that a personal source exists in source inventory without gaining access to that account's seller identity, orders, questions or dashboard.
+
+Future Mercado Libre actions must be separate capabilities routed through Executive/action policy and `action_log`. A public HTTPS deployment can later add notification-driven reconciliation for orders/items/questions/shipments/payments/messages while retaining polling as recovery.
+
+See `docs/MERCADOLIBRE.md`.
 
 ## Other planned sources
 
-Gmail, files/Drive, contacts, voice, Home Assistant, Mercado Libre and future sources should implement the same provider-neutral ingestion/action contracts. SOL's core data model and executive loop should not need provider-specific rewrites when one is added.
+Gmail, files/Drive, contacts, voice and future sources should implement the same provider-neutral ingestion/action contracts. SOL's core data model and executive loop should not need provider-specific rewrites when one is added.
