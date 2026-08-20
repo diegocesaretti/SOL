@@ -1,233 +1,222 @@
 # SOL roadmap
 
-The order is intentionally dependency-driven rather than feature-driven.
+SOL's direction is now **data/knowledge first**:
 
-## Phase 0 — Foundation ✅
+> Sources → Life → Knowledge → Identity/Privacy → MCP → reasoning clients
 
-- [x] Private repository initialized
-- [x] TypeScript/pnpm modular-monolith scaffold
-- [x] Standard PostgreSQL-first infrastructure
-- [x] Neon-managed PostgreSQL profile with secure local `DATABASE_URL` configuration
-- [x] Native Windows PostgreSQL fallback; no Docker/WSL/Hyper-V requirement
-- [x] Redis removed until a demonstrated workload requires it
-- [x] pgvector deferred to an optional semantic-search migration
-- [x] Household/member/source-account data model
-- [x] Visibility/access contract
-- [x] Provider-neutral ingestion contract
-- [x] Provider-neutral AI contract
-- [x] Internal event bus primitive
-- [x] Provenance/source-link schema
+Executive remains the protected write/action boundary. Codex remains an optional enrichment provider rather than the required frontend/brain.
+
+## Foundation ✅
+
+- [x] Family-first modular monolith
+- [x] PostgreSQL/Neon persistence
+- [x] Native Windows profile; no Docker/WSL/Hyper-V requirement
+- [x] Household/member identity and conservative privacy model
+- [x] Multiple personal/shared source accounts
+- [x] Provenance/source-link model
+- [x] Durable event outbox + PostgreSQL NOTIFY wakeups
 - [x] Action audit schema
+- [x] Redis and pgvector deferred until measured need
 
-## Phase 1 — Persistence + onboarding ✅
+## Sources / Life ✅ core
 
-- [x] PostgreSQL client and explicit migration runner
-- [x] Repositories/services for household, member and source account
-- [x] First-run household/member onboarding API + UI
-- [x] Persistent member authentication/session for SOL UI
-- [x] Additional household-member creation with role policy
-- [x] Multi-account source-account API with personal/shared ownership
-- [x] Unit tests for core visibility boundaries
-- [x] Durable event outbox storage and transactional writes
-- [x] Event-driven outbox wakeups through PostgreSQL `NOTIFY`
-- [x] Slow outbox recovery reconciliation instead of high-frequency polling
-- [x] Small/short-lived database pool for scale-to-zero compatibility
-- [x] Localhost-first pre-deployment security default
+### WhatsApp
 
-## Phase 2 — Codex reasoning adapter ✅
+- [x] Multi-session linked-device connector
+- [x] Encrypted Baileys credentials
+- [x] Realtime + history ingestion
+- [x] Personal/shared privacy
+- [x] Local relevance gate
+- [x] Optional AI candidate classification
+- [x] Connection diagnostics UI
+- [ ] Real target-host integration/tuning
+- [ ] Rich media transcription/extraction
+- [ ] More complete contact/LID/entity reconciliation
 
-- [x] Implement `CodexProvider` behind `AiProvider`
-- [x] Codex App Server JSON-RPC/JSONL runtime
-- [x] ChatGPT OAuth browser login flow
-- [x] ChatGPT device-code fallback
-- [x] Connection/status/logout endpoints
-- [x] ChatGPT plan + rate-limit awareness
-- [x] Integrated `/ai` setup and reasoning-test UI
-- [x] Structured reasoning purposes (conversation/classification/consolidation/planning/automation)
-- [x] Prompt-injection boundary for source context before Codex
-- [x] Outbox dispatcher into SOL's runtime event bus
+### Google Calendar
 
-### Phase 2 follow-ups
+- [x] Multiple OAuth accounts/calendars
+- [x] Separate read/write selection
+- [x] Incremental reconciliation
+- [x] Calendar events represented in Life
+- [x] Approved proposal → idempotent Calendar write
+- [ ] Real target-host OAuth integration test
 
-- [ ] Decide whether background/batch reasoning should use Codex SDK while interactive auth remains on App Server
-- [ ] Persist optional per-household AI profiles if SOL later supports more than one ChatGPT/Codex identity on the same host
-- [ ] Add integration tests against a real installed Codex CLI/App Server runtime
+### Home Assistant
 
-## Phase 3 — First source: WhatsApp ✅
+- [x] Encrypted Long-Lived Access Token
+- [x] Entity discovery/current-state reconciliation
+- [x] Explicit entity selection
+- [x] Snapshot vs changes modes
+- [x] Realtime selected `state_changed`
+- [x] Selected state exposed through MCP read facade
+- [ ] Per-member sensitive entity visibility
+- [ ] Audited control actions behind explicit grants/proposals
 
-- [x] Multi-session connector manager
-- [x] One `source_account` per WhatsApp linked-device session
-- [x] Encrypted PostgreSQL Baileys auth/Signal-key store
-- [x] QR and pairing-code connection UI
-- [x] Realtime `messages.upsert` ingestion
-- [x] History sync/reconciliation with idempotent message IDs
-- [x] Direct/group conversation and basic identity resolution
-- [x] Personal vs shared-family privacy boundaries
-- [x] Zero-AI deterministic filtering for trivial messages
-- [x] Candidate commitment/task/event/deadline detection
-- [x] Realtime candidate → Codex structured classification
-- [x] Historical candidates held for future quota-aware batch processing
-- [x] Automatic reconnect with explicit logout/bad-session handling
+### Mercado Libre
 
-### Phase 3 follow-ups
+- [x] OAuth/PKCE model + encrypted rotating credentials
+- [x] Int64-safe IDs
+- [x] Publications snapshot
+- [x] Recent orders/questions
+- [x] Business dashboard/context
+- [x] Business summary exposed through MCP
+- [ ] Real OAuth/API integration test
+- [ ] HTTPS webhooks/notifications
+- [ ] Historical import
+- [ ] Explicit audited business write proposals
 
-- [ ] Real linked-device integration test on the target SOL host
-- [ ] Tune local Spanish candidate heuristics from real household traffic
-- [ ] Quota-aware historical candidate consolidation job
-- [ ] Rich media pipeline (voice transcription, document/image extraction) with explicit privacy policy
-- [ ] More complete LID/contact/entity reconciliation
+## Life + Knowledge 🟡 priority
 
-## Phase 4 — Calendar + executive loop ✅ core
+- [x] Privacy-filtered Life timeline
+- [x] People/Projects views
+- [x] WhatsApp identity → Person promotion
+- [x] Manual Person/Project creation
+- [x] Facts/aliases read model
+- [ ] **Automatic Life → Knowledge consolidator**
+- [ ] Entity/alias merge and reconciliation
+- [ ] Routine/schedule model (school/work/activities)
+- [ ] Facts/relations with provenance drill-down
+- [ ] Knowledge conflict/supersession model
+- [ ] Structured import for recurring schedules
+- [ ] Optional semantic retrieval profile after baseline search is proven
 
-- [x] Google Calendar OAuth connector with offline refresh
-- [x] Multiple Google accounts per household/member
-- [x] Multiple calendars per account with separate read/write selection
-- [x] Family vs personal Calendar privacy mapping
-- [x] Incremental Calendar reconciliation with sync tokens and full-resync recovery
-- [x] Calendar events represented in Life with provenance
-- [x] Candidate → executive proposal workflow
-- [x] Explicit approval/rejection boundary before actions
-- [x] Approved task → local SOL task
-- [x] Approved timed event → idempotent Google Calendar write
-- [x] Family proposal decision restricted to owner/adult
-- [x] Daily member brief generation
-- [x] Tomorrow-preview brief generation
-- [x] Schedule-conflict detection
-- [x] Persisted briefs reusable by delivery channels
-- [x] Integrated `/calendar` and `/executive` UI
-- [x] Sparse Calendar/executive reconciliation defaults for managed scale-to-zero PostgreSQL
+The consolidator should use deterministic normalization where possible and optional `AiProvider` enrichment only for genuinely unstructured interpretation.
 
-### Phase 4 follow-ups
+## MCP ✅ v0.9 read-only core
 
-- [ ] Real Google OAuth + Calendar integration test on the target SOL host
-- [ ] Daily/nightly Life → Knowledge consolidation pass
-- [ ] Quota-aware historical WhatsApp candidate consolidation
-- [ ] Rich proposal editing before approval (time/title/destination)
-- [ ] Reminder delivery policy and snooze/reschedule model
-- [ ] Optional Google Tasks or another external task provider
+- [x] MCP specification `2026-07-28` target
+- [x] TypeScript MCP SDK v2
+- [x] Local stdio transport
+- [x] Member-scoped revocable/expiring tokens
+- [x] Clear token shown once; SHA-256 hash only in PostgreSQL
+- [x] Local token bootstrap command
+- [x] `sol_status`
+- [x] `get_timeline`
+- [x] `search_life`
+- [x] `list_people`
+- [x] `list_projects`
+- [x] `get_home_state`
+- [x] `get_business_summary`
+- [x] No raw SQL/connector secrets/direct dangerous actions
+- [ ] Wire MCP access-management page into Web navigation
+- [ ] Add MCP resources for stable canonical entities/projects
+- [ ] Better date/range filters for Life
+- [ ] Source/provenance drill-down tools
+- [ ] Calendar/schedule read tools
+- [ ] Remote MCP over hardened HTTPS authorization
+- [ ] Client compatibility tests (Codex/ChatGPT/other MCP hosts)
 
-## Phase 5 — SOL communication channel ✅ core
+See `docs/MCP.md`.
 
-- [x] Dedicated household WhatsApp account/session role for SOL
-- [x] Treat SOL WhatsApp as an assistant interface/action channel, not an ordinary monitored source
-- [x] Exclude the assistant account from member WhatsApp source/history ingestion
-- [x] One-time member binding challenge → actual WhatsApp JID/LID
-- [x] Prevent one active WhatsApp identity from authenticating multiple members
-- [x] Resolve incoming direct sender → authenticated active household member
-- [x] Reject unknown/group/broadcast senders as command authorities before AI
-- [x] Deliver persisted morning/tomorrow briefs through SOL WhatsApp
-- [x] Deliver executive proposals to the correct member/managers
-- [x] Deterministic `sí/no` approval bound to the last proposal SOL asked about
-- [x] Explicit approve/reject by short proposal reference
-- [x] Receive permission-filtered natural-language questions
-- [x] Authenticated natural-language create command → pending proposal → explicit approval
-- [x] Reuse Executive Core permissions/action policy for WhatsApp approvals
-- [x] Audit outbound assistant WhatsApp messages through `action_log`
-- [x] Delivery ledger for durable outbox retries
-- [x] Integrated `/sol-whatsapp` setup/member-binding UI
+## Executive / actions ✅ core, narrower role
 
-### Phase 5 follow-ups
+Executive is no longer the mandatory conversational brain. It remains the policy boundary for writes.
 
-- [ ] Real dedicated-number linked-device integration test on the target SOL host
-- [ ] Offline-channel delivery reconciliation/retry policy
-- [ ] Rate limiting / abuse controls for unknown senders
-- [ ] Rich media and voice messages on the assistant channel
-- [ ] Multi-turn clarification/editing before approving ambiguous proposals
-- [ ] Delivery receipts / stronger remote-send reconciliation
+- [x] Pending proposals
+- [x] Explicit approve/reject
+- [x] Private/family decision policy
+- [x] Approved local task creation
+- [x] Approved Calendar write
+- [x] Action audit
+- [x] Conflict/brief primitives
+- [ ] Proposal editing/clarification
+- [ ] Rich reminder/snooze/reschedule policy
+- [ ] MCP proposal-oriented write tools
+- [ ] HA action grants + stronger security-domain approval
+- [ ] Mercado Libre externally visible action policy
 
-## Phase 6 — Family UI + knowledge views 🟡 underway
+Future MCP write flow:
 
-- [x] Integrated responsive Home modules for Executive, Life, Calendar, sources, SOL WhatsApp and AI
-- [x] Privacy-filtered `/life` timeline for source items, life events and tasks
-- [x] Timeline pagination without cross-member private retrieval
-- [x] People and Projects knowledge views
-- [x] WhatsApp identity → Person entity promotion with source-matched privacy
-- [x] Backfill existing WhatsApp identities into Person entities
-- [x] Manual private/family Person and Project creation
-- [x] Basic household/member creation and per-connector setup screens
-- [ ] Unified reusable PWA/navigation shell across every page
-- [ ] Edit/delete/merge people and projects
-- [ ] Fact/relation inspection with provenance drill-down
-- [ ] User-facing privacy/visibility/grant controls
-- [ ] Full household/member lifecycle management (disable/reset/role changes)
-- [ ] Automation rules and richer action-approval views
-- [ ] Daily/nightly Life → Knowledge consolidator to populate facts/relations/projects automatically
+```text
+client → propose_action → Executive → permission/risk/approval → action → action_log
+```
 
-## First-class connector — Home Assistant ✅ read-only core
+## AI providers 🟡 optional enrichment
 
-- [x] Household Home Assistant `source_account` with Long-Lived Access Token
-- [x] AES-256-GCM token encryption using a SOL-host-only key
-- [x] REST `/api/states` entity discovery
-- [x] Explicit per-entity source selection
-- [x] `snapshot` vs `changes` persistence modes
-- [x] Numeric `sensor.*` discovery defaults to snapshot-only
-- [x] WebSocket authentication + `state_changed` subscription
-- [x] In-memory filtering before PostgreSQL for unselected entities
-- [x] Current-state reconciliation after SOL restart without inventing missed transitions
-- [x] Selected state changes represented as family Life/source items
-- [x] `/home-assistant` setup/entity-selection UI
-- [x] Separate future `selected_for_control` / control-grant model; no control endpoint yet
-- [x] Automatic reconnect with exponential backoff
+### Codex adapter ✅
 
-### Home Assistant follow-ups
+- [x] Provider-neutral `AiProvider`
+- [x] Codex App Server
+- [x] ChatGPT OAuth/device-code flows
+- [x] Restricted reasoning policy
+- [x] Source prompt-injection boundary
 
-- [ ] Real Home Assistant integration test on the target SOL host
-- [ ] Expose selected current HA state through SOL's permission-filtered reasoning context
-- [ ] Meaningful-domain policies for presence/alarm/energy summaries
-- [ ] Per-member read visibility for sensitive presence/security entities
-- [ ] Explicit audited control actions after per-entity/service grants
-- [ ] Stronger approvals for security/lock/alarm/door actions
+### New role
 
-## First-class connector — Mercado Libre ✅ read-only core
+AI is optional for:
 
-- [x] Personal/shared Mercado Libre `source_account` model
-- [x] OAuth Authorization Code + `state` + S256 PKCE flow
-- [x] HTTPS/static redirect-URI requirement enforced before authorization
-- [x] AES-256-GCM access/refresh token encryption using a SOL-host-only key
-- [x] Single-use refresh-token rotation serialized transactionally per account
-- [x] Int64-safe external identifier parsing/storage
-- [x] Seller `/users/me` identity reconciliation
-- [x] Publication search + bounded item snapshot reconciliation
-- [x] Recent seller order reconciliation
-- [x] Recent question reconciliation
-- [x] Orders/questions represented as privacy-matched Life/source items
-- [x] Business dashboard for loaded sales, questions and publications
-- [x] Manual + sparse scheduled reconciliation
-- [x] Private seller metadata/dashboard hidden from household admins without read permission
-- [x] Permission-filtered Mercado Libre context in SOL daily reasoning/briefs
-- [x] No stock/price/listing/reply write endpoint in the read-only core
+- extraction from unstructured messages/documents;
+- entity/fact discovery;
+- Life → Knowledge consolidation;
+- alias/relation resolution;
+- summaries.
 
-### Mercado Libre follow-ups
+AI is not required for:
 
-- [ ] Real OAuth/API integration test with an actual Mercado Libre application/account
-- [ ] Hardened public HTTPS endpoint + Mercado Libre notifications/webhooks
-- [ ] Notification-driven reconciliation for orders/items/questions/shipments/payments/messages
-- [ ] Historical scan/import jobs beyond bounded prototype windows
-- [ ] Shipping/payment detail models without retaining unnecessary buyer-sensitive data
-- [ ] Business-scoped Knowledge consolidation/projects/metrics
-- [ ] Explicit audited question replies, stock/price and listing actions
-- [ ] Strong approval/policy layer for externally visible business changes
+- database access;
+- MCP Life/Knowledge queries;
+- identity/privacy enforcement;
+- source ingestion;
+- authorization.
 
-## Other planned sources
+## Interfaces
 
-- [ ] Gmail
-- [ ] Google Drive/files
-- [ ] Contacts
-- [ ] Voice / Codex Audio Remote
-- [ ] Additional household/business sources
+### Web 🟡
+
+- [x] onboarding/auth
+- [x] Life + People + Projects
+- [x] connector setup pages
+- [x] Executive
+- [ ] unified PWA shell/navigation
+- [ ] user-facing privacy/grant controls
+- [ ] MCP token/access UI wired into navigation
+- [ ] member lifecycle management
+
+### SOL WhatsApp ✅ core
+
+- [x] Dedicated assistant account role
+- [x] Member binding by one-time challenge and actual JID/LID
+- [x] Permission-filtered questions
+- [x] Proposal delivery/approval
+- [x] Brief delivery
+- [ ] Rebase conversational reads on the same MCP/data facade
+- [ ] Rich media/voice
+- [ ] multi-turn clarification
+
+### Voice / clients
+
+- [ ] Codex Audio Remote / voice adapter
+- [ ] Generic MCP-host compatibility recipes
+- [ ] Mobile/PWA interaction improvements
+
+## Next sources
+
+Priority is determined by how much useful family context they add:
+
+1. [ ] Gmail
+2. [ ] Google Drive/files
+3. [ ] Contacts
+4. [ ] richer local files/media
+5. [ ] additional business/household sources
 
 ## Deployment hardening
 
-Before SOL is intentionally exposed beyond localhost:
+- [ ] Windows service/installer
+- [ ] automated Neon/PostgreSQL backup + restore
+- [ ] backup of host-local encryption keys
+- [ ] HTTPS/reverse proxy profile
+- [ ] login throttling/session-device controls
+- [ ] secret-store integration
+- [ ] remote MCP authorization profile
+- [ ] revisit pgvector only when semantic retrieval is implemented
+- [ ] revisit Redis only if measured queue/cache needs justify it
 
-- [ ] Register SOL Core as an always-on Windows service on the target host
-- [ ] Automated PostgreSQL backup/restore workflow for Neon and local profiles
-- [ ] HTTPS/reverse-proxy deployment profile
-- [ ] Login throttling / abuse controls
-- [ ] Session/device management UI
-- [ ] Backup/restore strategy including local encryption keys
-- [ ] Secret-store integration
-- [ ] Revisit optional pgvector only when semantic retrieval is actually implemented
-- [ ] Revisit Redis only if measured queue/cache coordination needs justify another service
+## Immediate development order
 
-See `docs/INTEGRATIONS.md` for the distinction between sources, action targets and assistant interfaces.
+1. Validate v0.9 MCP end-to-end on the target Windows host.
+2. Build automatic Life → Knowledge consolidation.
+3. Add schedule/routine Knowledge (school schedules are a first concrete case).
+4. Expand MCP reads for calendar/routines/provenance.
+5. Add Gmail/Drive/Contacts ingestion.
+6. Only then expose proposal-oriented MCP write tools.
