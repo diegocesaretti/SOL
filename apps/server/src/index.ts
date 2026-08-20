@@ -44,6 +44,7 @@ import {
   listSourceAccounts,
   SourceAccountValidationError,
 } from "./modules/identity/source-accounts.js";
+import { handleInputsApi } from "./modules/inputs/routes.js";
 import { handleLifeApi } from "./modules/life/routes.js";
 import { registerCandidateProcessor } from "./modules/knowledge/candidate-processor.js";
 import { handleKnowledgeApi } from "./modules/knowledge/routes.js";
@@ -58,12 +59,14 @@ import { renderAiPage } from "./ui/ai.js";
 import { renderCalendarPage } from "./ui/calendar.js";
 import { renderExecutivePage } from "./ui/executive.js";
 import { renderHomeAssistantPage } from "./ui/home-assistant.js";
+import { renderInputsPage } from "./ui/inputs.js";
 import { renderLifePage } from "./ui/life.js";
 import { renderMcpPage } from "./ui/mcp.js";
 import { renderMercadoLibrePage } from "./ui/mercadolibre.js";
 import { renderOnboardingPage } from "./ui/onboarding.js";
 import { renderSolWhatsappPage } from "./ui/sol-whatsapp.js";
 import { renderWhatsappPage } from "./ui/whatsapp.js";
+import { startWindowsTray, stopWindowsTray } from "./windows/tray.js";
 
 export const eventBus = new InMemoryEventBus();
 const unregisterCandidateProcessor = registerCandidateProcessor(eventBus);
@@ -126,6 +129,10 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     sendHtml(response, 200, renderOnboardingPage());
     return;
   }
+  if (request.method === "GET" && path === "/inputs") {
+    sendHtml(response, 200, renderInputsPage());
+    return;
+  }
   if (request.method === "GET" && path === "/ai") {
     sendHtml(response, 200, renderAiPage());
     return;
@@ -183,8 +190,8 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
       reasoningInterface: "mcp",
       optionalAiProvider: "codex",
       sources: ["whatsapp", "google_calendar", "home_assistant", "mercadolibre"],
-      interfaces: ["mcp_stdio", "web", "sol_whatsapp"],
-      views: ["life_timeline", "people", "projects", "executive", "business", "mcp_access"],
+      interfaces: ["mcp_stdio", "web", "sol_whatsapp", "windows_tray"],
+      views: ["inputs", "life_timeline", "people", "projects", "executive", "business", "mcp_access"],
       plannedSources: ["gmail", "google_drive", "contacts", "voice"],
     });
     return;
@@ -249,6 +256,11 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     return;
   }
 
+  if (path === "/v1/inputs" || path.startsWith("/v1/inputs/")) {
+    const principal = await principalFor(request, response);
+    if (!principal) return;
+    if (await handleInputsApi(path, request, response, principal)) return;
+  }
   if (path.startsWith("/v1/ai/")) {
     const principal = await principalFor(request, response);
     if (!principal) return;
@@ -428,6 +440,7 @@ const server = createServer((request, response) => {
 
 server.listen(config.port, config.host, () => {
   console.log(`SOL Core listening on http://${config.host}:${config.port}`);
+  startWindowsTray();
   outboxDispatcher.start();
   calendarScheduler.start();
   mercadoLibreScheduler.start();
@@ -447,6 +460,7 @@ server.listen(config.port, config.host, () => {
 
 async function shutdown(signal: string): Promise<void> {
   console.log(`Received ${signal}; shutting down SOL Core`);
+  stopWindowsTray();
   outboxDispatcher.stop();
   calendarScheduler.stop();
   mercadoLibreScheduler.stop();
