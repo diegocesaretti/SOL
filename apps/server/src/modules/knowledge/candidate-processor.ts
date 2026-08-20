@@ -1,6 +1,8 @@
 import { db } from "../../database/client.js";
+import { config } from "../../config.js";
 import type { DomainEvent, EventBus } from "../../core/event-bus.js";
 import { codexProvider } from "../ai/codex/runtime.js";
+import { KnowledgeConsolidationScheduler } from "./consolidator.js";
 
 const KINDS = new Set([
   "task",
@@ -207,7 +209,14 @@ async function processCandidate(candidateId: string): Promise<void> {
 }
 
 export function registerCandidateProcessor(eventBus: EventBus): () => void {
-  return eventBus.subscribe<{ candidateId?: string }>(
+  const knowledgeScheduler = new KnowledgeConsolidationScheduler(
+    config.knowledgeConsolidationMs,
+    config.knowledgeBatchesPerRun,
+    config.knowledgeBatchItems,
+  );
+  knowledgeScheduler.start();
+
+  const unsubscribe = eventBus.subscribe<{ candidateId?: string }>(
     "whatsapp.candidate.detected",
     async (event: DomainEvent<{ candidateId?: string }>) => {
       const candidateId = event.payload.candidateId;
@@ -215,4 +224,9 @@ export function registerCandidateProcessor(eventBus: EventBus): () => void {
       await processCandidate(candidateId);
     },
   );
+
+  return () => {
+    knowledgeScheduler.stop();
+    unsubscribe();
+  };
 }
