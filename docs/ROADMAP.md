@@ -27,7 +27,7 @@ Executive remains the protected write/action boundary. Codex remains an optional
 - [x] Realtime + history ingestion
 - [x] Personal/shared privacy
 - [x] Local relevance gate
-- [x] Optional AI candidate classification
+- [x] Optional AI candidate classification with deferred recovery when AI is unavailable
 - [x] Connection diagnostics UI
 - [ ] Real target-host integration/tuning
 - [ ] Rich media transcription/extraction
@@ -73,21 +73,26 @@ Executive remains the protected write/action boundary. Codex remains an optional
 - [x] WhatsApp identity → Person promotion
 - [x] Manual Person/Project creation
 - [x] Facts/aliases read model
-- [ ] **Automatic Life → Knowledge consolidator**
-- [ ] Entity/alias merge and reconciliation
-- [ ] Routine/schedule model (school/work/activities)
+- [x] Incremental privacy-scoped Life → Knowledge consolidator core
+- [x] Evidence-ID validation + `source_links` provenance for automatic entities/facts
+- [x] Sparse/bounded AI enrichment that skips cleanly when Codex is unavailable
+- [x] Manual `pnpm knowledge:consolidate` test/debug command
+- [ ] Deterministic provider-specific structured consolidators that require no AI
+- [ ] Entity/alias merge and reconciliation beyond exact conservative matching
+- [ ] First-class routine/schedule model and query API (school/work/activities)
 - [ ] Facts/relations with provenance drill-down
 - [ ] Knowledge conflict/supersession model
-- [ ] Structured import for recurring schedules
+- [ ] Structured import/review UI for recurring schedules
+- [ ] Explicit shared/project grant propagation during consolidation
 - [ ] Optional semantic retrieval profile after baseline search is proven
 
-The consolidator should use deterministic normalization where possible and optional `AiProvider` enrichment only for genuinely unstructured interpretation.
+The first consolidator intentionally handles only `private` and `family` text-bearing source items. It groups by household/source/privacy, requires exact evidence item IDs and preserves source provenance. See `docs/KNOWLEDGE.md`.
 
 ## MCP ✅ v0.9 read-only core
 
 - [x] MCP specification `2026-07-28` target
 - [x] TypeScript MCP SDK v2
-- [x] Local stdio transport
+- [x] Local stdio transport with modern/legacy negotiation through `serveStdio`
 - [x] Member-scoped revocable/expiring tokens
 - [x] Clear token shown once; SHA-256 hash only in PostgreSQL
 - [x] Local token bootstrap command
@@ -103,7 +108,7 @@ The consolidator should use deterministic normalization where possible and optio
 - [ ] Add MCP resources for stable canonical entities/projects
 - [ ] Better date/range filters for Life
 - [ ] Source/provenance drill-down tools
-- [ ] Calendar/schedule read tools
+- [ ] First-class calendar/schedule read tools
 - [ ] Remote MCP over hardened HTTPS authorization
 - [ ] Client compatibility tests (Codex/ChatGPT/other MCP hosts)
 
@@ -141,6 +146,7 @@ client → propose_action → Executive → permission/risk/approval → action 
 - [x] ChatGPT OAuth/device-code flows
 - [x] Restricted reasoning policy
 - [x] Source prompt-injection boundary
+- [x] Missing/disconnected Codex no longer needs to keep realtime WhatsApp candidate outbox work hot
 
 ### New role
 
@@ -214,9 +220,9 @@ Priority is determined by how much useful family context they add:
 
 ## Immediate development order
 
-1. Validate v0.9 MCP end-to-end on the target Windows host.
-2. Build automatic Life → Knowledge consolidation.
-3. Add schedule/routine Knowledge (school schedules are a first concrete case).
-4. Expand MCP reads for calendar/routines/provenance.
+1. Validate v0.9 MCP + migrations `0012/0013` end-to-end on the target Windows host.
+2. Add first-class schedule/routine Knowledge reads (school schedules are the first concrete case).
+3. Add deterministic provider-specific consolidation where structured data makes AI unnecessary.
+4. Expand MCP provenance/date-range reads.
 5. Add Gmail/Drive/Contacts ingestion.
 6. Only then expose proposal-oriented MCP write tools.
