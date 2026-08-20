@@ -194,6 +194,7 @@ The order is intentionally dependency-driven rather than feature-driven.
 - [x] Business dashboard for loaded sales, questions and publications
 - [x] Manual + sparse scheduled reconciliation
 - [x] Private seller metadata/dashboard hidden from household admins without read permission
+- [x] Permission-filtered Mercado Libre context in SOL daily reasoning/briefs
 - [x] No stock/price/listing/reply write endpoint in the read-only core
 
 ### Mercado Libre follow-ups
@@ -204,7 +205,6 @@ The order is intentionally dependency-driven rather than feature-driven.
 - [ ] Historical scan/import jobs beyond bounded prototype windows
 - [ ] Shipping/payment detail models without retaining unnecessary buyer-sensitive data
 - [ ] Business-scoped Knowledge consolidation/projects/metrics
-- [ ] Permission-filtered Mercado Libre context in SOL reasoning/briefs
 - [ ] Explicit audited question replies, stock/price and listing actions
 - [ ] Strong approval/policy layer for externally visible business changes
 
