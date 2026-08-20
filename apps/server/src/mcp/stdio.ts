@@ -44,10 +44,26 @@ async function main(): Promise<void> {
       "sol_status",
       {
         description:
-          "Describe the authenticated SOL member, visible source inventory, knowledge counts and privacy policy.",
+          "Describe the authenticated SOL member, visible source inventory, knowledge counts, token scopes and privacy/write policy.",
         inputSchema: z.object({}),
       },
-      async () => text({ ...(await getMcpStatus(principal)), mcpScopes: scopes }),
+      async () => {
+        const status = await getMcpStatus(principal);
+        const basePolicy = status.policy && typeof status.policy === "object" && !Array.isArray(status.policy)
+          ? status.policy as Record<string, unknown>
+          : {};
+        return text({
+          ...status,
+          mcpScopes: scopes,
+          policy: {
+            ...basePolicy,
+            readOnly: !scopes.includes("submit"),
+            canSubmitObservations: scopes.includes("submit"),
+            directKnowledgeWrites: false,
+            externalActionsAllowed: false,
+          },
+        });
+      },
     );
 
     server.registerTool(
