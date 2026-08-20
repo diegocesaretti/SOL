@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import vm from "node:vm";
+import { renderAiPage } from "./ai.js";
 import { renderInputsPage } from "./inputs.js";
 import { renderLifePage } from "./life.js";
 import { renderMcpPage } from "./mcp.js";
@@ -18,7 +19,8 @@ for (const [label, render, filename] of [
   ["Life page", renderLifePage, "life-inline.js"],
   ["Inputs page", renderInputsPage, "inputs-inline.js"],
   ["Outputs page", renderOutputsPage, "outputs-inline.js"],
-  ["Mercado Libre page", renderMercadoLibrePage, "mercadolibre-inline.js"],
+  ["AI page", renderAiPage, "ai-inline.js"],
+  ["Mercado Libre advanced page", renderMercadoLibrePage, "mercadolibre-inline.js"],
   ["MCP page", renderMcpPage, "mcp-inline.js"],
   ["SOL home", renderOnboardingPage, "home-inline.js"],
 ] as const) {
