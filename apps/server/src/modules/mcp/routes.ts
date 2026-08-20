@@ -21,7 +21,7 @@ export async function handleMcpApi(
       protocol: "2026-07-28 target · 2025-era compatible",
       protocolTarget: "2026-07-28",
       protocolNegotiation: "serveStdio",
-      mode: "read-only",
+      mode: "read + scoped submissions",
       command: "pnpm mcp",
       repoRoot: config.repoRoot,
       tools: [
@@ -32,7 +32,14 @@ export async function handleMcpApi(
         "list_projects",
         "get_home_state",
         "get_business_summary",
+        "submit_information (requires submit scope)",
+        "submit_schedule (requires submit scope)",
       ],
+      submissionPolicy: {
+        directKnowledgeWrites: false,
+        externalActions: false,
+        lifeProvenanceRequired: true,
+      },
     });
     return true;
   }
@@ -48,7 +55,7 @@ export async function handleMcpApi(
       return true;
     }
     try {
-      const body = await readJsonBody<{ label?: string; expiresInDays?: number }>(request);
+      const body = await readJsonBody<{ label?: string; expiresInDays?: number; allowSubmit?: boolean }>(request);
       sendJson(response, 201, await createMcpAccessToken(principal, body));
     } catch (error) {
       sendJson(response, 400, { error: error instanceof Error ? error.message : String(error) });
