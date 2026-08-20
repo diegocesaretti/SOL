@@ -52,6 +52,25 @@ and is never stored in PostgreSQL or Git. Backups must include this key together
 
 QR strings and pairing codes are runtime-only and are not persisted or logged.
 
+## Connection diagnostics
+
+Every manageable WhatsApp source account has a **Diagnóstico / logs de conexión** panel in `/whatsapp`.
+
+The diagnostic buffer records safe lifecycle information such as:
+
+- account creation;
+- manual connect/restart requests;
+- runtime state transitions (`idle`, `connecting`, `qr`, `open`, `reconnecting`, `error`, `logged_out`);
+- reconnect attempt count;
+- pairing-code success/failure;
+- unlink requests;
+- exact connection errors returned through the SOL API;
+- Node/platform/architecture and persisted WhatsApp session timestamps.
+
+The diagnostic layer deliberately does **not** accept likely secret/payload fields such as OAuth/auth tokens, credentials, QR strings or message bodies. It is an in-memory ring buffer capped per account and is cleared when SOL restarts. This is intentional: the normal debug path should not create a second persistent store of sensitive WhatsApp data.
+
+The UI can copy the sanitized diagnostic text for troubleshooting and can clear/refresh it. Account managers only can access the diagnostic endpoint; another member's private account logs remain unavailable.
+
 ## Ingestion
 
 SOL listens to:
@@ -149,8 +168,11 @@ From this screen an authorized member can:
 - link with QR;
 - request a pairing code;
 - see connection/reconnection status;
+- inspect/copy safe connection diagnostics;
 - unlink their account;
 - inspect recent stored messages they are authorized to read.
+
+Connection buttons surface the exact API error inline instead of discarding the response during a page refresh. This makes QR/pairing/socket failures directly actionable from the diagnostic panel.
 
 ## Privacy / E2EE boundary
 
