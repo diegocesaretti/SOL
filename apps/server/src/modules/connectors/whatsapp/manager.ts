@@ -2,15 +2,18 @@ import makeWASocket, {
   Browsers,
   DisconnectReason,
   makeCacheableSignalKeyStore,
+  type WAMessage,
 } from "baileys";
 import pino from "pino";
 import * as QRCode from "qrcode";
 import { getSolWhatsappAccountById } from "../sol-whatsapp/repository.js";
 import { handleSolWhatsappInbound } from "../sol-whatsapp/service.js";
 import { createWhatsappAuthState, clearWhatsappAuthState } from "./auth-store.js";
+import { logWhatsappDiagnostic } from "./diagnostics.js";
 import {
   ingestWhatsappMessage,
   updateWhatsappConversationTitles,
+  type WhatsappIngestOrigin,
 } from "./ingest.js";
 import {
   clearWhatsappLinkState,
@@ -20,6 +23,7 @@ import {
   markWhatsappConnected,
   markWhatsappDisconnected,
   markWhatsappHistoryComplete,
+  type WhatsappAccountRecord,
 } from "./repository.js";
 
 export type WhatsappRuntimeState =
@@ -42,6 +46,17 @@ export interface WhatsappRuntimeStatus {
   lastDisconnectCode?: number;
   reconnectAttempt: number;
   updatedAt: string;
+  upsertEvents: number;
+  upsertMessages: number;
+  historyBatches: number;
+  historyMessages: number;
+  storedMessages: number;
+  skippedMessages: number;
+  ingestErrors: number;
+  lastUpsertAt?: string;
+  lastStoredAt?: string;
+  lastIngestErrorAt?: string;
+  lastIngestError?: string;
 }
 
 type Socket = ReturnType<typeof makeWASocket>;
@@ -64,6 +79,17 @@ interface RuntimeSession {
   reconnectTimer?: NodeJS.Timeout;
   ingestChain: Promise<void>;
   authSaveChain: Promise<void>;
+  upsertEvents: number;
+  upsertMessages: number;
+  historyBatches: number;
+  historyMessages: number;
+  storedMessages: number;
+  skippedMessages: number;
+  ingestErrors: number;
+  lastUpsertAt?: Date;
+  lastStoredAt?: Date;
+  lastIngestErrorAt?: Date;
+  lastIngestError?: string;
 }
 
 const logger = pino({ level: "silent" });
@@ -119,6 +145,33 @@ function publicStatus(runtime: RuntimeSession): WhatsappRuntimeStatus {
     lastDisconnectCode: runtime.lastDisconnectCode,
     reconnectAttempt: runtime.reconnectAttempt,
     updatedAt: runtime.updatedAt.toISOString(),
+    upsertEvents: runtime.upsertEvents,
+    upsertMessages: runtime.upsertMessages,
+    historyBatches: runtime.historyBatches,
+    historyMessages: runtime.historyMessages,
+    storedMessages: runtime.storedMessages,
+    skippedMessages: runtime.skippedMessages,
+    ingestErrors: runtime.ingestErrors,
+    lastUpsertAt: runtime.lastUpsertAt?.toISOString(),
+    lastStoredAt: runtime.lastStoredAt?.toISOString(),
+    lastIngestErrorAt: runtime.lastIngestErrorAt?.toISOString(),
+    lastIngestError: runtime.lastIngestError,
+  };
+}
+
+function emptyRuntime(sourceAccountId: string): WhatsappRuntimeStatus {
+  return {
+    sourceAccountId,
+    state: "idle",
+    reconnectAttempt: 0,
+    updatedAt: new Date().toISOString(),
+    upsertEvents: 0,
+    upsertMessages: 0,
+    historyBatches: 0,
+    historyMessages: 0,
+    storedMessages: 0,
+    skippedMessages: 0,
+    ingestErrors: 0,
   };
 }
 
@@ -127,15 +180,7 @@ export class WhatsappManager {
 
   getStatus(sourceAccountId: string): WhatsappRuntimeStatus {
     const runtime = this.sessions.get(sourceAccountId);
-    if (!runtime) {
-      return {
-        sourceAccountId,
-        state: "idle",
-        reconnectAttempt: 0,
-        updatedAt: new Date().toISOString(),
-      };
-    }
-    return publicStatus(runtime);
+    return runtime ? publicStatus(runtime) : emptyRuntime(sourceAccountId);
   }
 
   isOpen(sourceAccountId: string): boolean {
@@ -174,6 +219,13 @@ export class WhatsappManager {
         generation: 0,
         ingestChain: Promise.resolve(),
         authSaveChain: Promise.resolve(),
+        upsertEvents: 0,
+        upsertMessages: 0,
+        historyBatches: 0,
+        historyMessages: 0,
+        storedMessages: 0,
+        skippedMessages: 0,
+        ingestErrors: 0,
       };
       this.sessions.set(sourceAccountId, runtime);
     }
@@ -348,6 +400,19 @@ export class WhatsappManager {
     });
 
     socket.ev.on("messages.upsert", (upsert) => {
+      if (!isAssistant) {
+        runtime.upsertEvents += 1;
+        runtime.upsertMessages += upsert.messages.length;
+        runtime.lastUpsertAt = new Date();
+        logWhatsappDiagnostic(
+          runtime.sourceAccountId,
+          "info",
+          "messages_upsert",
+          `Baileys delivered ${upsert.messages.length} message(s) with type ${upsert.type}`,
+          { upsertType: upsert.type, count: upsert.messages.length },
+        );
+      }
+
       this.enqueue(runtime, async () => {
         if (isAssistant) {
           if (upsert.type !== "notify") return;
@@ -370,7 +435,8 @@ export class WhatsappManager {
         const currentAccount = await getWhatsappAccount(runtime.sourceAccountId);
         if (!currentAccount) return;
         for (const message of upsert.messages) {
-          await ingestWhatsappMessage(
+          await this.ingestMonitoredMessage(
+            runtime,
             currentAccount,
             message,
             origin,
@@ -383,6 +449,15 @@ export class WhatsappManager {
 
     socket.ev.on("messaging-history.set", (history) => {
       if (isAssistant) return;
+      runtime.historyBatches += 1;
+      runtime.historyMessages += history.messages.length;
+      logWhatsappDiagnostic(
+        runtime.sourceAccountId,
+        "info",
+        "history_batch",
+        `Baileys delivered a history batch with ${history.messages.length} message(s)`,
+        { count: history.messages.length, progress: history.progress, isLatest: history.isLatest },
+      );
       this.enqueue(runtime, async () => {
         const currentAccount = await getWhatsappAccount(runtime.sourceAccountId);
         if (!currentAccount) return;
@@ -396,7 +471,8 @@ export class WhatsappManager {
         );
 
         for (const message of history.messages) {
-          await ingestWhatsappMessage(
+          await this.ingestMonitoredMessage(
+            runtime,
             currentAccount,
             message,
             "history",
@@ -447,11 +523,65 @@ export class WhatsappManager {
     });
   }
 
+  private async ingestMonitoredMessage(
+    runtime: RuntimeSession,
+    account: WhatsappAccountRecord,
+    message: WAMessage,
+    origin: WhatsappIngestOrigin,
+    selfJid?: string,
+    upsertType?: string,
+  ): Promise<void> {
+    try {
+      const result = await ingestWhatsappMessage(
+        account,
+        message,
+        origin,
+        selfJid,
+        upsertType,
+      );
+      if (result.stored) {
+        runtime.storedMessages += 1;
+        runtime.lastStoredAt = new Date();
+        runtime.lastIngestError = undefined;
+      } else {
+        runtime.skippedMessages += 1;
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      runtime.ingestErrors += 1;
+      runtime.lastIngestError = errorMessage.slice(0, 1200);
+      runtime.lastIngestErrorAt = new Date();
+      logWhatsappDiagnostic(
+        runtime.sourceAccountId,
+        "error",
+        "message_ingest_failed",
+        errorMessage,
+        {
+          origin,
+          upsertType: upsertType ?? null,
+          remoteJid: message.key.remoteJid ?? null,
+          fromMe: Boolean(message.key.fromMe),
+        },
+      );
+      console.error(`[whatsapp:${runtime.sourceAccountId}] message ingest failed`, error);
+    }
+  }
+
   private enqueue(runtime: RuntimeSession, job: () => Promise<void>): void {
     runtime.ingestChain = runtime.ingestChain
       .then(job)
       .catch((error) => {
-        console.error(`[whatsapp:${runtime.sourceAccountId}] ingest failed`, error);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        runtime.ingestErrors += 1;
+        runtime.lastIngestError = errorMessage.slice(0, 1200);
+        runtime.lastIngestErrorAt = new Date();
+        logWhatsappDiagnostic(
+          runtime.sourceAccountId,
+          "error",
+          "ingest_job_failed",
+          errorMessage,
+        );
+        console.error(`[whatsapp:${runtime.sourceAccountId}] ingest job failed`, error);
       });
   }
 
