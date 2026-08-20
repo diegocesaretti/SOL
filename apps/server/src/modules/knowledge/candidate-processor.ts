@@ -208,6 +208,26 @@ async function processCandidate(candidateId: string): Promise<void> {
   await persistExtraction(candidate, extraction);
 }
 
+async function processPendingRealtimeCandidates(limit = 12): Promise<number> {
+  if (!(await codexProvider.isAvailable())) return 0;
+  const result = await db.query<{ id: string }>(
+    `SELECT ec.id
+     FROM extraction_candidates ec
+     JOIN source_items si ON si.id = ec.source_item_id
+     WHERE ec.status = 'pending'
+       AND si.raw_metadata->>'origin' = 'realtime'
+     ORDER BY ec.created_at ASC
+     LIMIT $1`,
+    [Math.max(1, Math.min(30, Math.trunc(limit)))],
+  );
+  let processed = 0;
+  for (const row of result.rows) {
+    await processCandidate(row.id);
+    processed += 1;
+  }
+  return processed;
+}
+
 export function registerCandidateProcessor(eventBus: EventBus): () => void {
   const knowledgeScheduler = new KnowledgeConsolidationScheduler(
     config.knowledgeConsolidationMs,
@@ -216,16 +236,41 @@ export function registerCandidateProcessor(eventBus: EventBus): () => void {
   );
   knowledgeScheduler.start();
 
+  let stopped = false;
+  let recoveryTimer: NodeJS.Timeout | undefined;
+  const scheduleRecovery = (delayMs: number) => {
+    recoveryTimer = setTimeout(async () => {
+      if (stopped) return;
+      try {
+        const count = await processPendingRealtimeCandidates();
+        if (count) console.log(`[knowledge] recovered ${count} deferred WhatsApp candidate(s)`);
+      } catch (error) {
+        console.error("[knowledge] deferred WhatsApp candidate recovery failed", error);
+      } finally {
+        if (!stopped) scheduleRecovery(config.knowledgeConsolidationMs);
+      }
+    }, delayMs);
+    recoveryTimer.unref();
+  };
+  scheduleRecovery(2 * 60 * 1000);
+
   const unsubscribe = eventBus.subscribe<{ candidateId?: string }>(
     "whatsapp.candidate.detected",
     async (event: DomainEvent<{ candidateId?: string }>) => {
       const candidateId = event.payload.candidateId;
       if (!candidateId) return;
+      // AI enrichment is optional. A disconnected Codex account must never keep
+      // the durable outbox hot or block ingestion; leave the candidate pending for
+      // the sparse recovery pass instead.
+      if (!(await codexProvider.isAvailable())) return;
       await processCandidate(candidateId);
     },
   );
 
   return () => {
+    stopped = true;
+    if (recoveryTimer) clearTimeout(recoveryTimer);
+    recoveryTimer = undefined;
     knowledgeScheduler.stop();
     unsubscribe();
   };
