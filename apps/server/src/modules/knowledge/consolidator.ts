@@ -1,6 +1,6 @@
 import type { PoolClient } from "pg";
 import { db } from "../../database/client.js";
-import { codexProvider } from "../ai/codex/runtime.js";
+import { aiProvider } from "../ai/runtime.js";
 
 const ENTITY_KINDS = new Set([
   "person",
@@ -376,12 +376,12 @@ export async function consolidateNextKnowledgeBatch(
 ): Promise<{ processed: number; entities: number; facts: number } | null> {
   const batch = await loadNextBatch(Math.max(2, Math.min(30, Math.trunc(maxItems))));
   if (!batch.length) return null;
-  if (!(await codexProvider.isAvailable())) return null;
+  if (!(await aiProvider.isAvailable())) return null;
 
   const first = batch[0]!;
   const allowedIds = new Set(batch.map((item) => item.id));
   try {
-    const result = await codexProvider.reason({
+    const result = await aiProvider.reason({
       householdId: first.household_id,
       memberId: first.visibility === "private" ? first.owner_member_id ?? "household" : "household",
       purpose: "consolidation",
@@ -413,6 +413,7 @@ export async function consolidateNextKnowledgeBatch(
     const extraction = parseConsolidationExtraction(result.text, allowedIds);
     const persisted = await persistExtraction(batch, extraction, {
       provider: result.provider,
+      model: result.model,
       ...result.metadata,
     });
     return { processed: batch.length, ...persisted };
@@ -435,7 +436,7 @@ export class KnowledgeConsolidationScheduler {
   start(): void {
     if (this.timer) return;
     // Delay the first pass so source connectors and the main UI start independently
-    // even when Codex is not installed or not logged in.
+    // even when no optional AI provider is configured or available.
     this.timer = setTimeout(() => {
       void this.tick();
       this.timer = setInterval(() => void this.tick(), this.intervalMs);
