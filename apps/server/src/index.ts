@@ -19,6 +19,8 @@ import {
   handleGoogleOAuthCallback,
 } from "./modules/connectors/google-calendar/routes.js";
 import { CalendarSyncScheduler } from "./modules/connectors/google-calendar/scheduler.js";
+import { handleGmailApi, handleGmailOAuthCallback } from "./modules/connectors/gmail/routes.js";
+import { GmailSyncScheduler } from "./modules/connectors/gmail/scheduler.js";
 import { homeAssistantManager } from "./modules/connectors/home-assistant/manager.js";
 import { handleHomeAssistantApi } from "./modules/connectors/home-assistant/routes.js";
 import {
@@ -64,6 +66,7 @@ import { renderLifePage } from "./ui/life.js";
 import { renderMcpPage } from "./ui/mcp.js";
 import { renderMercadoLibrePage } from "./ui/mercadolibre.js";
 import { renderOnboardingPage } from "./ui/onboarding.js";
+import { renderOutputsPage } from "./ui/outputs.js";
 import { renderSolWhatsappPage } from "./ui/sol-whatsapp.js";
 import { renderWhatsappPage } from "./ui/whatsapp.js";
 import { startWindowsTray, stopWindowsTray } from "./windows/tray.js";
@@ -74,11 +77,26 @@ const unregisterExecutiveProcessor = registerExecutiveProposalProcessor(eventBus
 const unregisterSolWhatsappDelivery = registerSolWhatsappDelivery(eventBus, whatsappManager);
 const outboxDispatcher = new OutboxDispatcher(eventBus, config.outboxPollMs);
 const calendarScheduler = new CalendarSyncScheduler(config.calendarSyncMs);
+const gmailScheduler = new GmailSyncScheduler(config.gmailSyncMs);
 const mercadoLibreScheduler = new MercadoLibreSyncScheduler(config.mercadoLibreSyncMs);
 const executiveScheduler = new ExecutiveScheduler(config.executivePollMs);
 
+function requestUrl(request: IncomingMessage): URL {
+  return new URL(request.url ?? "/", "http://sol.local");
+}
+
 function pathname(request: IncomingMessage): string {
-  return new URL(request.url ?? "/", "http://sol.local").pathname;
+  return requestUrl(request).pathname;
+}
+
+function advancedRequested(request: IncomingMessage): boolean {
+  return requestUrl(request).searchParams.get("advanced") === "1";
+}
+
+function redirect(response: ServerResponse, location: string): void {
+  response.statusCode = 302;
+  response.setHeader("location", location);
+  response.end();
 }
 
 function requireJson(request: IncomingMessage, response: ServerResponse): boolean {
@@ -123,6 +141,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
 
   // OAuth callbacks are authenticated by one-time state/PKCE rather than the SOL cookie.
   if (await handleGoogleOAuthCallback(request, response)) return;
+  if (await handleGmailOAuthCallback(request, response)) return;
   if (await handleMercadoLibreOAuthCallback(request, response)) return;
 
   if (request.method === "GET" && path === "/") {
@@ -133,24 +152,8 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     sendHtml(response, 200, renderInputsPage());
     return;
   }
-  if (request.method === "GET" && path === "/ai") {
-    sendHtml(response, 200, renderAiPage());
-    return;
-  }
-  if (request.method === "GET" && path === "/whatsapp") {
-    sendHtml(response, 200, renderWhatsappPage());
-    return;
-  }
-  if (request.method === "GET" && path === "/sol-whatsapp") {
-    sendHtml(response, 200, renderSolWhatsappPage());
-    return;
-  }
-  if (request.method === "GET" && path === "/calendar") {
-    sendHtml(response, 200, renderCalendarPage());
-    return;
-  }
-  if (request.method === "GET" && path === "/executive") {
-    sendHtml(response, 200, renderExecutivePage());
+  if (request.method === "GET" && path === "/outputs") {
+    sendHtml(response, 200, renderOutputsPage());
     return;
   }
   if (request.method === "GET" && path === "/life") {
@@ -161,12 +164,40 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     sendHtml(response, 200, renderMcpPage());
     return;
   }
+  if (request.method === "GET" && path === "/ai") {
+    sendHtml(response, 200, renderAiPage());
+    return;
+  }
+
+  // Provider-specific pages remain available only as advanced adapters. Normal use is Inputs/Outputs.
+  if (request.method === "GET" && path === "/whatsapp") {
+    if (!advancedRequested(request)) { redirect(response, "/inputs"); return; }
+    sendHtml(response, 200, renderWhatsappPage());
+    return;
+  }
   if (request.method === "GET" && path === "/home-assistant") {
+    if (!advancedRequested(request)) { redirect(response, "/inputs"); return; }
     sendHtml(response, 200, renderHomeAssistantPage());
     return;
   }
   if (request.method === "GET" && path === "/mercadolibre") {
+    if (!advancedRequested(request)) { redirect(response, "/inputs"); return; }
     sendHtml(response, 200, renderMercadoLibrePage());
+    return;
+  }
+  if (request.method === "GET" && path === "/calendar") {
+    if (!advancedRequested(request)) { redirect(response, "/inputs"); return; }
+    sendHtml(response, 200, renderCalendarPage());
+    return;
+  }
+  if (request.method === "GET" && path === "/sol-whatsapp") {
+    if (!advancedRequested(request)) { redirect(response, "/outputs"); return; }
+    sendHtml(response, 200, renderSolWhatsappPage());
+    return;
+  }
+  if (request.method === "GET" && path === "/executive") {
+    if (!advancedRequested(request)) { redirect(response, "/outputs"); return; }
+    sendHtml(response, 200, renderExecutivePage());
     return;
   }
 
@@ -185,14 +216,14 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     sendJson(response, 200, {
       name: "SOL",
       architecture: "family-first data/knowledge OS + MCP",
-      version: "0.9.0",
+      version: "0.10.0",
       database,
       reasoningInterface: "mcp",
       optionalAiProvider: "codex",
-      sources: ["whatsapp", "google_calendar", "home_assistant", "mercadolibre"],
+      sources: ["whatsapp", "gmail", "google_calendar", "home_assistant", "mercadolibre"],
       interfaces: ["mcp_stdio", "web", "sol_whatsapp", "windows_tray"],
-      views: ["inputs", "life_timeline", "people", "projects", "executive", "business", "mcp_access"],
-      plannedSources: ["gmail", "google_drive", "contacts", "voice"],
+      views: ["inputs", "outputs", "life_timeline", "people", "projects", "mcp_access"],
+      plannedSources: ["google_drive", "contacts", "voice"],
     });
     return;
   }
@@ -276,6 +307,11 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     if (!principal) return;
     if (await handleWhatsappApi(path, request, response, principal)) return;
   }
+  if (path.startsWith("/v1/gmail")) {
+    const principal = await principalFor(request, response);
+    if (!principal) return;
+    if (await handleGmailApi(path, request, response, principal)) return;
+  }
   if (path.startsWith("/v1/calendar/")) {
     const principal = await principalFor(request, response);
     if (!principal) return;
@@ -338,9 +374,10 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
       }>(request, response);
       if (!input) return;
       const provider = input.provider?.trim().toLowerCase();
-      if (["whatsapp", "google_calendar", "home_assistant", "mercadolibre"].includes(provider ?? "")) {
+      if (["whatsapp", "gmail", "google_calendar", "home_assistant", "mercadolibre"].includes(provider ?? "")) {
         const dedicated =
           provider === "whatsapp" ? "whatsapp" :
+          provider === "gmail" ? "gmail" :
           provider === "google_calendar" ? "calendar" :
           provider === "home_assistant" ? "home-assistant" : "mercadolibre";
         sendJson(response, 400, { error: `Use the dedicated /v1/${dedicated}/accounts endpoint` });
@@ -443,6 +480,7 @@ server.listen(config.port, config.host, () => {
   startWindowsTray();
   outboxDispatcher.start();
   calendarScheduler.start();
+  gmailScheduler.start();
   mercadoLibreScheduler.start();
   executiveScheduler.start();
   void whatsappManager.startLinkedAccounts().catch((error) => {
@@ -463,6 +501,7 @@ async function shutdown(signal: string): Promise<void> {
   stopWindowsTray();
   outboxDispatcher.stop();
   calendarScheduler.stop();
+  gmailScheduler.stop();
   mercadoLibreScheduler.stop();
   executiveScheduler.stop();
   unregisterSolWhatsappDelivery();
