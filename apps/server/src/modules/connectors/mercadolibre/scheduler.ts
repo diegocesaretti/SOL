@@ -27,7 +27,7 @@ export class MercadoLibreSyncScheduler {
         `SELECT sa.id
          FROM source_accounts sa
          JOIN mercadolibre_oauth_credentials mc ON mc.source_account_id = sa.id
-         WHERE sa.provider = 'mercadolibre' AND sa.status IN ('connected', 'error')
+         WHERE sa.provider = 'mercadolibre'
          ORDER BY COALESCE(sa.last_sync_at, to_timestamp(0)) ASC`,
       );
       for (const row of result.rows) {
