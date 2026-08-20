@@ -35,6 +35,13 @@ test("Life family visibility confirmation keeps newline escaped in rendered Java
   assert.match(html, /Visible para la familia\?\\nAceptar/);
 });
 
+test("Life keeps long source bodies compact and exposes Intelligence Gate state", () => {
+  const html = renderLifePage();
+  assert.match(html, /Ver más/);
+  assert.match(html, /gate · sólo Life/);
+  assert.match(html, /intelligenceRoutes/);
+});
+
 test("Inputs explains destructive source removal before deleting", () => {
   const html = renderInputsPage();
   assert.match(html, /también borrará de SOL los datos importados/);
