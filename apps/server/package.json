@@ -11,7 +11,8 @@
     "db:check": "tsx src/database/check.ts",
     "db:migrate": "tsx src/database/migrate.ts",
     "mcp": "tsx src/mcp/stdio.ts",
-    "mcp:token": "tsx src/mcp/create-token.ts"
+    "mcp:token": "tsx src/mcp/create-token.ts",
+    "knowledge:consolidate": "tsx src/knowledge/consolidate.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "2.0.0",
