@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import vm from "node:vm";
+import { renderInputsPage } from "./inputs.js";
 import { renderLifePage } from "./life.js";
 import { renderMcpPage } from "./mcp.js";
 import { renderMercadoLibrePage } from "./mercadolibre.js";
@@ -12,27 +13,25 @@ function embeddedScript(html: string, label: string): string {
   return match[1];
 }
 
-test("Life page renders syntactically valid embedded JavaScript", () => {
-  const script = embeddedScript(renderLifePage(), "Life page");
-  assert.doesNotThrow(() => new vm.Script(script, { filename: "life-inline.js" }));
-});
-
-test("Mercado Libre page renders syntactically valid embedded JavaScript", () => {
-  const script = embeddedScript(renderMercadoLibrePage(), "Mercado Libre page");
-  assert.doesNotThrow(() => new vm.Script(script, { filename: "mercadolibre-inline.js" }));
-});
-
-test("MCP page renders syntactically valid embedded JavaScript", () => {
-  const script = embeddedScript(renderMcpPage(), "MCP page");
-  assert.doesNotThrow(() => new vm.Script(script, { filename: "mcp-inline.js" }));
-});
-
-test("SOL home renders syntactically valid embedded JavaScript", () => {
-  const script = embeddedScript(renderOnboardingPage(), "SOL home");
-  assert.doesNotThrow(() => new vm.Script(script, { filename: "home-inline.js" }));
-});
+for (const [label, render, filename] of [
+  ["Life page", renderLifePage, "life-inline.js"],
+  ["Inputs page", renderInputsPage, "inputs-inline.js"],
+  ["Mercado Libre page", renderMercadoLibrePage, "mercadolibre-inline.js"],
+  ["MCP page", renderMcpPage, "mcp-inline.js"],
+  ["SOL home", renderOnboardingPage, "home-inline.js"],
+] as const) {
+  test(`${label} renders syntactically valid embedded JavaScript`, () => {
+    const script = embeddedScript(render(), label);
+    assert.doesNotThrow(() => new vm.Script(script, { filename }));
+  });
+}
 
 test("Life family visibility confirmation keeps newline escaped in rendered JavaScript", () => {
   const html = renderLifePage();
-  assert.match(html, /visible para la familia\?\\nAceptar/);
+  assert.match(html, /Visible para la familia\?\\nAceptar/);
+});
+
+test("Inputs explains destructive source removal before deleting", () => {
+  const html = renderInputsPage();
+  assert.match(html, /también borrará de SOL los datos importados/);
 });
