@@ -1,5 +1,6 @@
 import { db } from "../../database/client.js";
 import type { AuthPrincipal } from "../auth/session.js";
+import { scoreIntelligenceCandidate } from "../knowledge/intelligence-gate.js";
 
 export type TimelineItemType = "source" | "event" | "task";
 
@@ -20,6 +21,32 @@ function safeBefore(value: string | undefined): Date | null {
   if (!value) return null;
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function intelligenceMetadata(input: {
+  provider: string;
+  title: string | null;
+  bodyText: string | null;
+  metadata: Record<string, unknown>;
+}): Record<string, unknown> {
+  if (input.provider !== "whatsapp" && input.provider !== "gmail") return input.metadata;
+  if (typeof input.metadata.intelligenceScore === "number") return input.metadata;
+  const gate = scoreIntelligenceCandidate({
+    provider: input.provider,
+    title: input.title,
+    bodyText: input.bodyText,
+    metadata: input.metadata,
+  });
+  return {
+    ...input.metadata,
+    intelligenceCandidate: gate.candidate,
+    intelligenceScore: gate.score,
+    intelligencePriority: gate.priority,
+    intelligenceRoutes: gate.routes,
+    intelligenceOperationalScore: gate.operationalScore,
+    intelligenceKnowledgeScore: gate.knowledgeScore,
+    intelligenceReasons: gate.reasons,
+  };
 }
 
 export async function listTimeline(
@@ -141,7 +168,12 @@ export async function listTimeline(
       visibility: row.visibility,
       provider: row.provider,
       sourceLabel: row.source_label,
-      metadata: row.raw_metadata,
+      metadata: intelligenceMetadata({
+        provider: row.provider,
+        title: row.title,
+        bodyText: row.body_text,
+        metadata: row.raw_metadata,
+      }),
     })),
     ...events.rows.map((row) => ({
       id: row.id,
