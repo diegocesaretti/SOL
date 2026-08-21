@@ -21,6 +21,9 @@ test("routes explicit proposal references without AI", () => {
 test("recognizes agenda and creation intents", () => {
   assert.deepEqual(parseAssistantIntent("¿Qué tengo hoy?"), { kind: "today" });
   assert.deepEqual(parseAssistantIntent("agenda mañana"), { kind: "tomorrow" });
+  assert.deepEqual(parseAssistantIntent("¿Qué hay para mañana?"), { kind: "tomorrow" });
+  assert.deepEqual(parseAssistantIntent("¿Cómo viene mañana?"), { kind: "tomorrow" });
+  assert.deepEqual(parseAssistantIntent("¿Qué hay hoy?"), { kind: "today" });
   assert.deepEqual(parseAssistantIntent("Recordame comprar filtros mañana"), { kind: "create" });
 });
 
