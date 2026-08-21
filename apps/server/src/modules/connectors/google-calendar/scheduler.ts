@@ -1,3 +1,4 @@
+import { config } from "../../../config.js";
 import { db } from "../../../database/client.js";
 import { discoverGoogleCalendars, syncGoogleCalendarAccount } from "./sync.js";
 
@@ -8,7 +9,7 @@ export class CalendarSyncScheduler {
   constructor(private readonly intervalMs: number) {}
 
   start(): void {
-    if (this.timer) return;
+    if (!config.nexoLegacyConnectorsEnabled || this.timer) return;
     void this.tick();
     this.timer = setInterval(() => void this.tick(), this.intervalMs);
     this.timer.unref();
