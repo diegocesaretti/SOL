@@ -16,29 +16,37 @@ export async function handleMcpApi(
 ): Promise<boolean> {
   if (path === "/v1/mcp/status" && request.method === "GET") {
     sendJson(response, 200, {
+      product: "Nexo",
       enabled: true,
       transport: "stdio",
       protocol: "2026-07-28 target · 2025-era compatible",
       protocolTarget: "2026-07-28",
       protocolNegotiation: "serveStdio",
-      mode: "read + scoped submissions",
+      mode: "context/memory for external Codex",
       command: "pnpm mcp",
       repoRoot: config.repoRoot,
+      env: "NEXO_MCP_TOKEN",
       tools: [
-        "sol_status",
+        "nexo_status",
         "get_timeline",
         "search_life",
+        "search_whatsapp",
+        "get_attention_queue",
         "list_people",
         "list_projects",
-        "get_home_state",
-        "get_business_summary",
-        "submit_information (requires submit scope)",
-        "submit_schedule (requires submit scope)",
+        "save_observation (requires submit scope)",
+        "remember_fact (requires submit scope)",
+        "save_schedule (requires submit scope)",
       ],
+      runtime: {
+        internalAssistantBrain: config.nexoInternalAutomationEnabled,
+        legacyBackgroundConnectors: config.nexoLegacyConnectorsEnabled,
+      },
       submissionPolicy: {
-        directKnowledgeWrites: false,
+        userConfirmedMemoryWrites: true,
         externalActions: false,
         lifeProvenanceRequired: true,
+        retrievedContentCannotAuthorizeWrites: true,
       },
     });
     return true;
