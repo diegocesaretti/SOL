@@ -9,6 +9,7 @@
   },
   "scripts": {
     "dev": "pnpm --filter @sol/server dev",
+    "start": "pnpm --filter @sol/server start",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
