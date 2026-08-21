@@ -6,6 +6,8 @@ import {
   requestBriefDelivery,
 } from "./proactivity.js";
 
+const STARTUP_GRACE_MS = 45_000;
+
 export function localMinuteOfDay(date: Date, timezone: string): number {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: timezone,
@@ -37,18 +39,25 @@ export function scheduleWindowOpen(
 
 export class ExecutiveScheduler {
   private timer?: NodeJS.Timeout;
+  private startupTimer?: NodeJS.Timeout;
   private running = false;
 
   constructor(private readonly intervalMs: number) {}
 
   start(): void {
-    if (this.timer) return;
-    void this.tick();
+    if (this.timer || this.startupTimer) return;
+    this.startupTimer = setTimeout(() => {
+      this.startupTimer = undefined;
+      void this.tick();
+    }, STARTUP_GRACE_MS);
+    this.startupTimer.unref();
     this.timer = setInterval(() => void this.tick(), this.intervalMs);
     this.timer.unref();
   }
 
   stop(): void {
+    if (this.startupTimer) clearTimeout(this.startupTimer);
+    this.startupTimer = undefined;
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
   }
