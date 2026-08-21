@@ -30,6 +30,7 @@ export class AiRouter implements AiProvider {
   }
 
   async isAvailable(): Promise<boolean> {
+    if (!config.nexoInternalAutomationEnabled) return false;
     for (const provider of this.providers()) {
       if (await provider.isAvailable()) return true;
     }
@@ -37,6 +38,9 @@ export class AiRouter implements AiProvider {
   }
 
   async reason(request: ReasoningRequest): Promise<ReasoningResult> {
+    if (!config.nexoInternalAutomationEnabled) {
+      throw new Error("Nexo internal AI is disabled; reasoning belongs to the external Codex host via MCP");
+    }
     const failures: string[] = [];
     for (const provider of this.providers()) {
       if (!(await provider.isAvailable())) continue;
@@ -56,6 +60,15 @@ export class AiRouter implements AiProvider {
     activeProvider?: string;
     providers: Array<{ id: string; configured: boolean; available: boolean }>;
   }> {
+    if (!config.nexoInternalAutomationEnabled) {
+      return {
+        mode: this.mode,
+        providers: [
+          { id: "openai", configured: Boolean(config.openaiApiKey), available: false },
+          { id: "codex", configured: true, available: false },
+        ],
+      };
+    }
     const openaiAvailable = await this.openai.isAvailable();
     const codexAvailable = await this.codex.isAvailable();
     const availableById = new Map<string, boolean>([
