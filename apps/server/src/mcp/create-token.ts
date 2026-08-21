@@ -22,14 +22,14 @@ const members = await db.query<{
 );
 
 if (!members.rows.length) {
-  console.error("No active SOL members exist. Complete onboarding first.");
+  console.error("No active Nexo members exist. Complete onboarding first.");
   await closeDatabase();
   process.exit(1);
 }
 
 const rl = createInterface({ input, output });
 try {
-  console.log("\nSOL MCP · create member-scoped token\n");
+  console.log("\nNexo MCP · create member-scoped token\n");
   members.rows.forEach((row, index) => {
     console.log(`${index + 1}. ${row.display_name} (${row.role}) · ${row.household_name}`);
   });
@@ -39,9 +39,9 @@ try {
   if (!row) throw new Error("Invalid member selection");
   if (row.role === "guest") throw new Error("Guest members cannot receive MCP access tokens");
 
-  const labelRaw = await rl.question("Client label [Local MCP client]: ");
+  const labelRaw = await rl.question("Client label [Codex · Nexo]: ");
   const daysRaw = await rl.question("Expires in days [90]: ");
-  const submitRaw = await rl.question("Allow this client to submit information/schedules into SOL Life? [y/N]: ");
+  const submitRaw = await rl.question("Allow this client to save user-confirmed observations/memory in Nexo? [y/N]: ");
   const allowSubmit = ["y", "yes", "s", "si", "sí"].includes(submitRaw.trim().toLowerCase());
   const principal: AuthPrincipal = {
     householdId: row.household_id,
@@ -51,28 +51,28 @@ try {
     role: row.role,
   };
   const created = await createMcpAccessToken(principal, {
-    label: labelRaw.trim() || "Local MCP client",
+    label: labelRaw.trim() || "Codex · Nexo",
     expiresInDays: daysRaw.trim() ? Number(daysRaw) : 90,
     allowSubmit,
   });
 
-  console.log("\nToken created. Copy it now; SOL stores only its hash:\n");
+  console.log("\nToken created. Copy it now; Nexo stores only its hash:\n");
   console.log(created.token);
   console.log(`\nScopes: ${created.access.scopes.join(", ")}\n`);
   console.log("Generic MCP stdio configuration template:\n");
   console.log(JSON.stringify({
     mcpServers: {
-      sol: {
+      nexo: {
         command: "pnpm",
         args: ["--dir", config.repoRoot, "mcp"],
-        env: { SOL_MCP_TOKEN: created.token },
+        env: { NEXO_MCP_TOKEN: created.token },
       },
     },
   }, null, 2));
   console.log(
     allowSubmit
-      ? "\nThis token can read permitted SOL data and submit provenance-bearing information/schedules. It cannot perform external actions.\n"
-      : "\nThis token is read-only and inherits the selected member's SOL privacy boundary.\n",
+      ? "\nThis token can read permitted Nexo context and save user-confirmed observations/memory. It cannot perform external actions.\n"
+      : "\nThis token is read-only and inherits the selected member's Nexo privacy boundary.\n",
   );
 } finally {
   rl.close();
