@@ -1,4 +1,5 @@
 import { db } from "../../database/client.js";
+import type { ExecutiveBriefContent } from "./briefs.js";
 
 export interface ProactivitySettings {
   enabled: boolean;
@@ -27,6 +28,16 @@ function normalizeClock(value: string): string {
     throw new Error("invalid_time");
   }
   return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+export function briefHasUsefulContent(brief: ExecutiveBriefContent): boolean {
+  if (brief.events.length || brief.tasks.length || brief.pendingProposals.length || brief.conflicts.length) return true;
+  const business = brief.business;
+  if (!business) return false;
+  return Boolean(
+    business.period.orders ||
+    business.unansweredQuestions.length
+  );
 }
 
 export async function getProactivitySettings(memberId: string): Promise<ProactivitySettings> {
@@ -94,4 +105,81 @@ export async function updateProactivitySettings(
     ],
   );
   return next;
+}
+
+export async function briefDeliveryHandled(
+  memberId: string,
+  brief: ExecutiveBriefContent,
+): Promise<boolean> {
+  const result = await db.query<{ delivery_requested_at: Date | null }>(
+    `SELECT delivery_requested_at
+     FROM executive_briefs
+     WHERE member_id = $1
+       AND brief_type = $2
+       AND period_start = $3
+       AND period_end = $4`,
+    [memberId, brief.type, new Date(brief.periodStart), new Date(brief.periodEnd)],
+  );
+  return Boolean(result.rows[0]?.delivery_requested_at);
+}
+
+export async function requestBriefDelivery(
+  memberId: string,
+  brief: ExecutiveBriefContent,
+  suppressEmpty: boolean,
+): Promise<{ requested: boolean; suppressed: boolean }> {
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    const found = await client.query<{
+      id: string;
+      household_id: string;
+      delivery_requested_at: Date | null;
+    }>(
+      `SELECT id, household_id, delivery_requested_at
+       FROM executive_briefs
+       WHERE member_id = $1
+         AND brief_type = $2
+         AND period_start = $3
+         AND period_end = $4
+       FOR UPDATE`,
+      [memberId, brief.type, new Date(brief.periodStart), new Date(brief.periodEnd)],
+    );
+    const row = found.rows[0];
+    if (!row) throw new Error("brief_not_persisted");
+    if (row.delivery_requested_at) {
+      await client.query("COMMIT");
+      return { requested: false, suppressed: false };
+    }
+
+    await client.query(
+      `UPDATE executive_briefs
+       SET delivery_requested_at = now()
+       WHERE id = $1`,
+      [row.id],
+    );
+
+    if (suppressEmpty && !briefHasUsefulContent(brief)) {
+      await client.query("COMMIT");
+      return { requested: false, suppressed: true };
+    }
+
+    await client.query(
+      `INSERT INTO event_outbox(
+         household_id, event_type, aggregate_type, aggregate_id, payload
+       ) VALUES ($1, 'executive.brief.created', 'executive_brief', $2, $3::jsonb)`,
+      [
+        row.household_id,
+        row.id,
+        JSON.stringify({ briefId: row.id, memberId }),
+      ],
+    );
+    await client.query("COMMIT");
+    return { requested: true, suppressed: false };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
