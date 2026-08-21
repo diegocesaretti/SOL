@@ -3,6 +3,11 @@ import { config } from "../../config.js";
 import type { DomainEvent, EventBus } from "../../core/event-bus.js";
 import { aiProvider } from "../ai/runtime.js";
 import { KnowledgeConsolidationScheduler } from "./consolidator.js";
+import { scoreIntelligenceCandidate } from "./intelligence-gate.js";
+
+export const HISTORICAL_OPERATIONAL_BOOTSTRAP_DAYS = 7;
+export const HISTORICAL_OPERATIONAL_BOOTSTRAP_MAX_CANDIDATES = 50;
+const HISTORICAL_BOOTSTRAP_REASON = "historical-bootstrap";
 
 const KINDS = new Set([
   "task",
@@ -40,6 +45,18 @@ interface CandidateRow {
   raw_metadata: Record<string, unknown>;
   timezone: string;
   conversation_title: string | null;
+}
+
+interface HistoricalSourceRow {
+  id: string;
+  household_id: string;
+  owner_member_id: string | null;
+  provider: string;
+  title: string | null;
+  body_text: string;
+  raw_metadata: Record<string, unknown>;
+  occurred_at: Date;
+  candidate_id: string | null;
 }
 
 function stripCodeFence(value: string): string {
@@ -212,17 +229,135 @@ async function processCandidate(candidateId: string): Promise<void> {
   await persistExtraction(candidate, extraction);
 }
 
-async function processPendingRealtimeCandidates(limit = 12): Promise<number> {
+async function prepareHistoricalOperationalBootstrap(): Promise<number> {
+  const tagged = await db.query<{ count: string }>(
+    `SELECT count(*)::text AS count
+     FROM extraction_candidates
+     WHERE reasons @> $1::jsonb`,
+    [JSON.stringify([HISTORICAL_BOOTSTRAP_REASON])],
+  );
+  const alreadyTagged = Number(tagged.rows[0]?.count ?? 0);
+  const remaining = Math.max(
+    0,
+    HISTORICAL_OPERATIONAL_BOOTSTRAP_MAX_CANDIDATES - alreadyTagged,
+  );
+  if (!remaining) return 0;
+
+  const result = await db.query<HistoricalSourceRow>(
+    `SELECT si.id, si.household_id, si.owner_member_id, sa.provider,
+            si.title, si.body_text, si.raw_metadata, si.occurred_at,
+            ec.id AS candidate_id
+     FROM source_items si
+     JOIN source_accounts sa ON sa.id = si.source_account_id
+     LEFT JOIN extraction_candidates ec ON ec.source_item_id = si.id
+     WHERE si.deleted_at IS NULL
+       AND sa.provider IN ('whatsapp', 'gmail')
+       AND si.visibility IN ('private', 'family')
+       AND (si.visibility <> 'private' OR si.owner_member_id IS NOT NULL)
+       AND si.body_text IS NOT NULL
+       AND char_length(btrim(si.body_text)) >= 4
+       AND si.occurred_at >= now() - ($1::int * interval '1 day')
+       AND COALESCE(si.raw_metadata->>'origin', 'history') <> 'realtime'
+       AND (ec.id IS NULL OR ec.status = 'pending')`,
+    [HISTORICAL_OPERATIONAL_BOOTSTRAP_DAYS],
+  );
+
+  const ranked = result.rows
+    .map((item) => ({
+      item,
+      gate: scoreIntelligenceCandidate({
+        provider: item.provider,
+        title: item.title,
+        bodyText: item.body_text,
+        metadata: item.raw_metadata,
+      }),
+    }))
+    .filter(({ gate }) => gate.routes.includes("operational"))
+    .sort((a, b) => {
+      if (b.gate.operationalScore !== a.gate.operationalScore) {
+        return b.gate.operationalScore - a.gate.operationalScore;
+      }
+      return b.item.occurred_at.getTime() - a.item.occurred_at.getTime();
+    })
+    .slice(0, remaining);
+
+  let prepared = 0;
+  for (const { item, gate } of ranked) {
+    const reasons = [...new Set([...gate.reasons, HISTORICAL_BOOTSTRAP_REASON])];
+    if (item.candidate_id) {
+      const updated = await db.query(
+        `UPDATE extraction_candidates
+         SET score = GREATEST(score, $2), reasons = $3::jsonb, updated_at = now()
+         WHERE id = $1 AND status = 'pending'`,
+        [item.candidate_id, gate.operationalScore, JSON.stringify(reasons)],
+      );
+      if (updated.rowCount) prepared += 1;
+      continue;
+    }
+
+    const inserted = await db.query(
+      `INSERT INTO extraction_candidates(
+         household_id, source_item_id, owner_member_id, source_provider, score, reasons
+       ) VALUES ($1,$2,$3,$4,$5,$6::jsonb)
+       ON CONFLICT(source_item_id) DO NOTHING`,
+      [
+        item.household_id,
+        item.id,
+        item.owner_member_id,
+        item.provider,
+        gate.operationalScore,
+        JSON.stringify(reasons),
+      ],
+    );
+    if (inserted.rowCount) prepared += 1;
+  }
+  return prepared;
+}
+
+async function processHistoricalBootstrapCandidates(): Promise<number> {
+  if (!(await aiProvider.isAvailable())) return 0;
+  const result = await db.query<{ id: string }>(
+    `SELECT id
+     FROM extraction_candidates
+     WHERE status = 'pending'
+       AND reasons @> $1::jsonb
+     ORDER BY score DESC, created_at ASC
+     LIMIT $2`,
+    [
+      JSON.stringify([HISTORICAL_BOOTSTRAP_REASON]),
+      HISTORICAL_OPERATIONAL_BOOTSTRAP_MAX_CANDIDATES,
+    ],
+  );
+  let processed = 0;
+  for (const row of result.rows) {
+    try {
+      await processCandidate(row.id);
+      processed += 1;
+    } catch (error) {
+      console.error(`[knowledge] historical operational bootstrap stopped after ${processed} candidate(s)`, error);
+      break;
+    }
+  }
+  return processed;
+}
+
+async function processPendingOperationalCandidates(limit = 12): Promise<number> {
   if (!(await aiProvider.isAvailable())) return 0;
   const result = await db.query<{ id: string }>(
     `SELECT ec.id
      FROM extraction_candidates ec
      JOIN source_items si ON si.id = ec.source_item_id
      WHERE ec.status = 'pending'
-       AND si.raw_metadata->>'origin' = 'realtime'
+       AND (
+         si.raw_metadata->>'origin' = 'realtime'
+         OR ec.reasons @> $2::jsonb
+       )
      ORDER BY ec.score DESC, ec.created_at ASC
      LIMIT $1`,
-    [Math.max(1, Math.min(30, Math.trunc(limit)))],
+    [
+      Math.max(1, Math.min(30, Math.trunc(limit))),
+      JSON.stringify([HISTORICAL_BOOTSTRAP_REASON]),
+    ],
   );
   let processed = 0;
   for (const row of result.rows) {
@@ -242,11 +377,32 @@ export function registerCandidateProcessor(eventBus: EventBus): () => void {
 
   let stopped = false;
   let recoveryTimer: NodeJS.Timeout | undefined;
+  let bootstrapTimer: NodeJS.Timeout | undefined;
+
+  bootstrapTimer = setTimeout(async () => {
+    if (stopped) return;
+    try {
+      const prepared = await prepareHistoricalOperationalBootstrap();
+      if (prepared) {
+        console.log(
+          `[knowledge] historical operational bootstrap selected ${prepared} candidate(s) from the last ${HISTORICAL_OPERATIONAL_BOOTSTRAP_DAYS} day(s)`,
+        );
+      }
+      const processed = await processHistoricalBootstrapCandidates();
+      if (processed) {
+        console.log(`[knowledge] historical operational bootstrap processed ${processed} candidate(s)`);
+      }
+    } catch (error) {
+      console.error("[knowledge] historical operational bootstrap failed", error);
+    }
+  }, 15_000);
+  bootstrapTimer.unref();
+
   const scheduleRecovery = (delayMs: number) => {
     recoveryTimer = setTimeout(async () => {
       if (stopped) return;
       try {
-        const count = await processPendingRealtimeCandidates();
+        const count = await processPendingOperationalCandidates();
         if (count) console.log(`[knowledge] recovered ${count} deferred operational candidate(s)`);
       } catch (error) {
         console.error("[knowledge] deferred operational candidate recovery failed", error);
@@ -278,6 +434,8 @@ export function registerCandidateProcessor(eventBus: EventBus): () => void {
 
   return () => {
     stopped = true;
+    if (bootstrapTimer) clearTimeout(bootstrapTimer);
+    bootstrapTimer = undefined;
     if (recoveryTimer) clearTimeout(recoveryTimer);
     recoveryTimer = undefined;
     knowledgeScheduler.stop();
