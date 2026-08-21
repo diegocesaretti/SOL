@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { config } from "../../../config.js";
 import { db } from "../../../database/client.js";
 import { fetchHomeAssistantStates, normalizeHomeAssistantBaseUrl, testHomeAssistantConnection, type HomeAssistantState } from "./client.js";
 import { openHomeAssistantToken, sealHomeAssistantToken } from "./crypto.js";
@@ -143,6 +144,7 @@ export async function loadHomeAssistantCredential(sourceAccountId: string): Prom
 }
 
 export async function listConfiguredHomeAssistantAccountIds(): Promise<string[]> {
+  if (!config.nexoLegacyConnectorsEnabled) return [];
   const result = await db.query<{ id: string }>(
     `SELECT sa.id
      FROM source_accounts sa
