@@ -177,6 +177,8 @@ Proactive WhatsApp delivery is independent from interactive `confirmedByUser`. I
 
 The destination never comes from Gmail, WhatsApp, Mercado Libre, Calendar or LLM output. Configure the bridge URL with `WHATSAPP_NEXO_URL` (default `http://127.0.0.1:3210`).
 
+On Windows, install the persistent hidden host once with `powershell -ExecutionPolicy Bypass -File scripts/windows/install-nexo-startup.ps1`. It starts at logon, restarts after failures and lets Morning Brief catch up once when the machine starts after 08:00. Use the same command with `-Remove` to uninstall it.
+
 MCP tools: `get_morning_brief_status`, `get_last_morning_brief`, `get_morning_brief_settings`, `run_morning_brief({dryRun})`, and confirmed mutation `configure_morning_brief`.
 
 To minimize migration risk in the first prototype, these old technical identifiers remain temporarily:
