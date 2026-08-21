@@ -18,3 +18,30 @@ COMMENT ON TABLE member_proactivity_settings IS
 
 COMMENT ON COLUMN executive_briefs.delivery_requested_at IS
   'Set once the proactive scheduler has handled delivery for this brief, including intentional empty-brief suppression.';
+
+CREATE OR REPLACE FUNCTION enqueue_executive_proposal_created()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  INSERT INTO event_outbox(
+    household_id, event_type, aggregate_type, aggregate_id, payload
+  ) VALUES (
+    NEW.household_id,
+    'executive.proposal.created',
+    'executive_proposal',
+    NEW.id,
+    jsonb_build_object(
+      'proposalId', NEW.id,
+      'ownerMemberId', NEW.owner_member_id
+    )
+  );
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS executive_proposal_created_outbox ON executive_proposals;
+CREATE TRIGGER executive_proposal_created_outbox
+AFTER INSERT ON executive_proposals
+FOR EACH ROW
+EXECUTE FUNCTION enqueue_executive_proposal_created();
