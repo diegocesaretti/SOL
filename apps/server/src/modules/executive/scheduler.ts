@@ -1,3 +1,4 @@
+import { config } from "../../config.js";
 import { db } from "../../database/client.js";
 import { buildExecutiveBrief, readExecutiveBrief } from "./briefs.js";
 import {
@@ -5,8 +6,6 @@ import {
   getProactivitySettings,
   requestBriefDelivery,
 } from "./proactivity.js";
-
-const STARTUP_GRACE_MS = 45_000;
 
 export function localMinuteOfDay(date: Date, timezone: string): number {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -39,25 +38,25 @@ export function scheduleWindowOpen(
 
 export class ExecutiveScheduler {
   private timer?: NodeJS.Timeout;
-  private startupTimer?: NodeJS.Timeout;
+  private initialTimer?: NodeJS.Timeout;
   private running = false;
 
   constructor(private readonly intervalMs: number) {}
 
   start(): void {
-    if (this.timer || this.startupTimer) return;
-    this.startupTimer = setTimeout(() => {
-      this.startupTimer = undefined;
+    if (!config.nexoInternalAutomationEnabled || this.timer || this.initialTimer) return;
+    this.initialTimer = setTimeout(() => {
+      this.initialTimer = undefined;
       void this.tick();
-    }, STARTUP_GRACE_MS);
-    this.startupTimer.unref();
+    }, 45_000);
+    this.initialTimer.unref();
     this.timer = setInterval(() => void this.tick(), this.intervalMs);
     this.timer.unref();
   }
 
   stop(): void {
-    if (this.startupTimer) clearTimeout(this.startupTimer);
-    this.startupTimer = undefined;
+    if (this.initialTimer) clearTimeout(this.initialTimer);
+    this.initialTimer = undefined;
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
   }
@@ -69,9 +68,6 @@ export class ExecutiveScheduler {
   ): Promise<void> {
     const existing = await readExecutiveBrief(memberId, type);
     if (existing && (await briefDeliveryHandled(memberId, existing))) return;
-
-    // Refresh at delivery time so a manually generated earlier brief does not make
-    // the proactive message stale.
     const brief = await buildExecutiveBrief(memberId, type);
     const delivery = await requestBriefDelivery(memberId, brief, suppressEmpty);
     if (delivery.requested) {
@@ -98,14 +94,12 @@ export class ExecutiveScheduler {
         try {
           const settings = await getProactivitySettings(member.id);
           if (!settings.enabled) continue;
-
           if (
             settings.morningBriefEnabled &&
             scheduleWindowOpen(now, member.timezone, settings.morningTime)
           ) {
             await this.deliverScheduledBrief(member.id, "morning", settings.suppressEmpty);
           }
-
           if (
             settings.tomorrowPreviewEnabled &&
             scheduleWindowOpen(now, member.timezone, settings.tomorrowTime)
