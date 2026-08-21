@@ -8,15 +8,34 @@ export interface ProactivitySettings {
   tomorrowPreviewEnabled: boolean;
   tomorrowTime: string;
   suppressEmpty: boolean;
+  morningTimezone: string;
+  morningSources: { gmail: boolean; whatsapp: boolean; mercadolibre: boolean; calendar: boolean };
+  morningAutoCreateEvents: boolean;
+  morningSendWhatsapp: boolean;
+  morningWhatsappGrant: boolean;
+  morningMaxWhatsapp: number;
+  morningMaxEmails: number;
+  morningMaxMercadolibre: number;
 }
+export type ProactivitySettingsPatch = Partial<Omit<ProactivitySettings, "morningSources">> & {
+  morningSources?: Partial<ProactivitySettings["morningSources"]>;
+};
 
 export const DEFAULT_PROACTIVITY_SETTINGS: ProactivitySettings = {
   enabled: true,
   morningBriefEnabled: true,
-  morningTime: "07:30",
+  morningTime: "08:00",
   tomorrowPreviewEnabled: true,
   tomorrowTime: "20:30",
   suppressEmpty: true,
+  morningTimezone: "America/Argentina/Buenos_Aires",
+  morningSources: { gmail: true, whatsapp: true, mercadolibre: true, calendar: true },
+  morningAutoCreateEvents: true,
+  morningSendWhatsapp: true,
+  morningWhatsappGrant: false,
+  morningMaxWhatsapp: 200,
+  morningMaxEmails: 100,
+  morningMaxMercadolibre: 100,
 };
 
 function normalizeClock(value: string): string {
@@ -48,9 +67,20 @@ export async function getProactivitySettings(memberId: string): Promise<Proactiv
     tomorrow_preview_enabled: boolean;
     tomorrow_time: string;
     suppress_empty: boolean;
+    morning_timezone: string;
+    morning_sources: ProactivitySettings["morningSources"];
+    morning_auto_create_events: boolean;
+    morning_send_whatsapp: boolean;
+    morning_whatsapp_grant: boolean;
+    morning_max_whatsapp: number;
+    morning_max_emails: number;
+    morning_max_mercadolibre: number;
   }>(
     `SELECT enabled, morning_brief_enabled, morning_time::text,
-            tomorrow_preview_enabled, tomorrow_time::text, suppress_empty
+            tomorrow_preview_enabled, tomorrow_time::text, suppress_empty,
+            morning_timezone, morning_sources, morning_auto_create_events,
+            morning_send_whatsapp, morning_whatsapp_grant, morning_max_whatsapp,
+            morning_max_emails, morning_max_mercadolibre
      FROM member_proactivity_settings
      WHERE member_id = $1`,
     [memberId],
@@ -64,12 +94,20 @@ export async function getProactivitySettings(memberId: string): Promise<Proactiv
     tomorrowPreviewEnabled: row.tomorrow_preview_enabled,
     tomorrowTime: normalizeClock(row.tomorrow_time),
     suppressEmpty: row.suppress_empty,
+    morningTimezone: row.morning_timezone,
+    morningSources: row.morning_sources,
+    morningAutoCreateEvents: row.morning_auto_create_events,
+    morningSendWhatsapp: row.morning_send_whatsapp,
+    morningWhatsappGrant: row.morning_whatsapp_grant,
+    morningMaxWhatsapp: row.morning_max_whatsapp,
+    morningMaxEmails: row.morning_max_emails,
+    morningMaxMercadolibre: row.morning_max_mercadolibre,
   };
 }
 
 export async function updateProactivitySettings(
   memberId: string,
-  patch: Partial<ProactivitySettings>,
+  patch: ProactivitySettingsPatch,
 ): Promise<ProactivitySettings> {
   const current = await getProactivitySettings(memberId);
   const next: ProactivitySettings = {
@@ -79,13 +117,25 @@ export async function updateProactivitySettings(
     tomorrowPreviewEnabled: patch.tomorrowPreviewEnabled ?? current.tomorrowPreviewEnabled,
     tomorrowTime: normalizeClock(patch.tomorrowTime ?? current.tomorrowTime),
     suppressEmpty: patch.suppressEmpty ?? current.suppressEmpty,
+    morningTimezone: patch.morningTimezone ?? current.morningTimezone,
+    morningSources: { ...current.morningSources, ...patch.morningSources },
+    morningAutoCreateEvents: patch.morningAutoCreateEvents ?? current.morningAutoCreateEvents,
+    morningSendWhatsapp: patch.morningSendWhatsapp ?? current.morningSendWhatsapp,
+    morningWhatsappGrant: patch.morningWhatsappGrant ?? current.morningWhatsappGrant,
+    morningMaxWhatsapp: Math.max(10, Math.min(2000, patch.morningMaxWhatsapp ?? current.morningMaxWhatsapp)),
+    morningMaxEmails: Math.max(10, Math.min(1000, patch.morningMaxEmails ?? current.morningMaxEmails)),
+    morningMaxMercadolibre: Math.max(10, Math.min(1000, patch.morningMaxMercadolibre ?? current.morningMaxMercadolibre)),
   };
+  try { new Intl.DateTimeFormat("en", { timeZone: next.morningTimezone }); } catch { throw new Error("invalid_timezone"); }
 
   await db.query(
     `INSERT INTO member_proactivity_settings(
        member_id, enabled, morning_brief_enabled, morning_time,
-       tomorrow_preview_enabled, tomorrow_time, suppress_empty, updated_at
-     ) VALUES ($1,$2,$3,$4::time,$5,$6::time,$7,now())
+       tomorrow_preview_enabled, tomorrow_time, suppress_empty, morning_timezone,
+       morning_sources, morning_auto_create_events, morning_send_whatsapp,
+       morning_whatsapp_grant, morning_max_whatsapp, morning_max_emails,
+       morning_max_mercadolibre, updated_at
+     ) VALUES ($1,$2,$3,$4::time,$5,$6::time,$7,$8,$9::jsonb,$10,$11,$12,$13,$14,$15,now())
      ON CONFLICT(member_id)
      DO UPDATE SET enabled = EXCLUDED.enabled,
                    morning_brief_enabled = EXCLUDED.morning_brief_enabled,
@@ -93,6 +143,14 @@ export async function updateProactivitySettings(
                    tomorrow_preview_enabled = EXCLUDED.tomorrow_preview_enabled,
                    tomorrow_time = EXCLUDED.tomorrow_time,
                    suppress_empty = EXCLUDED.suppress_empty,
+                   morning_timezone = EXCLUDED.morning_timezone,
+                   morning_sources = EXCLUDED.morning_sources,
+                   morning_auto_create_events = EXCLUDED.morning_auto_create_events,
+                   morning_send_whatsapp = EXCLUDED.morning_send_whatsapp,
+                   morning_whatsapp_grant = EXCLUDED.morning_whatsapp_grant,
+                   morning_max_whatsapp = EXCLUDED.morning_max_whatsapp,
+                   morning_max_emails = EXCLUDED.morning_max_emails,
+                   morning_max_mercadolibre = EXCLUDED.morning_max_mercadolibre,
                    updated_at = now()`,
     [
       memberId,
@@ -102,6 +160,14 @@ export async function updateProactivitySettings(
       next.tomorrowPreviewEnabled,
       next.tomorrowTime,
       next.suppressEmpty,
+      next.morningTimezone,
+      JSON.stringify(next.morningSources),
+      next.morningAutoCreateEvents,
+      next.morningSendWhatsapp,
+      next.morningWhatsappGrant,
+      next.morningMaxWhatsapp,
+      next.morningMaxEmails,
+      next.morningMaxMercadolibre,
     ],
   );
   return next;

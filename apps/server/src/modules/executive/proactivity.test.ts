@@ -20,7 +20,9 @@ function brief(overrides: Partial<ExecutiveBriefContent> = {}): ExecutiveBriefCo
 
 test("uses conservative proactive defaults", () => {
   assert.equal(DEFAULT_PROACTIVITY_SETTINGS.enabled, true);
-  assert.equal(DEFAULT_PROACTIVITY_SETTINGS.morningTime, "07:30");
+  assert.equal(DEFAULT_PROACTIVITY_SETTINGS.morningTime, "08:00");
+  assert.equal(DEFAULT_PROACTIVITY_SETTINGS.morningTimezone, "America/Argentina/Buenos_Aires");
+  assert.equal(DEFAULT_PROACTIVITY_SETTINGS.morningWhatsappGrant, false);
   assert.equal(DEFAULT_PROACTIVITY_SETTINGS.tomorrowTime, "20:30");
   assert.equal(DEFAULT_PROACTIVITY_SETTINGS.suppressEmpty, true);
 });
