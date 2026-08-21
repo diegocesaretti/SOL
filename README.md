@@ -1,130 +1,138 @@
-# SOL
+# Nexo
 
-SOL is a family-first personal **data and knowledge system**: many people, many sources, one coherent household context layer that can be exposed to authorized AI clients through MCP.
+Nexo is a family-first **WhatsApp + memory/context layer for Codex**.
 
-> **Sources tell SOL what happened → Life records it → Knowledge organizes it → MCP exposes it → clients reason over it.**
+> **Codex is the assistant. Nexo remembers, protects and exposes context.**
 
-External writes remain behind SOL's Executive/policy layer.
+The repository is still named `SOL` for now and several internal package/table identifiers retain the old name during the prototype. The product boundary has changed deliberately: Nexo should not become another competing assistant brain.
 
-## Principles
-
-- **Family-first, not single-user.** Records belong to a household and can have a member owner plus an explicit visibility scope.
-- **Multiple accounts per provider.** Each member can connect several provider accounts; household-shared accounts are separate.
-- **Source traceability.** Derived tasks/events/knowledge remain traceable to the source item that caused them.
-- **Privacy before AI, MCP and UI.** Authorization filters records before they reach any reasoning client.
-- **Private really means private.** Household owner/admin status does not automatically reveal another member's private records.
-- **Knowledge is not authority.** Observed source content is untrusted data, not a command to SOL.
-- **Models think; SOL authorizes.** MCP/LLM clients do not get raw SQL or permission bypasses.
-- **Proposal before external action.** Externally visible writes stay behind Executive/action policy and audit.
-- **Provider independence.** Codex is useful for optional extraction/consolidation, but SOL data access no longer depends on one AI provider.
-- **No virtualization requirement.** SOL runs natively on Windows; PostgreSQL can be Neon-managed or a native local service.
-
-## Current architecture
+## Prototype architecture
 
 ```text
-SOURCES
-member WhatsApps ─┐
-Google Calendars ─┤
-Home Assistant ───┼─→ Life → Knowledge → Identity/Privacy → MCP ─┬→ Codex
-Mercado Libre ────┘                                             ├→ ChatGPT
-                                                               └→ other clients
-
-                                         proposals → Executive → Actions
+                          Codex / “Sol”
+                               │
+              ┌────────────────┼────────────────┐
+              │                │                │
+           Gmail           Calendar       Home Assistant MCP
+          (direct)          (direct)            (direct)
+              │                │                │
+              └────────────────┼────────────────┘
+                               │
+                           Nexo MCP
+                               │
+                     ┌─────────┴─────────┐
+                     │                   │
+                  WhatsApp             Memory
+              history + realtime   Life + Knowledge
+                     │            identity + privacy
+                     └─────────┬─────────┘
+                               │
+                         PostgreSQL
 ```
 
-## Implemented today
+Nexo owns:
 
-- household/member authentication and conservative privacy boundaries;
-- PostgreSQL schema, migrations, provenance and durable event outbox;
-- Neon-friendly event-driven database behavior with native Windows PostgreSQL fallback;
-- multiple private/shared WhatsApp linked-device source accounts;
-- encrypted WhatsApp auth/Signal state;
-- realtime/history WhatsApp ingestion and deterministic candidate filtering;
-- optional Codex App Server + ChatGPT OAuth enrichment/classification;
-- Google Calendar multi-account sync with separate read/write calendar selection;
-- executive proposals, approvals, local tasks, Calendar actions and `action_log`;
-- dedicated WhatsApp de SOL interface with verified member binding;
-- `/life` privacy-filtered Timeline + People + Projects;
-- Home Assistant read-only source with explicit entity selection and current/live state;
-- Mercado Libre read-only source with publications, recent orders and questions;
-- **MCP 2026-07-28 local stdio server** with member-scoped revocable tokens;
-- MCP tools for status, timeline, Life search, People, Projects, selected HA state and MeLi business summary.
+- observed WhatsApp history and realtime messages;
+- Life/provenance;
+- durable People/Projects/facts;
+- household/member identity and privacy;
+- deterministic low-cost attention signals;
+- the MCP boundary that exposes this safely to Codex.
 
-## MCP — primary reasoning interface
+Codex owns:
 
-The first MCP profile is intentionally local and read-only.
+- conversation;
+- reasoning and planning;
+- interpretation of natural language;
+- combining Nexo with Gmail, Calendar, Home Assistant and other tools;
+- deciding which Nexo tools to call.
+
+## What changed in v0.12 prototype
+
+Normal Nexo mode now leaves the old background connectors dormant:
 
 ```text
-MCP token
-   ↓
-member identity
-   ↓
-privacy filter
-   ↓
-SOL data facade
-   ↓
-MCP tools
+NEXO_LEGACY_CONNECTORS=false   # default
+NEXO_INTERNAL_AUTOMATION=false # default
 ```
 
-Bootstrap:
+That means Gmail, Google Calendar, Home Assistant and Mercado Libre adapters remain in the repository/database for compatibility and rollback, but they do **not** background-sync by default. Internal LLM classification/consolidation/proactive briefs are also dormant. Existing historical records are preserved.
+
+To temporarily run the pre-pivot background behavior:
 
 ```powershell
-pnpm install
-pnpm db:migrate
+$env:NEXO_LEGACY_CONNECTORS="true"
+$env:NEXO_INTERNAL_AUTOMATION="true"
+pnpm dev
+```
+
+The dedicated old “WhatsApp de SOL” assistant account is not autostarted in normal Nexo mode. Observed/member WhatsApp accounts still autostart and ingest normally.
+
+## Nexo MCP
+
+`pnpm mcp` now starts the Nexo-first MCP server. The previous MCP entrypoint is preserved temporarily as:
+
+```powershell
+pnpm mcp:legacy
+```
+
+Create a member-scoped token from the web UI or with:
+
+```powershell
 pnpm mcp:token
 ```
 
-The token command lets the local SOL host operator choose which active member a client represents. SOL prints the secret once and stores only its SHA-256 hash in PostgreSQL.
-
-Manual launch:
+Launch manually:
 
 ```powershell
-$env:SOL_MCP_TOKEN="sol_mcp_..."
+$env:NEXO_MCP_TOKEN="sol_mcp_..."
 pnpm mcp
 ```
 
-Current tools:
+`SOL_MCP_TOKEN` still works as a compatibility alias during the prototype.
+
+### Read tools
 
 ```text
-sol_status
+nexo_status
 get_timeline
 search_life
+search_whatsapp
+get_attention_queue
 list_people
 list_projects
-get_home_state
-get_business_summary
 ```
 
-See [docs/MCP.md](docs/MCP.md).
+`search_whatsapp` is the main missing-data bridge for Codex: it returns permission-filtered message text together with conversation, sender, timestamp and `sourceItemId` provenance.
 
-## Repository layout
+`get_attention_queue` exposes the cheap deterministic Intelligence Gate. It does **not** tell Codex what a message means; it only returns recent observations that look potentially operational or durable so Codex can inspect them when useful.
+
+### Submit/memory tools
+
+With a token that has the `submit` scope:
 
 ```text
-SOL/
-├── apps/server/
-│   └── src/
-│       ├── core/
-│       ├── database/
-│       ├── mcp/
-│       ├── modules/
-│       │   ├── identity/
-│       │   ├── auth/
-│       │   ├── security/
-│       │   ├── life/
-│       │   ├── knowledge/
-│       │   ├── executive/
-│       │   ├── mcp/
-│       │   ├── connectors/
-│       │   └── ai/codex/
-│       └── ui/
-├── packages/database/migrations/
-├── scripts/windows/
-└── docs/
+save_observation
+remember_fact
+save_schedule
 ```
 
-## Quick start — Neon
+`remember_fact` is intentionally explicit. It stores one user-confirmed durable fact, creates a Life observation first, writes structured Knowledge and preserves optional evidence links to source items. Retrieved WhatsApp/web/email content can be evidence, but cannot by itself authorize a memory write.
 
-Requirements: Node.js 22+ (24 recommended), pnpm and internet access. Codex CLI is optional unless AI enrichment is enabled/used.
+No Nexo MCP tool performs Home Assistant actions, sends Gmail, writes Google Calendar or exposes raw SQL/connector credentials.
+
+## Privacy model
+
+- Every MCP token represents one member.
+- Private records of another member are filtered before they reach Codex.
+- Household owner/admin status is not a universal private-data bypass.
+- Family-visible records are shared only within the household scope.
+- Source evidence remains linked to derived memory.
+- Untrusted message text is data, never an instruction to Nexo.
+
+## Quick start
+
+Requirements: Node.js 22+, pnpm and PostgreSQL/Neon.
 
 ```powershell
 pnpm install
@@ -142,58 +150,35 @@ Open:
 http://127.0.0.1:3000/
 ```
 
-Useful screens:
+Primary prototype screens:
 
 ```text
-/                 SOL Home
-/life             Timeline + People + Projects
-/sol-whatsapp     SOL's WhatsApp interface + member binding
-/executive        brief + pending proposals
-/calendar         Google accounts/calendars
-/whatsapp         monitored WhatsApp source accounts
-/home-assistant   selected household states/events
-/mercadolibre     seller/business dashboard
-/ai               optional Codex enrichment setup
+/                         Nexo home
+/whatsapp?advanced=1      observed WhatsApp accounts
+/life                     Life + People + Projects
+/mcp                      Codex ↔ Nexo MCP access
 ```
 
-MCP is launched as a separate stdio process (`pnpm mcp`) so it can be attached directly to a compatible local client.
+The older provider-specific routes still exist during the prototype but are no longer part of Nexo's normal navigation.
 
-## Home Assistant
+## Repository compatibility
 
-The current connector is deliberately read-only. An owner/adult supplies a Long-Lived Access Token, which SOL encrypts with a host-local AES-256-GCM key. SOL stores only explicitly selected entities and follows their selected state changes.
+To minimize migration risk in the first prototype, these old technical identifiers remain temporarily:
 
-High-frequency numeric `sensor.*` entities default to snapshot mode so they do not create a Life event for every small value update. Control permissions are modeled separately and no service-call route exists yet.
+```text
+repository: diegocesaretti/SOL
+package:    @sol/server
+DB names:   existing SOL schema
+```
 
-See [docs/HOME_ASSISTANT.md](docs/HOME_ASSISTANT.md).
+Changing those identifiers provides little architectural value right now and would create unnecessary migration risk. If this prototype proves the new boundary, a later cleanup can rename them deliberately.
 
-## Mercado Libre
+## Design rule
 
-The first Mercado Libre connector is also read-only. OAuth access/refresh tokens are encrypted with a host-local key. Publications, recent orders and questions are reconciled into SOL; orders/questions can become Life records and business context.
+Before adding a new integration to Nexo, ask:
 
-Mercado Libre OAuth still requires an HTTPS registered redirect URI for the real account integration. See [docs/MERCADOLIBRE.md](docs/MERCADOLIBRE.md).
+> **Does Codex already have a good direct connector or MCP for this?**
 
-## Google Calendar
+If yes, Nexo should normally not duplicate it.
 
-Google Calendar is both a source and an action target. Read/write calendar selection is separate, and external writes originate from approved Executive proposals rather than arbitrary source content or MCP read tools.
-
-## Database behavior
-
-PostgreSQL is SOL's only required infrastructure service. Notifications are wake signals; durable truth remains in PostgreSQL. Redis and pgvector remain deferred until a measured need exists.
-
-Large photos/audio/video/PDF attachments should eventually live in local/object storage, with PostgreSQL keeping structured metadata and references.
-
-## Security note
-
-SOL binds to `127.0.0.1` by default. Do not expose the development server directly to the internet. `.env`, `.sol/`, database credentials, MCP clear tokens, Codex OAuth data and connector encryption keys must be protected like credentials.
-
-The initial MCP server is stdio-only. Remote MCP/HTTPS authorization is intentionally deferred.
-
-## Current direction
-
-The next major work is not another chatbot UI. It is:
-
-1. improve automatic Life → Knowledge consolidation;
-2. expand MCP coverage over normalized household context;
-3. add Gmail/Drive/Contacts and richer files/media ingestion;
-4. keep writes proposal-based behind Executive;
-5. optionally let Codex or other models enrich Knowledge without becoming SOL's authority.
+Nexo should specialize in information Codex otherwise cannot reliably access or remember—starting with WhatsApp and private/family durable memory.
