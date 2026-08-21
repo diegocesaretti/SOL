@@ -24,6 +24,17 @@ RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 BEGIN
+  -- Historical bootstrap candidates are intentionally batched into briefs/pending lists
+  -- instead of generating one WhatsApp notification per recovered item.
+  IF NEW.source_candidate_id IS NOT NULL AND EXISTS (
+    SELECT 1
+    FROM extraction_candidates ec
+    WHERE ec.id = NEW.source_candidate_id
+      AND ec.reasons @> '["historical-bootstrap"]'::jsonb
+  ) THEN
+    RETURN NEW;
+  END IF;
+
   INSERT INTO event_outbox(
     household_id, event_type, aggregate_type, aggregate_id, payload
   ) VALUES (
