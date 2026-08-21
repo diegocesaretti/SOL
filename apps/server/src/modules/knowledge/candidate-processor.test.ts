@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseCandidateExtraction } from "./candidate-processor.js";
+import {
+  HISTORICAL_OPERATIONAL_BOOTSTRAP_DAYS,
+  HISTORICAL_OPERATIONAL_BOOTSTRAP_MAX_CANDIDATES,
+  parseCandidateExtraction,
+} from "./candidate-processor.js";
+
+test("historical operational bootstrap is capped to one week and 50 candidates", () => {
+  assert.equal(HISTORICAL_OPERATIONAL_BOOTSTRAP_DAYS, 7);
+  assert.equal(HISTORICAL_OPERATIONAL_BOOTSTRAP_MAX_CANDIDATES, 50);
+});
 
 test("parses a valid structured extraction", () => {
   const result = parseCandidateExtraction(JSON.stringify({
