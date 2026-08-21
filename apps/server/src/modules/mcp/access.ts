@@ -32,13 +32,13 @@ export async function createMcpAccessToken(
   input: { label?: string; expiresInDays?: number; allowSubmit?: boolean } = {},
 ): Promise<{ token: string; access: McpAccessTokenView }> {
   if (principal.role === "guest") throw new Error("guests cannot create MCP access tokens");
-  const label = normalizeLabel(input.label ?? "Local MCP client");
+  const label = normalizeLabel(input.label ?? "Codex · Nexo");
   const requestedDays = Number(input.expiresInDays ?? 90);
   const expiresInDays = Number.isFinite(requestedDays)
     ? Math.max(1, Math.min(365, Math.trunc(requestedDays)))
     : 90;
   const expiresAt = new Date(Date.now() + expiresInDays * 86_400_000);
-  const token = `sol_mcp_${randomBytes(32).toString("base64url")}`;
+  const token = `nexo_mcp_${randomBytes(32).toString("base64url")}`;
   const scopes = input.allowSubmit === true ? ["read", "submit"] : ["read"];
   const result = await db.query<{
     id: string;
@@ -114,7 +114,7 @@ export async function revokeMcpAccessToken(
 
 export async function authenticateMcpAccess(token: string): Promise<AuthenticatedMcpAccess | null> {
   const value = token.trim();
-  if (!value.startsWith("sol_mcp_") || value.length < 30) return null;
+  if (!(value.startsWith("nexo_mcp_") || value.startsWith("sol_mcp_")) || value.length < 30) return null;
   const result = await db.query<{
     token_id: string;
     household_id: string;
