@@ -125,8 +125,8 @@ export async function listMcpAttentionQueue(
          $5::text = 'any'
          OR EXISTS (
            SELECT 1
-           FROM jsonb_array_elements_text(si.raw_metadata->'intelligenceRoutes') route_value
-           WHERE route_value = $5::text
+           FROM jsonb_array_elements_text(si.raw_metadata->'intelligenceRoutes') AS route_item(value)
+           WHERE route_item.value = $5::text
          )
        )
        AND ${visibleSql("si")}
