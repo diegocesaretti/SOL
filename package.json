@@ -1,8 +1,8 @@
 {
-  "name": "sol",
-  "version": "0.9.0",
+  "name": "nexo",
+  "version": "0.12.0",
   "private": true,
-  "description": "Family-first personal data, knowledge and MCP system",
+  "description": "WhatsApp, personal/family memory and context layer for Codex",
   "packageManager": "pnpm@10.15.0",
   "engines": {
     "node": ">=22.0.0"
@@ -13,6 +13,7 @@
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "mcp": "pnpm --filter @sol/server mcp",
+    "mcp:legacy": "pnpm --filter @sol/server mcp:legacy",
     "mcp:token": "pnpm --filter @sol/server mcp:token",
     "knowledge:consolidate": "pnpm --filter @sol/server knowledge:consolidate",
     "db:configure": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows/configure-database.ps1",
