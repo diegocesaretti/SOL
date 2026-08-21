@@ -107,6 +107,7 @@ export async function listWhatsappAutostartAccounts(): Promise<string[]> {
     FROM source_accounts s
     JOIN whatsapp_sessions w ON w.source_account_id = s.id
     WHERE s.provider = 'whatsapp'
+      AND COALESCE(s.auth_mode, '') <> 'linked-device-assistant'
       AND w.enabled = true
       AND w.linked_at IS NOT NULL
     ORDER BY s.created_at ASC
