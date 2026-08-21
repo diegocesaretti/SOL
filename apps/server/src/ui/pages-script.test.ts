@@ -8,6 +8,7 @@ import { renderMcpPage } from "./mcp.js";
 import { renderMercadoLibrePage } from "./mercadolibre.js";
 import { renderOnboardingPage } from "./onboarding.js";
 import { renderOutputsPage } from "./outputs.js";
+import { renderExecutivePage } from "./executive.js";
 import { solSidebar } from "./shell.js";
 
 function embeddedScript(html: string, label: string): string {
@@ -24,6 +25,7 @@ for (const [label, render, filename] of [
   ["Mercado Libre advanced page", renderMercadoLibrePage, "mercadolibre-inline.js"],
   ["MCP page", renderMcpPage, "mcp-inline.js"],
   ["Nexo home", renderOnboardingPage, "home-inline.js"],
+  ["Morning Brief page", renderExecutivePage, "executive-inline.js"],
 ] as const) {
   test(`${label} renders syntactically valid embedded JavaScript`, () => {
     const script = embeddedScript(render(), label);

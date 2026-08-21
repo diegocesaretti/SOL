@@ -465,7 +465,7 @@ export class WhatsappManager {
         await updateWhatsappConversationTitles(
           runtime.sourceAccountId,
           history.chats.map((chat) => ({
-            id: chat.id,
+            id: chat.id ?? undefined,
             name: (chat as { name?: string | null }).name,
           })),
         );
@@ -502,7 +502,7 @@ export class WhatsappManager {
         updateWhatsappConversationTitles(
           runtime.sourceAccountId,
           chats.map((chat) => ({
-            id: chat.id,
+            id: chat.id ?? undefined,
             name: (chat as { name?: string | null }).name,
           })),
         ),
@@ -515,7 +515,7 @@ export class WhatsappManager {
         updateWhatsappConversationTitles(
           runtime.sourceAccountId,
           chats.map((chat) => ({
-            id: chat.id,
+            id: chat.id ?? undefined,
             name: (chat as { name?: string | null }).name,
           })),
         ),

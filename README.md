@@ -163,6 +163,22 @@ The older provider-specific routes still exist during the prototype but are no l
 
 ## Repository compatibility
 
+## Morning Brief
+
+Morning Brief runs once per local day at `08:00` in `America/Argentina/Buenos_Aires`. It reuses the existing Gmail, Google Calendar, Mercado Libre, WhatsApp ingestion, executive brief, proposal and PostgreSQL/outbox architecture. A database uniqueness constraint prevents duplicate daily runs; if Nexo starts later the same day, the scheduler performs the pending run once.
+
+Open `/executive?advanced=1` to enable/disable it, select sources, use **Vista previa** (no Calendar/WhatsApp writes), or **Probar ahora**. Runs and partial source errors are stored in `morning_brief_runs`.
+
+Proactive WhatsApp delivery is independent from interactive `confirmedByUser`. It requires all three controls:
+
+1. `morningWhatsappGrant` enabled in Morning Brief settings;
+2. a fixed destination and enabled Morning Brief policy in Whatsapp-Codex-Nexo;
+3. the same local `NEXO_AUTOMATION_TOKEN` in both processes.
+
+The destination never comes from Gmail, WhatsApp, Mercado Libre, Calendar or LLM output. Configure the bridge URL with `WHATSAPP_NEXO_URL` (default `http://127.0.0.1:3210`).
+
+MCP tools: `get_morning_brief_status`, `get_last_morning_brief`, `get_morning_brief_settings`, `run_morning_brief({dryRun})`, and confirmed mutation `configure_morning_brief`.
+
 To minimize migration risk in the first prototype, these old technical identifiers remain temporarily:
 
 ```text

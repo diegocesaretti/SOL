@@ -106,6 +106,8 @@ export const config = {
   gmailSyncMs: integerEnv("SOL_GMAIL_SYNC_MS", 15 * 60 * 1000),
   mercadoLibreSyncMs: integerEnv("SOL_MERCADOLIBRE_SYNC_MS", 60 * 60 * 1000),
   executivePollMs: integerEnv("SOL_EXECUTIVE_POLL_MS", 5 * 60 * 1000),
+  whatsappNexoUrl: optionalEnv("WHATSAPP_NEXO_URL") ?? "http://127.0.0.1:3210",
+  whatsappNexoAutomationToken: optionalEnv("NEXO_AUTOMATION_TOKEN"),
   knowledgeConsolidationMs: integerEnv("SOL_KNOWLEDGE_CONSOLIDATION_MS", 6 * 60 * 60 * 1000),
   knowledgeBatchesPerRun: integerEnv("SOL_KNOWLEDGE_BATCHES_PER_RUN", 2),
   knowledgeBatchItems: integerEnv("SOL_KNOWLEDGE_BATCH_ITEMS", 12),

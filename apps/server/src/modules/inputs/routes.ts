@@ -29,8 +29,8 @@ function canManage(principal: AuthPrincipal, account: SourceAccountRecord): bool
 }
 
 function runtimeFor(account: SourceAccountRecord): Record<string, unknown> | undefined {
-  if (account.provider === "whatsapp") return whatsappManager.getStatus(account.id);
-  if (account.provider === "home_assistant") return homeAssistantManager.getStatus(account.id);
+  if (account.provider === "whatsapp") return { ...whatsappManager.getStatus(account.id) };
+  if (account.provider === "home_assistant") return { ...homeAssistantManager.getStatus(account.id) };
   return undefined;
 }
 

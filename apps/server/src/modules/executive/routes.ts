@@ -2,9 +2,11 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { readJsonBody, sendJson } from "../../http.js";
 import type { AuthPrincipal } from "../auth/session.js";
 import { buildExecutiveBrief, readExecutiveBrief } from "./briefs.js";
+import { getLastMorningBrief, runMorningBrief } from "./morning-brief.js";
 import {
   getProactivitySettings,
   updateProactivitySettings,
+  type ProactivitySettingsPatch,
   type ProactivitySettings,
 } from "./proactivity.js";
 import {
@@ -28,16 +30,20 @@ async function readJson<T>(request: IncomingMessage, response: ServerResponse): 
   }
 }
 
-function validProactivityPatch(value: unknown): value is Partial<ProactivitySettings> {
+function validProactivityPatch(value: unknown): value is ProactivitySettingsPatch {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const body = value as Record<string, unknown>;
-  const booleans = ["enabled", "morningBriefEnabled", "tomorrowPreviewEnabled", "suppressEmpty"];
+  const booleans = ["enabled", "morningBriefEnabled", "tomorrowPreviewEnabled", "suppressEmpty", "morningAutoCreateEvents", "morningSendWhatsapp", "morningWhatsappGrant"];
   for (const key of booleans) {
     if (body[key] !== undefined && typeof body[key] !== "boolean") return false;
   }
-  for (const key of ["morningTime", "tomorrowTime"]) {
+  for (const key of ["morningTime", "tomorrowTime", "morningTimezone"]) {
     if (body[key] !== undefined && typeof body[key] !== "string") return false;
   }
+  for (const key of ["morningMaxWhatsapp", "morningMaxEmails", "morningMaxMercadolibre"]) {
+    if (body[key] !== undefined && typeof body[key] !== "number") return false;
+  }
+  if (body.morningSources !== undefined && (!body.morningSources || typeof body.morningSources !== "object" || Array.isArray(body.morningSources))) return false;
   return true;
 }
 
@@ -56,6 +62,18 @@ export async function handleExecutiveApi(
     sendJson(response, 200, {
       settings: await getProactivitySettings(principal.memberId),
     });
+    return true;
+  }
+
+  if (path === "/v1/executive/morning-brief/status" && request.method === "GET") {
+    sendJson(response, 200, { settings: await getProactivitySettings(principal.memberId), lastRun: await getLastMorningBrief(principal.memberId) });
+    return true;
+  }
+
+  if (path === "/v1/executive/morning-brief/run" && request.method === "POST") {
+    const body = await readJson<{ dryRun?: boolean }>(request, response);
+    if (!body) return true;
+    sendJson(response, 200, { run: await runMorningBrief(principal, body.dryRun === true) });
     return true;
   }
 

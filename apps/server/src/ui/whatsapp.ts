@@ -127,10 +127,10 @@ export function renderWhatsappPage(): string {
         \${runtime.lastError ? '<p class="error">' + esc(runtime.lastError) + '</p>' : ''}
         \${qr}\${pairing}\${manage}
         \${account.canManage ? '<details><summary>Diagnóstico / logs de conexión</summary><div data-logs="' + esc(account.id) + '"><p class="muted">Abrí para cargar el diagnóstico.</p></div></details>' : ''}
-        \${account.canRead ? `
+        \${account.canRead ? \`
           <details><summary>Candidatos detectados por SOL</summary><div data-candidates="\${esc(account.id)}"><p class="muted">Abrí para cargar.</p></div></details>
           <details><summary>Últimos mensajes almacenados</summary><div data-messages="\${esc(account.id)}"><p class="muted">Abrí para cargar.</p></div></details>
-        ` : ''}
+        \` : ''}
       </article>
     \`;
   }

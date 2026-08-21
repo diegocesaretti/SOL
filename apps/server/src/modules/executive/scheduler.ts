@@ -1,5 +1,6 @@
 import { config } from "../../config.js";
 import { db } from "../../database/client.js";
+import { runMorningBrief } from "./morning-brief.js";
 import { buildExecutiveBrief, readExecutiveBrief } from "./briefs.js";
 import {
   briefDeliveryHandled,
@@ -44,7 +45,7 @@ export class ExecutiveScheduler {
   constructor(private readonly intervalMs: number) {}
 
   start(): void {
-    if (!config.nexoInternalAutomationEnabled || this.timer || this.initialTimer) return;
+    if (this.timer || this.initialTimer) return;
     this.initialTimer = setTimeout(() => {
       this.initialTimer = undefined;
       void this.tick();
@@ -83,9 +84,14 @@ export class ExecutiveScheduler {
     try {
       const members = await db.query<{
         id: string;
+        household_id: string;
+        display_name: string;
+        login_name: string;
+        role: "owner" | "adult" | "member" | "child" | "guest";
         timezone: string;
       }>(
-        `SELECT m.id, COALESCE(m.timezone, h.timezone) AS timezone
+        `SELECT m.id, m.household_id, m.display_name, m.login_name, m.role::text,
+                COALESCE(m.timezone, h.timezone) AS timezone
          FROM members m JOIN households h ON h.id = m.household_id
          WHERE m.status = 'active' AND m.role <> 'guest'`,
       );
@@ -96,9 +102,12 @@ export class ExecutiveScheduler {
           if (!settings.enabled) continue;
           if (
             settings.morningBriefEnabled &&
-            scheduleWindowOpen(now, member.timezone, settings.morningTime)
+            scheduleWindowOpen(now, settings.morningTimezone, settings.morningTime, 24 * 60)
           ) {
-            await this.deliverScheduledBrief(member.id, "morning", settings.suppressEmpty);
+            await runMorningBrief({
+              memberId: member.id, householdId: member.household_id,
+              displayName: member.display_name, loginName: member.login_name, role: member.role,
+            });
           }
           if (
             settings.tomorrowPreviewEnabled &&

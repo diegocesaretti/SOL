@@ -5,6 +5,7 @@ import {
   type WAMessage,
 } from "baileys";
 import { db } from "../../../database/client.js";
+import type { PoolClient } from "pg";
 import { scoreIntelligenceCandidate } from "../../knowledge/intelligence-gate.js";
 import {
   detectWhatsappMessageType,
@@ -41,7 +42,7 @@ function senderJid(message: WAMessage, selfJid?: string): string | undefined {
 }
 
 async function upsertIdentity(
-  client: Awaited<ReturnType<typeof db.connect>>,
+  client: PoolClient,
   account: WhatsappAccountRecord,
   jid: string | undefined,
   displayName: string | undefined,
