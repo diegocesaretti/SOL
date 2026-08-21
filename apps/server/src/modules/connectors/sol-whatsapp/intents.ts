@@ -31,10 +31,11 @@ export function parseAssistantIntent(text: string): AssistantIntent {
 
   // Read-only agenda/list intents are deliberately checked before write-proposal intents.
   if (/\b(?:pendientes|propuestas|por aprobar|por revisar)\b/.test(value)) return { kind: "pending" };
-  if (/\bmanana\b/.test(value) && /\b(?:que tengo|agenda|planes|eventos|dia|brief|resumen)\b/.test(value)) {
+  const agendaQuestion = /\b(?:que tengo|que hay|como viene|como esta|agenda|planes|eventos|dia|brief|resumen)\b/;
+  if (/\bmanana\b/.test(value) && agendaQuestion.test(value)) {
     return { kind: "tomorrow" };
   }
-  if (/\bhoy\b/.test(value) && /\b(?:que tengo|agenda|planes|eventos|dia|brief|resumen)\b/.test(value)) {
+  if (/\bhoy\b/.test(value) && agendaQuestion.test(value)) {
     return { kind: "today" };
   }
 
