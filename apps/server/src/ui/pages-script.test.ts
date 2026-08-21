@@ -59,3 +59,11 @@ test("Inputs exposes live WhatsApp ingestion diagnostics", () => {
   assert.match(html, /Baileys todavía no entregó ningún mensaje/);
   assert.match(html, /lastIngestError/);
 });
+
+test("Outputs exposes member proactivity controls", () => {
+  const html = renderOutputsPage();
+  assert.match(html, /Proactividad/);
+  assert.match(html, /pro-morning-time/);
+  assert.match(html, /pro-tomorrow-time/);
+  assert.match(html, /\/v1\/executive\/proactivity/);
+});
