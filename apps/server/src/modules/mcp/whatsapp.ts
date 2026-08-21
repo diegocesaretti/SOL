@@ -21,6 +21,15 @@ function visibleSql(alias: string): string {
   )`;
 }
 
+function searchPatterns(query: string): string[] {
+  return query
+    .trim()
+    .split(/\s+/)
+    .filter((term) => term.length >= 2)
+    .slice(0, 8)
+    .map((term) => `%${term.replace(/[\\%_]/g, "\\$&")}%`);
+}
+
 export async function searchMcpWhatsapp(
   principal: AuthPrincipal,
   query: string,
@@ -28,7 +37,8 @@ export async function searchMcpWhatsapp(
 ): Promise<Array<Record<string, unknown>>> {
   const needle = query.trim().slice(0, 240);
   if (needle.length < 2) return [];
-  const pattern = `%${needle.replace(/[\\%_]/g, "\\$&")}%`;
+  const patterns = searchPatterns(needle);
+  if (!patterns.length) return [];
   const bounded = boundedLimit(limit, 30, 80);
   const result = await db.query<{
     id: string;
@@ -55,11 +65,20 @@ export async function searchMcpWhatsapp(
        AND sa.provider = 'whatsapp'
        AND COALESCE(sa.auth_mode, '') <> 'linked-device-assistant'
        AND si.deleted_at IS NULL
-       AND COALESCE(si.body_text, '') ILIKE $4 ESCAPE '\\'
+       AND NOT EXISTS (
+         SELECT 1
+         FROM unnest($4::text[]) AS query_term(pattern)
+         WHERE NOT (
+           COALESCE(si.body_text, '') ILIKE query_term.pattern ESCAPE '\\'
+           OR COALESCE(c.title, '') ILIKE query_term.pattern ESCAPE '\\'
+           OR COALESCE(sender.label, '') ILIKE query_term.pattern ESCAPE '\\'
+           OR COALESCE(sender.external_value, '') ILIKE query_term.pattern ESCAPE '\\'
+         )
+       )
        AND ${visibleSql("si")}
      ORDER BY si.occurred_at DESC
      LIMIT $5`,
-    [principal.householdId, principal.memberId, principal.role, pattern, bounded],
+    [principal.householdId, principal.memberId, principal.role, patterns, bounded],
   );
 
   return result.rows.map((row) => ({
