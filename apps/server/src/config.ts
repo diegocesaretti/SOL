@@ -57,21 +57,24 @@ export const config = {
   databaseUrl:
     process.env.DATABASE_URL ??
     "postgresql://sol:sol_dev_only@127.0.0.1:5432/sol",
-  // Small/short-lived pools work well both with local PostgreSQL and scale-to-zero
-  // providers such as Neon. A direct DATABASE_URL is preferred for migrations.
   databasePoolMax: integerEnv("SOL_DB_POOL_MAX", 4),
   databaseIdleTimeoutMs: integerEnv("SOL_DB_IDLE_TIMEOUT_MS", 15_000),
   databaseConnectionTimeoutMs: integerEnv("SOL_DB_CONNECT_TIMEOUT_MS", 15_000),
   sessionDays: integerEnv("SOL_SESSION_DAYS", 30),
   cookieSecure: booleanEnv("SOL_COOKIE_SECURE", false),
 
-  // Optional AI enrichment. "auto" prefers OpenAI when an API key is configured,
-  // then falls back to the existing Codex/ChatGPT OAuth provider.
+  // Nexo is the default product/runtime profile. Legacy provider adapters remain
+  // available for migration/debugging, but they do not background-sync unless
+  // explicitly re-enabled. Internal AI/Executive automation is also opt-in: the
+  // normal Nexo architecture expects the external Codex host to reason via MCP.
+  nexoLegacyConnectorsEnabled: booleanEnv("NEXO_LEGACY_CONNECTORS", false),
+  nexoInternalAutomationEnabled: booleanEnv("NEXO_INTERNAL_AUTOMATION", false),
+
+  // Optional legacy AI enrichment. Nexo leaves this dormant by default and exposes
+  // context/memory through MCP instead of running a competing assistant brain.
   aiProvider: enumEnv("SOL_AI_PROVIDER", ["auto", "openai", "codex"] as const, "auto"),
   openaiApiKey: optionalEnv("SOL_OPENAI_API_KEY") ?? optionalEnv("OPENAI_API_KEY"),
   openaiBaseUrl: optionalEnv("SOL_OPENAI_BASE_URL") ?? "https://api.openai.com/v1",
-  // Use a very cheap model for high-volume classification and a stronger small model
-  // for consolidation/planning/conversation. Both remain user-configurable.
   openaiFastModel: optionalEnv("SOL_OPENAI_FAST_MODEL") ?? "gpt-5.4-nano",
   openaiModel: optionalEnv("SOL_OPENAI_MODEL") ?? "gpt-5.4-mini",
   openaiRequestTimeoutMs: integerEnv("SOL_OPENAI_REQUEST_TIMEOUT_MS", 45_000),
@@ -82,14 +85,12 @@ export const config = {
   codexWorkingDirectory:
     optionalEnv("SOL_CODEX_CWD") ?? resolve(codexHome, "workspace"),
   codexRequestTimeoutMs: integerEnv("SOL_CODEX_REQUEST_TIMEOUT_MS", 30_000),
-  // PostgreSQL NOTIFY wakes the outbox immediately. This is only a recovery sweep.
   outboxPollMs: integerEnv("SOL_OUTBOX_RECOVERY_MS", 30 * 60 * 1000),
   googleClientId,
   googleClientSecret,
   googleRedirectUri:
     optionalEnv("SOL_GOOGLE_REDIRECT_URI") ??
     `http://${host}:${port}/v1/google/callback`,
-  // Gmail can reuse the same Google OAuth Web client. Register the Gmail callback too.
   gmailClientId: optionalEnv("SOL_GMAIL_CLIENT_ID") ?? googleClientId,
   gmailClientSecret: optionalEnv("SOL_GMAIL_CLIENT_SECRET") ?? googleClientSecret,
   gmailRedirectUri:
@@ -97,19 +98,14 @@ export const config = {
     `http://${host}:${port}/v1/gmail/callback`,
   mercadoLibreClientId: optionalEnv("SOL_MERCADOLIBRE_CLIENT_ID"),
   mercadoLibreClientSecret: optionalEnv("SOL_MERCADOLIBRE_CLIENT_SECRET"),
-  // Mercado Libre currently requires this URI to be HTTPS and to exactly match
-  // the static URI registered in the application configuration.
   mercadoLibreRedirectUri: optionalEnv("SOL_MERCADOLIBRE_REDIRECT_URI"),
   mercadoLibreAuthUrl:
     optionalEnv("SOL_MERCADOLIBRE_AUTH_URL") ??
     "https://auth.mercadolibre.com.ar/authorization",
-  // Cloud-friendly defaults leave long idle windows so scale-to-zero can engage.
   calendarSyncMs: integerEnv("SOL_CALENDAR_SYNC_MS", 60 * 60 * 1000),
   gmailSyncMs: integerEnv("SOL_GMAIL_SYNC_MS", 15 * 60 * 1000),
   mercadoLibreSyncMs: integerEnv("SOL_MERCADOLIBRE_SYNC_MS", 60 * 60 * 1000),
-  executivePollMs: integerEnv("SOL_EXECUTIVE_POLL_MS", 30 * 60 * 1000),
-  // Knowledge consolidation is optional AI enrichment. Sparse batches keep Neon and
-  // model usage low; ingestion/MCP continue normally when no AI provider is available.
+  executivePollMs: integerEnv("SOL_EXECUTIVE_POLL_MS", 5 * 60 * 1000),
   knowledgeConsolidationMs: integerEnv("SOL_KNOWLEDGE_CONSOLIDATION_MS", 6 * 60 * 60 * 1000),
   knowledgeBatchesPerRun: integerEnv("SOL_KNOWLEDGE_BATCHES_PER_RUN", 2),
   knowledgeBatchItems: integerEnv("SOL_KNOWLEDGE_BATCH_ITEMS", 12),
