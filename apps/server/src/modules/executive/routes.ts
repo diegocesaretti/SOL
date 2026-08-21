@@ -3,6 +3,11 @@ import { readJsonBody, sendJson } from "../../http.js";
 import type { AuthPrincipal } from "../auth/session.js";
 import { buildExecutiveBrief, readExecutiveBrief } from "./briefs.js";
 import {
+  getProactivitySettings,
+  updateProactivitySettings,
+  type ProactivitySettings,
+} from "./proactivity.js";
+import {
   approveExecutiveProposal,
   listExecutiveProposals,
   rejectExecutiveProposal,
@@ -23,6 +28,19 @@ async function readJson<T>(request: IncomingMessage, response: ServerResponse): 
   }
 }
 
+function validProactivityPatch(value: unknown): value is Partial<ProactivitySettings> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const body = value as Record<string, unknown>;
+  const booleans = ["enabled", "morningBriefEnabled", "tomorrowPreviewEnabled", "suppressEmpty"];
+  for (const key of booleans) {
+    if (body[key] !== undefined && typeof body[key] !== "boolean") return false;
+  }
+  for (const key of ["morningTime", "tomorrowTime"]) {
+    if (body[key] !== undefined && typeof body[key] !== "string") return false;
+  }
+  return true;
+}
+
 export async function handleExecutiveApi(
   path: string,
   request: IncomingMessage,
@@ -31,6 +49,30 @@ export async function handleExecutiveApi(
 ): Promise<boolean> {
   if (principal.role === "guest") {
     sendJson(response, 403, { error: "forbidden" });
+    return true;
+  }
+
+  if (path === "/v1/executive/proactivity" && request.method === "GET") {
+    sendJson(response, 200, {
+      settings: await getProactivitySettings(principal.memberId),
+    });
+    return true;
+  }
+
+  if (path === "/v1/executive/proactivity" && request.method === "PATCH") {
+    const body = await readJson<unknown>(request, response);
+    if (body === null) return true;
+    if (!validProactivityPatch(body)) {
+      sendJson(response, 400, { error: "invalid_proactivity_settings" });
+      return true;
+    }
+    try {
+      const settings = await updateProactivitySettings(principal.memberId, body);
+      sendJson(response, 200, { settings });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      sendJson(response, message === "invalid_time" ? 400 : 503, { error: message });
+    }
     return true;
   }
 
