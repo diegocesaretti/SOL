@@ -7,6 +7,7 @@ import { syncMercadoLibreAccount } from "../connectors/mercadolibre/sync.js";
 import { buildExecutiveBrief } from "./briefs.js";
 import { approveExecutiveProposal, listExecutiveProposals } from "./proposals.js";
 import { getProactivitySettings } from "./proactivity.js";
+import { fetchMorningWhatsappSummary, type SafeMorningWhatsappSummary } from "./whatsapp-brief-source.js";
 
 export interface MorningBriefRun {
   id: string; scheduledFor: string; startedAt: string; finishedAt?: string;
@@ -78,6 +79,7 @@ export async function runMorningBrief(principal: AuthPrincipal, dryRun = false):
   const actions: unknown[] = [];
   const eventsCreated: string[] = [];
   let whatsappMessageId: string | undefined;
+  let whatsappSummary: SafeMorningWhatsappSummary | undefined;
   const sync = async (name: keyof typeof settings.morningSources, provider: string, fn: (id: string) => Promise<unknown>) => {
     if (!settings.morningSources[name]) return;
     try {
@@ -90,11 +92,33 @@ export async function runMorningBrief(principal: AuthPrincipal, dryRun = false):
     sync("gmail", "gmail", syncGmailAccount),
     sync("mercadolibre", "mercadolibre", syncMercadoLibreAccount),
   ]);
-  if (settings.morningSources.whatsapp) checked.whatsapp = { mode: "realtime_archive", maxItems: settings.morningMaxWhatsapp };
+  if (settings.morningSources.whatsapp) {
+    try {
+      const after = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      whatsappSummary = await fetchMorningWhatsappSummary({
+        baseUrl: config.whatsappNexoUrl,
+        after,
+        limit: settings.morningMaxWhatsapp,
+      });
+      checked.whatsapp = {
+        mode: "nexo_filtered_external_input",
+        sourceClass: whatsappSummary.sourceClass,
+        controlChannelExcluded: whatsappSummary.controlChannelExcluded,
+        excludedSourceClasses: whatsappSummary.excludedSourceClasses,
+        effectiveAfter: whatsappSummary.effectiveAfter ?? after,
+        selectedMessages: whatsappSummary.selectedMessages,
+      };
+    } catch (error) {
+      errors.whatsapp = error instanceof Error ? error.message : String(error);
+    }
+  }
 
   let summary = "";
   try {
-    const brief = await buildExecutiveBrief(principal.memberId, "morning", { persist: !dryRun });
+    const brief = await buildExecutiveBrief(principal.memberId, "morning", {
+      persist: !dryRun,
+      whatsapp: whatsappSummary,
+    });
     summary = brief.summary;
     if (!dryRun && settings.morningAutoCreateEvents) {
       const proposals = await listExecutiveProposals({ householdId: principal.householdId, memberId: principal.memberId, status: "pending" });
