@@ -115,11 +115,10 @@ export async function runMorningBrief(principal: AuthPrincipal, dryRun = false):
 
   let summary = "";
   try {
-    const brief = await buildExecutiveBrief(principal.memberId, "morning", {
-      persist: !dryRun,
-      whatsapp: whatsappSummary,
-    });
-    summary = brief.summary;
+    const brief = await buildExecutiveBrief(principal.memberId, "morning", { persist: !dryRun });
+    summary = whatsappSummary
+      ? `${brief.summary}\n\nWhatsApp externo (últimas 24 h; canal Codex excluido):\n${whatsappSummary.summary}`
+      : brief.summary;
     if (!dryRun && settings.morningAutoCreateEvents) {
       const proposals = await listExecutiveProposals({ householdId: principal.householdId, memberId: principal.memberId, status: "pending" });
       for (const proposal of proposals.filter((item) => ["event", "commitment"].includes(item.kind) && Boolean(item.startsAt) && item.confidence >= 0.9)) {
@@ -134,7 +133,7 @@ export async function runMorningBrief(principal: AuthPrincipal, dryRun = false):
       const response = await fetch(`${config.whatsappNexoUrl}/api/automation/morning-brief/send`, {
         method: "POST",
         headers: { "content-type": "application/json", authorization: `Bearer ${config.whatsappNexoAutomationToken}` },
-        body: JSON.stringify({ automation: "morning_brief", scheduledFor, text: brief.summary.slice(0, 5000) }),
+        body: JSON.stringify({ automation: "morning_brief", scheduledFor, text: summary.slice(0, 5000) }),
         signal: AbortSignal.timeout(30_000),
       });
       const delivery = await response.json() as { sent?: boolean; duplicate?: boolean; messageId?: string; error?: string };
