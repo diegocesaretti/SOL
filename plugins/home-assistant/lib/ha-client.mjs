@@ -48,6 +48,12 @@ export class HomeAssistantClient {
         failures += 1;
         this.connected = false;
         this.cache.setConnected(false);
+        if (this.reconcileTimer) clearInterval(this.reconcileTimer);
+        this.reconcileTimer = null;
+        try { this.ws?.close(); } catch {}
+        this.ws = null;
+        for (const { reject } of this.pending.values()) reject(new Error("Home Assistant connection reset"));
+        this.pending.clear();
         await Promise.resolve(this.onConnectionState?.("error", error)).catch(() => undefined);
         console.warn(`Home Assistant connection failed: ${error?.message || error}`);
         const waitMs = Math.min(30000, 1000 * 2 ** Math.min(5, failures - 1)) + Math.floor(Math.random() * 500);
@@ -64,6 +70,8 @@ export class HomeAssistantClient {
     this.ws = null;
     this.connected = false;
     this.cache.setConnected(false);
+    for (const { reject } of this.pending.values()) reject(new Error("Home Assistant plugin stopped"));
+    this.pending.clear();
     await Promise.resolve(this.onConnectionState?.("disconnected")).catch(() => undefined);
   }
 
@@ -94,13 +102,13 @@ export class HomeAssistantClient {
     }
   }
 
-  async callService(domain, service, serviceData = {}, target = {}) {
+  async callService(domain, service, serviceData = {}, target = {}, returnResponse = false) {
     return await this.command("call_service", {
       domain,
       service,
       service_data: serviceData,
       target,
-      return_response: true
+      ...(returnResponse ? { return_response: true } : {})
     });
   }
 
