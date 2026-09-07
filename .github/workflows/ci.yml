@@ -34,3 +34,14 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+      - name: Package Hello SOL sample plugin
+        run: pnpm plugin:pack:hello
+
+      - name: Upload Hello SOL sample plugin
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: hello-sol-plugin
+          path: dist/hello-sol.solplugin
+          if-no-files-found: error

@@ -1,8 +1,8 @@
 {
-  "name": "nexo",
-  "version": "0.12.0",
+  "name": "sol",
+  "version": "0.13.0",
   "private": true,
-  "description": "WhatsApp, personal/family memory and context layer for Codex",
+  "description": "SOL local host for memory, context, services and pluggable assistants",
   "packageManager": "pnpm@10.15.0",
   "engines": {
     "node": ">=22.0.0"
@@ -17,6 +17,8 @@
     "mcp:legacy": "pnpm --filter @sol/server mcp:legacy",
     "mcp:token": "pnpm --filter @sol/server mcp:token",
     "knowledge:consolidate": "pnpm --filter @sol/server knowledge:consolidate",
+    "plugin:pack": "node scripts/pack-sol-plugin.mjs",
+    "plugin:pack:hello": "node scripts/pack-sol-plugin.mjs examples/plugins/hello dist/hello-sol.solplugin",
     "db:configure": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows/configure-database.ps1",
     "db:setup": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows/setup-postgres.ps1",
     "db:check": "pnpm --filter @sol/server db:check",

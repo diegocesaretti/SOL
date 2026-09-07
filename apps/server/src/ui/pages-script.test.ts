@@ -9,6 +9,7 @@ import { renderMercadoLibrePage } from "./mercadolibre.js";
 import { renderOnboardingPage } from "./onboarding.js";
 import { renderOutputsPage } from "./outputs.js";
 import { renderExecutivePage } from "./executive.js";
+import { renderPluginsPage } from "./plugins.js";
 import { solSidebar } from "./shell.js";
 
 function embeddedScript(html: string, label: string): string {
@@ -26,6 +27,7 @@ for (const [label, render, filename] of [
   ["MCP page", renderMcpPage, "mcp-inline.js"],
   ["Nexo home", renderOnboardingPage, "home-inline.js"],
   ["Morning Brief page", renderExecutivePage, "executive-inline.js"],
+  ["SOL Services page", renderPluginsPage, "plugins-inline.js"],
 ] as const) {
   test(`${label} renders syntactically valid embedded JavaScript`, () => {
     const script = embeddedScript(render(), label);
@@ -33,12 +35,14 @@ for (const [label, render, filename] of [
   });
 }
 
-test("primary shell brands the product as Nexo and keeps the prototype navigation narrow", () => {
+test("primary shell brands the product as SOL and exposes the Services host", () => {
   const sidebar = solSidebar("home");
-  assert.match(sidebar, /NEXO/);
-  assert.match(sidebar, /WhatsApp/);
-  assert.match(sidebar, /Life/);
-  assert.match(sidebar, /MCP/);
+  assert.match(sidebar, />SOL</);
+  assert.match(sidebar, />Servicios</);
+  assert.match(sidebar, /\/v1\/inputs\/plugins\/ui/);
+  assert.match(sidebar, />Inputs</);
+  assert.match(sidebar, />Life</);
+  assert.match(sidebar, />MCP</);
   assert.doesNotMatch(sidebar, />Outputs</);
   assert.doesNotMatch(sidebar, />AI</);
 });
