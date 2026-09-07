@@ -42,7 +42,7 @@ interface InstallPackageOptions {
   approvedPermissions?: string[];
   settings?: Record<string, SolPluginSettingValue>;
   source?: SolPluginSource;
-  expectedManifest?: Pick<SolPluginManifest, "id" | "name" | "version" | "permissions">;
+  expectedManifest?: Pick<SolPluginManifest, "schemaVersion" | "id" | "name" | "version" | "capabilities" | "requires" | "permissions">;
   scope?: SolPluginScope;
 }
 
@@ -107,7 +107,15 @@ function approvedPermissions(manifest: SolPluginManifest, values?: string[]): st
 
 function assertExpectedManifest(actual: SolPluginManifest, expected?: InstallPackageOptions["expectedManifest"]): void {
   if (!expected) return;
-  if (actual.id !== expected.id || actual.name !== expected.name || actual.version !== expected.version || !sameStrings(actual.permissions, expected.permissions)) {
+  if (
+    actual.schemaVersion !== expected.schemaVersion
+    || actual.id !== expected.id
+    || actual.name !== expected.name
+    || actual.version !== expected.version
+    || !sameStrings(actual.capabilities, expected.capabilities)
+    || !sameStrings(actual.requires, expected.requires)
+    || !sameStrings(actual.permissions, expected.permissions)
+  ) {
     throw new Error("github_plugin_package_manifest_mismatch");
   }
 }
