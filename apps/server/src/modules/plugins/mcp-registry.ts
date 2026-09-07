@@ -3,6 +3,22 @@ import type { AuthPrincipal } from "../auth/session.js";
 import type { SolPluginRuntimePrincipal } from "./types.js";
 
 const TOOL_RE = /^[a-z][a-z0-9_]{1,79}$/;
+const MCP_SCOPES = new Set(["read", "submit", "actions"]);
+const RESERVED_TOOL_NAMES = new Set([
+  "nexo_status",
+  "get_timeline",
+  "search_life",
+  "search_whatsapp",
+  "get_attention_queue",
+  "list_people",
+  "list_projects",
+  "memory_search",
+  "save_observation",
+  "remember_fact",
+  "correct_memory",
+  "forget_memory",
+  "save_schedule",
+]);
 
 function callbackUrl(value: unknown): string {
   if (typeof value !== "string" || !value.trim()) throw new Error("callback_url_required");
@@ -33,13 +49,17 @@ function toolPrefix(pluginId: string): string {
   return pluginId.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
 }
 
+function requiredScope(value: unknown): "read" | "submit" | "actions" {
+  return typeof value === "string" && MCP_SCOPES.has(value) ? value as "read" | "submit" | "actions" : "read";
+}
+
 export interface PluginMcpTool {
   pluginId: string;
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
   callbackUrl: string;
-  requiresSubmit: boolean;
+  requiredScope: "read" | "submit" | "actions";
   visibility: "private" | "family";
 }
 
@@ -56,16 +76,17 @@ export async function registerPluginMcpTools(
     const name = typeof item.name === "string" ? item.name.trim().toLowerCase() : "";
     if (!TOOL_RE.test(name)) throw new Error(`tools_${index}_name_invalid`);
     if (!name.startsWith(prefix)) throw new Error(`tools_${index}_name_must_start_with_${prefix}`);
+    if (RESERVED_TOOL_NAMES.has(name)) throw new Error(`tools_${index}_name_reserved`);
     const description = typeof item.description === "string" ? item.description.trim() : "";
     if (!description || description.length > 1000) throw new Error(`tools_${index}_description_invalid`);
-    const visibility = item.visibility === "private" ? "private" as const : "family" as const;
+    const visibility = item.visibility === "family" ? "family" as const : "private" as const;
     return {
       pluginId: principal.pluginId,
       name,
       description,
       inputSchema: schema(item.inputSchema),
       callbackUrl: url,
-      requiresSubmit: item.requiresSubmit === true,
+      requiredScope: requiredScope(item.requiredScope),
       visibility,
     };
   });
@@ -85,14 +106,14 @@ export async function registerPluginMcpTools(
       await client.query(
         `INSERT INTO plugin_mcp_tools(
            household_id, plugin_id, name, description, input_schema,
-           callback_url, requires_submit, owner_member_id, visibility
+           callback_url, required_scope, owner_member_id, visibility
          ) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9::visibility_scope)
          ON CONFLICT(household_id, plugin_id, name)
          DO UPDATE SET
            description = EXCLUDED.description,
            input_schema = EXCLUDED.input_schema,
            callback_url = EXCLUDED.callback_url,
-           requires_submit = EXCLUDED.requires_submit,
+           required_scope = EXCLUDED.required_scope,
            owner_member_id = EXCLUDED.owner_member_id,
            visibility = EXCLUDED.visibility,
            updated_at = now()`,
@@ -103,7 +124,7 @@ export async function registerPluginMcpTools(
           tool.description,
           JSON.stringify(tool.inputSchema),
           tool.callbackUrl,
-          tool.requiresSubmit,
+          tool.requiredScope,
           principal.memberId,
           tool.visibility,
         ],
@@ -119,6 +140,23 @@ export async function registerPluginMcpTools(
   }
 }
 
+async function callbackIsLive(tool: PluginMcpTool): Promise<boolean> {
+  const url = callbackUrl(tool.callbackUrl);
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "sol.plugin.mcp.probe", pluginId: tool.pluginId }),
+      signal: AbortSignal.timeout(1_500),
+    });
+    if (!response.ok) return false;
+    const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
+    return payload.ok === true && payload.pluginId === tool.pluginId;
+  } catch {
+    return false;
+  }
+}
+
 export async function listPluginMcpTools(
   principal: AuthPrincipal,
   scopes: string[],
@@ -129,27 +167,40 @@ export async function listPluginMcpTools(
     description: string;
     input_schema: Record<string, unknown>;
     callback_url: string;
-    requires_submit: boolean;
+    required_scope: "read" | "submit" | "actions";
     visibility: "private" | "family";
   }>(
     `SELECT plugin_id, name, description, input_schema, callback_url,
-            requires_submit, visibility::text
+            required_scope, visibility::text
      FROM plugin_mcp_tools
      WHERE household_id = $1
        AND (visibility = 'family' OR owner_member_id = $2)
-       AND (NOT requires_submit OR $3::boolean)
+       AND required_scope = ANY($3::text[])
      ORDER BY plugin_id, name`,
-    [principal.householdId, principal.memberId, scopes.includes("submit")],
+    [principal.householdId, principal.memberId, scopes],
   );
-  return result.rows.map((row) => ({
+  const tools = result.rows.map((row) => ({
     pluginId: row.plugin_id,
     name: row.name,
     description: row.description,
     inputSchema: row.input_schema,
     callbackUrl: row.callback_url,
-    requiresSubmit: row.requires_submit,
+    requiredScope: row.required_scope,
     visibility: row.visibility,
   }));
+
+  const groups = new Map<string, PluginMcpTool[]>();
+  for (const tool of tools) {
+    const key = `${tool.pluginId}\n${tool.callbackUrl}`;
+    const values = groups.get(key) ?? [];
+    values.push(tool);
+    groups.set(key, values);
+  }
+  const liveGroups = await Promise.all([...groups.values()].map(async (group) => ({
+    group,
+    live: await callbackIsLive(group[0]!),
+  })));
+  return liveGroups.flatMap(({ group, live }) => live ? group : []);
 }
 
 export async function invokePluginMcpTool(
@@ -162,6 +213,8 @@ export async function invokePluginMcpTool(
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
+      type: "sol.plugin.mcp.invoke",
+      pluginId: tool.pluginId,
       tool: tool.name,
       arguments: args,
       caller: {
