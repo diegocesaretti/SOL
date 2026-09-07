@@ -63,6 +63,7 @@ const SELECT_ACCOUNT = `
   FROM source_accounts s
   LEFT JOIN whatsapp_sessions w ON w.source_account_id = s.id
   WHERE s.provider = 'whatsapp'
+    AND COALESCE(s.auth_mode, '') NOT LIKE 'plugin:%'
 `;
 
 export async function ensureWhatsappSessionRecord(sourceAccountId: string): Promise<void> {
@@ -108,6 +109,7 @@ export async function listWhatsappAutostartAccounts(): Promise<string[]> {
     JOIN whatsapp_sessions w ON w.source_account_id = s.id
     WHERE s.provider = 'whatsapp'
       AND COALESCE(s.auth_mode, '') <> 'linked-device-assistant'
+      AND COALESCE(s.auth_mode, '') NOT LIKE 'plugin:%'
       AND w.enabled = true
       AND w.linked_at IS NOT NULL
     ORDER BY s.created_at ASC

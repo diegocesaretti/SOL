@@ -126,13 +126,25 @@ export async function registerPluginInput(
     );
     const row = result.rows[0];
     if (!row) throw new Error("plugin_input_registration_failed");
-    if (row.auth_mode !== authMode || row.owner_member_id !== principal.memberId) {
+    const sameOwner = row.owner_member_id === principal.memberId;
+    const adoptableLegacyWhatsapp = provider === "whatsapp" && row.auth_mode === "linked-device";
+    if (!sameOwner || (row.auth_mode !== authMode && !adoptableLegacyWhatsapp)) {
       throw new Error("input_account_owned_by_other_runtime");
     }
-    await client.query(
-      `UPDATE source_accounts SET label=$2, updated_at=now() WHERE id=$1`,
-      [row.id, label],
-    );
+    if (adoptableLegacyWhatsapp) {
+      await client.query(
+        `UPDATE source_accounts
+         SET label=$2, auth_mode=$3, config=config || $4::jsonb, updated_at=now()
+         WHERE id=$1`,
+        [row.id, label, authMode, JSON.stringify({ pluginId: principal.pluginId, adoptedFrom: "linked-device" })],
+      );
+      row.auth_mode = authMode;
+    } else {
+      await client.query(
+        `UPDATE source_accounts SET label=$2, updated_at=now() WHERE id=$1`,
+        [row.id, label],
+      );
+    }
     row.label = label;
     await client.query("COMMIT");
     return rowAccount(row);
