@@ -49,13 +49,14 @@ export class SolPluginClient {
     await this.request(`/v1/plugin-api/inputs/${inputId}/items`, {
       body: {
         externalId: `${entity.entity_id}:${entity.last_updated || Date.now()}`,
-        kind: "presence",
+        kind: "sensor_event",
         occurredAt: entity.last_updated || new Date().toISOString(),
         observedAt: new Date().toISOString(),
         title: entity.attributes?.friendly_name || entity.entity_id,
         text: `${entity.attributes?.friendly_name || entity.entity_id} is ${entity.state}`,
         origin: "home_assistant",
         metadata: {
+          eventType: "presence",
           entityId: entity.entity_id,
           state: entity.state,
           latitude: entity.attributes?.latitude,
