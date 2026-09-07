@@ -14,6 +14,7 @@ import { rememberMcpFact } from "../modules/mcp/memory.js";
 import { submitMcpInformation, submitMcpSchedule } from "../modules/mcp/submissions.js";
 import { listMcpAttentionQueue, searchMcpWhatsapp } from "../modules/mcp/whatsapp.js";
 import { correctMemoryFact, forgetMemoryFact, searchMemories } from "../modules/memory/service.js";
+import { loadPluginMcpTools, registerPluginMcpToolsOnServer } from "./plugin-tools.js";
 
 async function loadToken(): Promise<string> {
   const direct = process.env.NEXO_MCP_TOKEN?.trim() || process.env.SOL_MCP_TOKEN?.trim();
@@ -37,6 +38,7 @@ async function main(): Promise<void> {
     );
   }
   const { principal, scopes } = access;
+  const pluginTools = await loadPluginMcpTools(principal, scopes);
 
   serveStdio(() => {
     const server = new McpServer({ name: "nexo", version: "0.12.0" });
@@ -58,6 +60,7 @@ async function main(): Promise<void> {
           sources,
           knowledge: status.knowledge,
           recentTimelineItems: status.recentTimelineItems,
+          pluginTools: pluginTools.map((tool) => ({ pluginId: tool.pluginId, name: tool.name, requiresSubmit: tool.requiresSubmit })),
           mcpScopes: scopes,
           policy: {
             privateDataIsMemberScoped: true,
@@ -73,7 +76,6 @@ async function main(): Promise<void> {
         });
       },
     );
-
 
     server.registerTool(
       "get_timeline",
@@ -170,7 +172,6 @@ async function main(): Promise<void> {
     );
 
     if (scopes.includes("submit")) {
-
       server.registerTool(
         "save_observation",
         {
@@ -297,6 +298,7 @@ async function main(): Promise<void> {
       );
     }
 
+    registerPluginMcpToolsOnServer(server, principal, pluginTools);
     return server;
   });
 }
