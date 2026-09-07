@@ -200,9 +200,19 @@ function validateDistribution(value: unknown): SolPluginDistribution | undefined
   return { type: "github-release", asset, tag };
 }
 
+export function missingRequiredSettingKeys(
+  definitions: SolPluginSettingDefinition[],
+  values: Record<string, SolPluginSettingValue>,
+): string[] {
+  return definitions
+    .filter((definition) => definition.required && values[definition.key] === undefined && definition.default === undefined)
+    .map((definition) => definition.key);
+}
+
 export function validateSettingValues(
   definitions: SolPluginSettingDefinition[],
   value: unknown,
+  options: { allowMissingRequired?: boolean } = {},
 ): Record<string, SolPluginSettingValue> {
   if (value === undefined) return {};
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("settings values must be an object");
@@ -213,7 +223,7 @@ export function validateSettingValues(
     const definition = definitionsByKey.get(key);
     if (!definition) throw new Error(`unknown plugin setting: ${key}`);
     if (raw === undefined || raw === null || raw === "") {
-      if (definition.required) throw new Error(`setting ${key} is required`);
+      if (definition.required && !options.allowMissingRequired) throw new Error(`setting ${key} is required`);
       continue;
     }
     if (definition.type === "boolean") {
@@ -231,17 +241,16 @@ export function validateSettingValues(
     }
     if (typeof raw !== "string") throw new Error(`setting ${key} must be text`);
     const stringValue = raw.trim();
-    if (!stringValue && definition.required) throw new Error(`setting ${key} is required`);
+    if (!stringValue && definition.required && !options.allowMissingRequired) throw new Error(`setting ${key} is required`);
     if (stringValue.length > 2_000) throw new Error(`setting ${key} is too long`);
     if (definition.type === "select" && !definition.options?.some((option) => option.value === stringValue)) {
       throw new Error(`setting ${key} must match one of its options`);
     }
     if (stringValue) result[key] = stringValue;
   }
-  for (const definition of definitions) {
-    if (definition.required && result[definition.key] === undefined && definition.default === undefined) {
-      throw new Error(`setting ${definition.key} is required`);
-    }
+  if (!options.allowMissingRequired) {
+    const missing = missingRequiredSettingKeys(definitions, result);
+    if (missing.length) throw new Error(`setting ${missing[0]} is required`);
   }
   return result;
 }
