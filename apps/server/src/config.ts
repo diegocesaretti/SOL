@@ -61,7 +61,6 @@ export const config = {
   sessionDays: integerEnv("SOL_SESSION_DAYS", 30),
   cookieSecure: booleanEnv("SOL_COOKIE_SECURE", false),
 
-  nexoInternalAutomationEnabled: booleanEnv("NEXO_INTERNAL_AUTOMATION", false),
 
   // Optional legacy AI enrichment. Nexo leaves this dormant by default and exposes
   // context/memory through MCP instead of running a competing assistant brain.
@@ -79,7 +78,6 @@ export const config = {
     optionalEnv("SOL_CODEX_CWD") ?? resolve(codexHome, "workspace"),
   codexRequestTimeoutMs: integerEnv("SOL_CODEX_REQUEST_TIMEOUT_MS", 30_000),
   outboxPollMs: integerEnv("SOL_OUTBOX_RECOVERY_MS", 30 * 60 * 1000),
-  executivePollMs: integerEnv("SOL_EXECUTIVE_POLL_MS", 5 * 60 * 1000),
   knowledgeConsolidationMs: integerEnv("SOL_KNOWLEDGE_CONSOLIDATION_MS", 6 * 60 * 60 * 1000),
   knowledgeBatchesPerRun: integerEnv("SOL_KNOWLEDGE_BATCHES_PER_RUN", 2),
   knowledgeBatchItems: integerEnv("SOL_KNOWLEDGE_BATCH_ITEMS", 12),

@@ -14,9 +14,6 @@ import {
 } from "./modules/auth/session.js";
 import { handleAiApi } from "./modules/ai/routes.js";
 import { codexAppServer } from "./modules/ai/codex/runtime.js";
-import { handleExecutiveApi } from "./modules/executive/routes.js";
-import { registerExecutiveProposalProcessor } from "./modules/executive/proposals.js";
-import { ExecutiveScheduler } from "./modules/executive/scheduler.js";
 import {
   createMember,
   MemberValidationError,
@@ -37,7 +34,6 @@ import {
   type BootstrapInput,
 } from "./modules/onboarding/service.js";
 import { renderAiPage } from "./ui/ai.js";
-import { renderExecutivePage } from "./ui/executive.js";
 import { renderInputsPage } from "./ui/inputs.js";
 import { renderLifePage } from "./ui/life.js";
 import { renderMcpPage } from "./ui/mcp.js";
@@ -47,9 +43,7 @@ import { startWindowsTray, stopWindowsTray } from "./windows/tray.js";
 
 export const eventBus = new InMemoryEventBus();
 const unregisterCandidateProcessor = registerCandidateProcessor(eventBus);
-const unregisterExecutiveProcessor = registerExecutiveProposalProcessor(eventBus);
 const outboxDispatcher = new OutboxDispatcher(eventBus, config.outboxPollMs);
-const executiveScheduler = new ExecutiveScheduler(config.executivePollMs);
 
 function requestUrl(request: IncomingMessage): URL {
   return new URL(request.url ?? "/", "http://sol.local");
@@ -141,11 +135,6 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     return;
   }
 
-  if (request.method === "GET" && path === "/executive") {
-    if (!advancedRequested(request)) { redirect(response, "/outputs"); return; }
-    sendHtml(response, 200, renderExecutivePage());
-    return;
-  }
 
   if (request.method === "GET" && path === "/health") {
     const database = await checkDatabase();
@@ -243,11 +232,6 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     const principal = await principalFor(request, response);
     if (!principal) return;
     if (await handleAiApi(path, request, response, principal)) return;
-  }
-  if (path.startsWith("/v1/executive/")) {
-    const principal = await principalFor(request, response);
-    if (!principal) return;
-    if (await handleExecutiveApi(path, request, response, principal)) return;
   }
   if (path.startsWith("/v1/life/")) {
     const principal = await principalFor(request, response);
@@ -350,7 +334,6 @@ server.listen(config.port, config.host, () => {
   startWindowsTray();
   outboxDispatcher.start();
   console.log("External sources are plugin-only; install providers from Services.");
-  if (config.nexoInternalAutomationEnabled) executiveScheduler.start();
   if (config.host !== "127.0.0.1" && config.host !== "localhost") {
     console.warn(
       "SOL is listening beyond localhost. Use HTTPS and review member authentication before exposing it broadly.",
@@ -362,8 +345,6 @@ async function shutdown(signal: string): Promise<void> {
   console.log(`Received ${signal}; shutting down SOL Core`);
   stopWindowsTray();
   outboxDispatcher.stop();
-  executiveScheduler.stop();
-  unregisterExecutiveProcessor();
   unregisterCandidateProcessor();
   await codexAppServer.stop().catch(() => undefined);
   server.close(async () => {
