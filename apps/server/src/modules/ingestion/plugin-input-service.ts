@@ -6,7 +6,7 @@ import type { SolPluginRuntimePrincipal } from "../plugins/types.js";
 export interface PluginInputAccount {
   id: string;
   householdId: string;
-  ownerMemberId: string;
+  ownerMemberId?: string;
   provider: string;
   externalAccountId: string;
   label: string;
@@ -60,11 +60,11 @@ function rowAccount(row: {
   auth_mode: string | null;
   last_sync_at: Date | null;
 }): PluginInputAccount {
-  if (!row.owner_member_id || !row.external_account_id || !row.auth_mode) throw new Error("plugin_input_account_invalid");
+  if (!row.external_account_id || !row.auth_mode) throw new Error("plugin_input_account_invalid");
   return {
     id: row.id,
     householdId: row.household_id,
-    ownerMemberId: row.owner_member_id,
+    ownerMemberId: row.owner_member_id ?? undefined,
     provider: row.provider,
     externalAccountId: row.external_account_id,
     label: row.label,
@@ -76,6 +76,17 @@ function rowAccount(row: {
 
 function pluginAuthMode(pluginId: string): string {
   return `plugin:${pluginId}`;
+}
+
+export function pluginRuntimeOwnsInput(
+  principal: Pick<SolPluginRuntimePrincipal, "pluginId" | "memberId">,
+  row: { owner_member_id: string | null; auth_mode: string | null },
+): boolean {
+  if (row.auth_mode !== pluginAuthMode(principal.pluginId)) return false;
+  // A null owner means the source account is family/shared. It is still owned by
+  // the plugin runtime identified by auth_mode; sharing it must not orphan the
+  // plugin after a UI visibility change.
+  return row.owner_member_id === null || row.owner_member_id === principal.memberId;
 }
 
 export async function registerPluginInput(
@@ -126,9 +137,10 @@ export async function registerPluginInput(
     );
     const row = result.rows[0];
     if (!row) throw new Error("plugin_input_registration_failed");
-    const sameOwner = row.owner_member_id === principal.memberId;
+    const sameOwner = row.owner_member_id === null || row.owner_member_id === principal.memberId;
     const adoptableLegacyWhatsapp = provider === "whatsapp" && row.auth_mode === "linked-device";
-    if (!sameOwner || (row.auth_mode !== authMode && !adoptableLegacyWhatsapp)) {
+    const samePluginRuntime = pluginRuntimeOwnsInput(principal, row);
+    if (!samePluginRuntime && !(sameOwner && adoptableLegacyWhatsapp)) {
       throw new Error("input_account_owned_by_other_runtime");
     }
     if (adoptableLegacyWhatsapp) {
@@ -174,7 +186,7 @@ async function ownedInput(principal: SolPluginRuntimePrincipal, sourceAccountId:
     [sourceAccountId, principal.householdId],
   );
   const row = result.rows[0];
-  if (!row || row.auth_mode !== pluginAuthMode(principal.pluginId) || row.owner_member_id !== principal.memberId) {
+  if (!row || !pluginRuntimeOwnsInput(principal, row)) {
     throw new Error("plugin_input_not_found");
   }
   return rowAccount(row);
@@ -278,7 +290,7 @@ export async function ingestPluginItem(
         account.id,
         externalId,
         kind,
-        account.ownerMemberId,
+        account.ownerMemberId ?? null,
         visibility,
         occurredAt,
         observedAt,
@@ -309,7 +321,7 @@ export async function ingestPluginItem(
         [
           principal.householdId,
           source.id,
-          account.ownerMemberId,
+          account.ownerMemberId ?? null,
           account.provider,
           intelligence.operationalScore,
           JSON.stringify(intelligence.reasons),
