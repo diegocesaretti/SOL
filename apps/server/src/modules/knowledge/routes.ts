@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { readJsonBody, sendJson } from "../../http.js";
 import type { AuthPrincipal } from "../auth/session.js";
+import { handleMemoryApi } from "../memory/routes.js";
 import {
   createKnowledgeEntity,
   KnowledgeValidationError,
@@ -14,6 +15,10 @@ export async function handleKnowledgeApi(
   response: ServerResponse,
   principal: AuthPrincipal,
 ): Promise<boolean> {
+  if (path.startsWith("/v1/knowledge/memory")) {
+    return handleMemoryApi(path, request, response, principal);
+  }
+
   if (path !== "/v1/knowledge/entities") return false;
 
   if (request.method === "GET") {
