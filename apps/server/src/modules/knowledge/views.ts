@@ -23,6 +23,7 @@ export interface KnowledgeEntityView {
   metadata: Record<string, unknown>;
   facts: KnowledgeFactView[];
   updatedAt: string;
+  canDelete: boolean;
 }
 
 export class KnowledgeValidationError extends Error {
@@ -30,6 +31,10 @@ export class KnowledgeValidationError extends Error {
     super(message);
     this.name = "KnowledgeValidationError";
   }
+}
+
+function manuallyOwnedBy(principal: AuthPrincipal, ownerMemberId: string | null, metadata: Record<string, unknown>): boolean {
+  return ownerMemberId === principal.memberId && metadata?.origin === "manual";
 }
 
 export async function createKnowledgeEntity(
@@ -40,149 +45,97 @@ export async function createKnowledgeEntity(
   const kind = input.kind === "person" || input.kind === "project" ? input.kind : null;
   if (!kind) throw new KnowledgeValidationError("kind must be person or project");
   const name = typeof input.name === "string" ? input.name.trim() : "";
-  if (!name || name.length > 180) {
-    throw new KnowledgeValidationError("name is required and must be at most 180 characters");
-  }
+  if (!name || name.length > 180) throw new KnowledgeValidationError("name is required and must be at most 180 characters");
   const visibility = input.visibility === "family" ? "family" : "private";
+  const metadata = { origin: "manual", createdByMemberId: principal.memberId };
 
   const result = await db.query<{ id: string; updated_at: Date }>(
-    `INSERT INTO entities(
-       household_id, kind, canonical_name, owner_member_id, visibility, metadata
-     ) VALUES ($1, $2::entity_kind, $3, $4, $5::visibility_scope, $6::jsonb)
+    `INSERT INTO entities(household_id, kind, canonical_name, owner_member_id, visibility, metadata)
+     VALUES ($1, $2::entity_kind, $3, $4, $5::visibility_scope, $6::jsonb)
      RETURNING id, updated_at`,
-    [
-      principal.householdId,
-      kind,
-      name,
-      principal.memberId,
-      visibility,
-      JSON.stringify({ origin: "manual", createdByMemberId: principal.memberId }),
-    ],
+    [principal.householdId, kind, name, principal.memberId, visibility, JSON.stringify(metadata)],
   );
   const row = result.rows[0];
   if (!row) throw new Error("failed_to_create_entity");
-  return {
-    id: row.id,
-    kind,
-    name,
-    aliases: [],
-    ownerMemberId: principal.memberId,
-    visibility,
-    metadata: { origin: "manual", createdByMemberId: principal.memberId },
-    facts: [],
-    updatedAt: row.updated_at.toISOString(),
-  };
+  return { id: row.id, kind, name, aliases: [], ownerMemberId: principal.memberId, visibility, metadata, facts: [], updatedAt: row.updated_at.toISOString(), canDelete: true };
 }
 
-export async function listKnowledgeEntities(
-  principal: AuthPrincipal,
-  kind: KnowledgeViewKind,
-): Promise<KnowledgeEntityView[]> {
+export async function deleteKnowledgeEntity(principal: AuthPrincipal, entityId: string): Promise<boolean> {
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    const found = await client.query<{ owner_member_id: string | null; metadata: Record<string, unknown> }>(
+      `SELECT owner_member_id, metadata FROM entities WHERE id = $1 AND household_id = $2 FOR UPDATE`,
+      [entityId, principal.householdId],
+    );
+    const entity = found.rows[0];
+    if (!entity) {
+      await client.query("ROLLBACK");
+      return false;
+    }
+    if (!manuallyOwnedBy(principal, entity.owner_member_id, entity.metadata ?? {})) {
+      throw new KnowledgeValidationError("only manually added entities owned by you can be deleted");
+    }
+    await client.query(`DELETE FROM visibility_grants WHERE household_id = $1 AND resource_type = 'entity' AND resource_id = $2`, [principal.householdId, entityId]);
+    await client.query(`DELETE FROM source_links WHERE target_type = 'entity' AND target_id = $1`, [entityId]);
+    const deleted = await client.query(`DELETE FROM entities WHERE id = $1 AND household_id = $2 RETURNING id`, [entityId, principal.householdId]);
+    await client.query("COMMIT");
+    return (deleted.rowCount ?? 0) > 0;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function listKnowledgeEntities(principal: AuthPrincipal, kind: KnowledgeViewKind): Promise<KnowledgeEntityView[]> {
   const entities = await db.query<{
-    id: string;
-    kind: KnowledgeViewKind;
-    canonical_name: string;
-    owner_member_id: string | null;
-    visibility: string;
-    metadata: Record<string, unknown>;
-    updated_at: Date;
+    id: string; kind: KnowledgeViewKind; canonical_name: string; owner_member_id: string | null;
+    visibility: string; metadata: Record<string, unknown>; updated_at: Date;
   }>(
-    `SELECT e.id, e.kind::text, e.canonical_name, e.owner_member_id,
-            e.visibility::text, e.metadata, e.updated_at
+    `SELECT e.id, e.kind::text, e.canonical_name, e.owner_member_id, e.visibility::text, e.metadata, e.updated_at
      FROM entities e
-     WHERE e.household_id = $1
-       AND e.kind::text = $4
-       AND (
-         e.owner_member_id = $2
-         OR (e.visibility = 'family' AND $3::text <> 'guest')
-         OR (e.visibility = 'system' AND $3::text IN ('owner', 'adult'))
-         OR (e.visibility IN ('shared', 'project') AND EXISTS (
-           SELECT 1 FROM visibility_grants vg
-           WHERE vg.household_id = e.household_id
-             AND vg.resource_type = 'entity'
-             AND vg.resource_id = e.id
-             AND vg.member_id = $2 AND vg.can_read = true
-         ))
-       )
-     ORDER BY e.updated_at DESC, e.canonical_name ASC
-     LIMIT 250`,
+     WHERE e.household_id = $1 AND e.kind::text = $4 AND (
+       e.owner_member_id = $2
+       OR (e.visibility = 'family' AND $3::text <> 'guest')
+       OR (e.visibility = 'system' AND $3::text IN ('owner', 'adult'))
+       OR (e.visibility IN ('shared', 'project') AND EXISTS (
+         SELECT 1 FROM visibility_grants vg WHERE vg.household_id = e.household_id
+           AND vg.resource_type = 'entity' AND vg.resource_id = e.id AND vg.member_id = $2 AND vg.can_read = true
+       ))
+     )
+     ORDER BY e.updated_at DESC, e.canonical_name ASC LIMIT 250`,
     [principal.householdId, principal.memberId, principal.role, kind],
   );
-
   if (!entities.rows.length) return [];
   const ids = entities.rows.map((row) => row.id);
   const [aliases, facts] = await Promise.all([
-    db.query<{ entity_id: string; alias: string }>(
-      `SELECT entity_id, alias
-       FROM entity_aliases
-       WHERE entity_id = ANY($1::uuid[])
-       ORDER BY alias ASC`,
-      [ids],
-    ),
-    db.query<{
-      id: string;
-      subject_entity_id: string;
-      predicate: string;
-      object_entity_id: string | null;
-      object_value: unknown;
-      confidence: number;
-      visibility: string;
-      updated_at: Date;
-    }>(
-      `SELECT f.id, f.subject_entity_id, f.predicate, f.object_entity_id,
-              f.object_value, f.confidence, f.visibility::text, f.updated_at
-       FROM facts f
-       WHERE f.household_id = $1
-         AND f.subject_entity_id = ANY($4::uuid[])
-         AND f.status = 'active'
-         AND (
-           f.owner_member_id = $2
-           OR (f.visibility = 'family' AND $3::text <> 'guest')
-           OR (f.visibility = 'system' AND $3::text IN ('owner', 'adult'))
-           OR (f.visibility IN ('shared', 'project') AND EXISTS (
-             SELECT 1 FROM visibility_grants vg
-             WHERE vg.household_id = f.household_id
-               AND vg.resource_type = 'fact'
-               AND vg.resource_id = f.id
-               AND vg.member_id = $2 AND vg.can_read = true
-           ))
-         )
-       ORDER BY f.updated_at DESC
-       LIMIT 1000`,
+    db.query<{ entity_id: string; alias: string }>(`SELECT entity_id, alias FROM entity_aliases WHERE entity_id = ANY($1::uuid[]) ORDER BY alias ASC`, [ids]),
+    db.query<{ id: string; subject_entity_id: string; predicate: string; object_entity_id: string | null; object_value: unknown; confidence: number; visibility: string; updated_at: Date }>(
+      `SELECT f.id, f.subject_entity_id, f.predicate, f.object_entity_id, f.object_value, f.confidence, f.visibility::text, f.updated_at
+       FROM facts f WHERE f.household_id = $1 AND f.subject_entity_id = ANY($4::uuid[]) AND f.status = 'active' AND (
+         f.owner_member_id = $2 OR (f.visibility = 'family' AND $3::text <> 'guest')
+         OR (f.visibility = 'system' AND $3::text IN ('owner', 'adult'))
+         OR (f.visibility IN ('shared', 'project') AND EXISTS (
+           SELECT 1 FROM visibility_grants vg WHERE vg.household_id = f.household_id
+             AND vg.resource_type = 'fact' AND vg.resource_id = f.id AND vg.member_id = $2 AND vg.can_read = true
+         ))
+       ) ORDER BY f.updated_at DESC LIMIT 1000`,
       [principal.householdId, principal.memberId, principal.role, ids],
     ),
   ]);
-
   const aliasMap = new Map<string, string[]>();
-  for (const row of aliases.rows) {
-    const list = aliasMap.get(row.entity_id) ?? [];
-    list.push(row.alias);
-    aliasMap.set(row.entity_id, list);
-  }
+  for (const row of aliases.rows) { const list = aliasMap.get(row.entity_id) ?? []; list.push(row.alias); aliasMap.set(row.entity_id, list); }
   const factMap = new Map<string, KnowledgeFactView[]>();
   for (const row of facts.rows) {
     const list = factMap.get(row.subject_entity_id) ?? [];
-    list.push({
-      id: row.id,
-      predicate: row.predicate,
-      value: row.object_value ?? undefined,
-      objectEntityId: row.object_entity_id ?? undefined,
-      confidence: Number(row.confidence),
-      visibility: row.visibility,
-      updatedAt: row.updated_at.toISOString(),
-    });
+    list.push({ id: row.id, predicate: row.predicate, value: row.object_value ?? undefined, objectEntityId: row.object_entity_id ?? undefined, confidence: Number(row.confidence), visibility: row.visibility, updatedAt: row.updated_at.toISOString() });
     factMap.set(row.subject_entity_id, list);
   }
-
   return entities.rows.map((row) => ({
-    id: row.id,
-    kind: row.kind,
-    name: row.canonical_name,
-    aliases: aliasMap.get(row.id) ?? [],
-    ownerMemberId: row.owner_member_id ?? undefined,
-    visibility: row.visibility,
-    metadata: row.metadata,
-    facts: factMap.get(row.id) ?? [],
-    updatedAt: row.updated_at.toISOString(),
+    id: row.id, kind: row.kind, name: row.canonical_name, aliases: aliasMap.get(row.id) ?? [], ownerMemberId: row.owner_member_id ?? undefined,
+    visibility: row.visibility, metadata: row.metadata ?? {}, facts: factMap.get(row.id) ?? [], updatedAt: row.updated_at.toISOString(),
+    canDelete: manuallyOwnedBy(principal, row.owner_member_id, row.metadata ?? {}),
   }));
 }
