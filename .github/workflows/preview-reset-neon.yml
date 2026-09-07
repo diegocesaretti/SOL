@@ -87,4 +87,4 @@ jobs:
         run: |
           $tag='sol-windows-preview-pr12'
           gh release delete $tag -y --cleanup-tag 2>$null
-          gh release create $tag dist/SOL-Windows.zip --target $env:GITHUB_SHA --title 'SOL Windows preview · Neon setup + reset' --notes 'First-run Neon page, automatic migrations, Settings/reset controls, and Nexo dashboard access.' --prerelease
+          gh release create $tag dist/SOL-Windows.zip --target $env:GITHUB_SHA --title 'SOL Windows preview · Neon setup + reset' --notes 'First-run Neon page, automatic migrations, Settings/reset controls, and Nexo dashboard access. Launcher compile fix included.' --prerelease
