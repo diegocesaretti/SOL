@@ -102,7 +102,8 @@ process.on('SIGTERM',()=>process.exit(0));
     assert.equal(started.state, "running");
     assert.ok(started.pid);
     await waitFor(async () => (await manager.get("hello-test")).health === "healthy");
-    assert.ok((await manager.getLogs("hello-test")).some((entry) => entry.message.includes("hello from test")));
+    await waitFor(async () => (await manager.getLogs("hello-test"))
+      .some((entry) => entry.message.includes("hello from test")));
 
     const firstPid = started.pid;
     const restarted = await manager.restart("hello-test");
