@@ -34,6 +34,8 @@ interface PluginTool {
   input: PluginToolArgument[];
 }
 
+const PLUGIN_TOOL_TIMEOUT_MS = 130_000;
+
 async function loadToken(): Promise<string> {
   const direct = process.env.SOL_MCP_TOKEN?.trim() || process.env.NEXO_MCP_TOKEN?.trim();
   if (direct) return direct;
@@ -53,7 +55,12 @@ function coreUrl(): string {
   return `http://${host}:${config.port}`;
 }
 
-async function pluginRequest<T>(token: string, path: string, options: RequestInit = {}): Promise<T> {
+async function pluginRequest<T>(
+  token: string,
+  path: string,
+  options: RequestInit = {},
+  timeoutMs = 20_000,
+): Promise<T> {
   const response = await fetch(`${coreUrl()}${path}`, {
     ...options,
     headers: {
@@ -61,7 +68,7 @@ async function pluginRequest<T>(token: string, path: string, options: RequestIni
       ...(options.body ? { "content-type": "application/json" } : {}),
       ...(options.headers || {}),
     },
-    signal: AbortSignal.timeout(20_000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
   if (!response.ok) {
@@ -236,6 +243,7 @@ async function main(): Promise<void> {
           token,
           `/v1/mcp/runtime/tools/${encodeURIComponent(tool.name)}/call`,
           { method: "POST", body: JSON.stringify(input) },
+          PLUGIN_TOOL_TIMEOUT_MS,
         );
         return text(payload.result);
       });
