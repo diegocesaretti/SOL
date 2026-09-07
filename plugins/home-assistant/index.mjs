@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { createServer } from "node:http";
 import { mkdir } from "node:fs/promises";
 import { HaStateCache } from "./lib/cache.mjs";
@@ -72,6 +73,7 @@ await mkdir(config.dataDir, { recursive: true });
 const cache = new HaStateCache(config.dataDir, config.flushMs);
 await cache.load();
 const sol = new SolPluginClient();
+const mcpPath = `/mcp/${randomBytes(24).toString("base64url")}`;
 
 let lastPersonSignature = "";
 async function syncPeople() {
@@ -206,7 +208,7 @@ const server = createServer(async (request, response) => {
       sendJson(response, 200, { ok: true, provider: "home_assistant", cache: cache.status(), controlEnabled: config.allowControl });
       return;
     }
-    if (request.method !== "POST" || path !== "/mcp") {
+    if (request.method !== "POST" || path !== mcpPath) {
       sendJson(response, 404, { error: "not_found" });
       return;
     }
@@ -277,8 +279,8 @@ const server = createServer(async (request, response) => {
 });
 
 server.listen(config.apiPort, "127.0.0.1", async () => {
-  const callbackUrl = `http://127.0.0.1:${config.apiPort}/mcp`;
-  console.log(`Home Assistant SOL plugin API listening on ${callbackUrl}`);
+  const callbackUrl = `http://127.0.0.1:${config.apiPort}${mcpPath}`;
+  console.log(`Home Assistant SOL plugin API listening on loopback port ${config.apiPort}`);
   if (sol.enabled) {
     await sol.registerMcpTools(callbackUrl, tools).catch((error) => {
       console.warn(`SOL MCP tool registration failed: ${error?.message || error}`);
