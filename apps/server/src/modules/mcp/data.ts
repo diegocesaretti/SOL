@@ -1,6 +1,5 @@
 import { db } from "../../database/client.js";
 import type { AuthPrincipal } from "../auth/session.js";
-import { buildMercadoLibreReasoningContext } from "../connectors/mercadolibre/context.js";
 import { listKnowledgeEntities, type KnowledgeViewKind } from "../knowledge/views.js";
 import { listTimeline } from "../life/timeline.js";
 
@@ -160,74 +159,4 @@ export async function listMcpKnowledge(
         ),
       );
   return filtered.slice(0, Math.max(1, Math.min(100, Math.trunc(limit))));
-}
-
-export async function getMcpHomeState(
-  principal: AuthPrincipal,
-  input: { query?: string; domain?: string; limit?: number },
-): Promise<Array<Record<string, unknown>>> {
-  if (principal.role === "guest") return [];
-  const query = input.query?.trim().toLocaleLowerCase("es-AR");
-  const domain = input.domain?.trim().toLowerCase();
-  const limit = Math.max(1, Math.min(200, Math.trunc(input.limit ?? 100)));
-  const result = await db.query<{
-    source_account_id: string;
-    source_label: string;
-    entity_id: string;
-    domain: string;
-    friendly_name: string | null;
-    device_class: string | null;
-    unit_of_measurement: string | null;
-    current_state: string | null;
-    current_attributes: Record<string, unknown>;
-    last_changed: Date | null;
-    last_updated: Date | null;
-  }>(
-    `SELECT e.source_account_id, sa.label AS source_label, e.entity_id, e.domain,
-            e.friendly_name, e.device_class, e.unit_of_measurement,
-            e.current_state, e.current_attributes, e.last_changed, e.last_updated
-     FROM home_assistant_entities e
-     JOIN source_accounts sa ON sa.id = e.source_account_id
-     WHERE sa.household_id = $1 AND sa.provider = 'home_assistant'
-       AND e.selected_for_sync = true
-       AND ($2::text IS NULL OR e.domain = $2)
-     ORDER BY e.domain, COALESCE(e.friendly_name,e.entity_id)
-     LIMIT $3`,
-    [principal.householdId, domain || null, Math.min(500, limit * 3)],
-  );
-  return result.rows
-    .filter((row) => !query ||
-      row.entity_id.toLocaleLowerCase("es-AR").includes(query) ||
-      (row.friendly_name ?? "").toLocaleLowerCase("es-AR").includes(query) ||
-      (row.current_state ?? "").toLocaleLowerCase("es-AR").includes(query))
-    .slice(0, limit)
-    .map((row) => ({
-      sourceAccountId: row.source_account_id,
-      sourceLabel: row.source_label,
-      entityId: row.entity_id,
-      domain: row.domain,
-      friendlyName: row.friendly_name ?? undefined,
-      deviceClass: row.device_class ?? undefined,
-      unitOfMeasurement: row.unit_of_measurement ?? undefined,
-      state: row.current_state ?? undefined,
-      attributes: row.current_attributes,
-      lastChanged: row.last_changed?.toISOString(),
-      lastUpdated: row.last_updated?.toISOString(),
-    }));
-}
-
-export async function getMcpBusinessSummary(
-  principal: AuthPrincipal,
-  days = 1,
-) {
-  const boundedDays = Math.max(1, Math.min(90, Math.trunc(days)));
-  const periodEnd = new Date();
-  const periodStart = new Date(periodEnd.getTime() - boundedDays * 86_400_000);
-  return buildMercadoLibreReasoningContext({
-    householdId: principal.householdId,
-    memberId: principal.memberId,
-    role: principal.role,
-    periodStart,
-    periodEnd,
-  });
 }

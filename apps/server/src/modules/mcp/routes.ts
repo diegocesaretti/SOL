@@ -38,10 +38,7 @@ export async function handleMcpApi(
         "remember_fact (requires submit scope)",
         "save_schedule (requires submit scope)",
       ],
-      runtime: {
-        internalAssistantBrain: config.nexoInternalAutomationEnabled,
-        legacyBackgroundConnectors: config.nexoLegacyConnectorsEnabled,
-      },
+      runtime: { externalSources: "plugins-only" },
       submissionPolicy: {
         userConfirmedMemoryWrites: true,
         externalActions: false,

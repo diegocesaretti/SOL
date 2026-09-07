@@ -1,0 +1,30 @@
+name: Verify plugin-only SOL core
+
+on:
+  push:
+    branches: [feat/plugin-input-api-v1]
+    paths:
+      - .github/workflows/verify-plugin-only-core.yml
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/plugin-input-api-v1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: corepack enable
+      - name: Inspect remaining provider-native references
+        run: |
+          echo '--- connector imports ---'
+          git grep -n 'modules/connectors\|../connectors\|./connectors' -- apps/server/src || true
+          echo '--- native runtime package references ---'
+          git grep -nE 'baileys|qrcode|from "pino"|from '\''pino'\''' -- apps/server/src || true
+      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
