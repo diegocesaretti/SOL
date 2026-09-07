@@ -1,7 +1,8 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { sendHtml, sendJson } from "../../http.js";
+import { readJsonBody, sendHtml, sendJson } from "../../http.js";
 import type { AuthPrincipal } from "../auth/session.js";
 import { renderPluginsPage } from "../../ui/plugins.js";
+import { downloadGithubPlugin, inspectGithubPlugin } from "./github.js";
 import { pluginManager } from "./runtime.js";
 
 function canManage(principal: AuthPrincipal): boolean {
@@ -20,6 +21,11 @@ async function readBinary(request: IncomingMessage, maxBytes: number): Promise<B
   return Buffer.concat(chunks, total);
 }
 
+async function readJson<T>(request: IncomingMessage): Promise<T> {
+  if (!request.headers["content-type"]?.includes("application/json")) throw new Error("content_type_must_be_application_json");
+  return await readJsonBody<T>(request);
+}
+
 function pluginError(response: ServerResponse, error: unknown): void {
   const message = error instanceof Error ? error.message : String(error);
   if (message.startsWith("plugin_not_found:")) {
@@ -30,8 +36,24 @@ function pluginError(response: ServerResponse, error: unknown): void {
     sendJson(response, 409, { error: message });
     return;
   }
+  if (message.startsWith("plugin_permissions_required:")) {
+    sendJson(response, 403, { error: message });
+    return;
+  }
   if (message === "plugin_package_too_large") {
     sendJson(response, 413, { error: message });
+    return;
+  }
+  if (message === "repository_or_plugin_manifest_not_found" || message.startsWith("github_release_asset_not_found:")) {
+    sendJson(response, 404, { error: message });
+    return;
+  }
+  if (message.startsWith("github_http_401") || message.startsWith("github_http_403") || message.startsWith("github_asset_http_401") || message.startsWith("github_asset_http_403")) {
+    sendJson(response, 401, { error: message, githubAuthRequired: true });
+    return;
+  }
+  if (message === "content_type_must_be_application_json") {
+    sendJson(response, 415, { error: message });
     return;
   }
   sendJson(response, 400, { error: message });
@@ -66,6 +88,80 @@ export async function handlePluginsApi(
     try {
       const packageBytes = await readBinary(request, 64 * 1024 * 1024);
       sendJson(response, 201, { plugin: await pluginManager.installPackage(packageBytes) });
+    } catch (error) {
+      pluginError(response, error);
+    }
+    return true;
+  }
+
+  if (path === "/v1/plugins/github/preview" && request.method === "POST") {
+    if (!canManage(principal)) {
+      sendJson(response, 403, { error: "forbidden" });
+      return true;
+    }
+    try {
+      const body = await readJson<{ repository?: string }>(request);
+      const preview = await inspectGithubPlugin(body.repository ?? "");
+      sendJson(response, 200, { preview });
+    } catch (error) {
+      pluginError(response, error);
+    }
+    return true;
+  }
+
+  if (path === "/v1/plugins/github/install" && request.method === "POST") {
+    if (!canManage(principal)) {
+      sendJson(response, 403, { error: "forbidden" });
+      return true;
+    }
+    try {
+      const body = await readJson<{
+        repository?: string;
+        approvedPermissions?: string[];
+        settings?: Record<string, string | number | boolean>;
+      }>(request);
+      const preview = await inspectGithubPlugin(body.repository ?? "");
+      const downloaded = await downloadGithubPlugin(preview);
+      const plugin = await pluginManager.installPackage(downloaded.bytes, {
+        approvedPermissions: Array.isArray(body.approvedPermissions) ? body.approvedPermissions : [],
+        settings: body.settings,
+        expectedManifest: preview.manifest,
+        source: {
+          type: "github",
+          repository: preview.repository,
+          ref: preview.defaultBranch,
+          releaseTag: downloaded.releaseTag,
+          installedAt: new Date().toISOString(),
+        },
+      });
+      sendJson(response, 201, { plugin });
+    } catch (error) {
+      pluginError(response, error);
+    }
+    return true;
+  }
+
+  const settingsMatch = path.match(/^\/v1\/plugins\/([a-z0-9][a-z0-9._-]{0,63})\/settings$/);
+  if (settingsMatch && request.method === "GET") {
+    if (!canManage(principal)) {
+      sendJson(response, 403, { error: "forbidden" });
+      return true;
+    }
+    try {
+      sendJson(response, 200, await pluginManager.getSettings(settingsMatch[1]!));
+    } catch (error) {
+      pluginError(response, error);
+    }
+    return true;
+  }
+  if (settingsMatch && request.method === "PUT") {
+    if (!canManage(principal)) {
+      sendJson(response, 403, { error: "forbidden" });
+      return true;
+    }
+    try {
+      const body = await readJson<{ values?: Record<string, string | number | boolean> }>(request);
+      sendJson(response, 200, { plugin: await pluginManager.updateSettings(settingsMatch[1]!, body.values ?? {}) });
     } catch (error) {
       pluginError(response, error);
     }
