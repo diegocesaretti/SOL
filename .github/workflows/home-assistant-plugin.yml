@@ -43,6 +43,7 @@ jobs:
         run: node scripts/pack-sol-plugin.mjs plugins/home-assistant dist/HomeAssistant.solplugin
 
       - name: Upload package artifact
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: HomeAssistant-solplugin
