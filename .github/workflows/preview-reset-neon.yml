@@ -1,0 +1,90 @@
+name: Preview Neon onboarding and reset
+
+on:
+  push:
+    branches: [feat/unified-mcp-tool-registry]
+    paths:
+      - .github/workflows/preview-reset-neon.yml
+
+permissions:
+  contents: write
+
+jobs:
+  linux-ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: corepack enable
+      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+
+  windows-package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - shell: pwsh
+        run: corepack enable
+      - shell: pwsh
+        run: pnpm install --no-frozen-lockfile
+      - shell: pwsh
+        run: pnpm typecheck
+      - shell: pwsh
+        run: pnpm build
+      - name: Build portable tree
+        shell: pwsh
+        run: |
+          $server = 'dist/windows/SOL/apps/server'
+          New-Item -ItemType Directory -Force $server | Out-Null
+          Copy-Item apps/server/package.json "$server/package.json" -Force
+          Push-Location $server
+          try { npm install --omit=dev --ignore-scripts --no-package-lock --no-audit --no-fund } finally { Pop-Location }
+          Copy-Item apps/server/dist "$server/dist" -Recurse -Force
+          New-Item -ItemType Directory -Force dist/windows/SOL/packages/database | Out-Null
+          Copy-Item packages/database/migrations dist/windows/SOL/packages/database/migrations -Recurse -Force
+          New-Item -ItemType Directory -Force dist/windows/SOL/runtime | Out-Null
+          New-Item -ItemType Directory -Force dist/windows/SOL/scripts/windows | Out-Null
+          Copy-Item (Get-Command node).Source dist/windows/SOL/runtime/node.exe
+          Copy-Item scripts/windows/sol-tray.ps1 dist/windows/SOL/scripts/windows/sol-tray.ps1
+          Copy-Item .env.example dist/windows/SOL/.env.example
+          dotnet publish packaging/windows/SolLauncher/SolLauncher.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o dist/windows/launcher
+          Copy-Item dist/windows/launcher/SOL.exe dist/windows/SOL/SOL.exe
+      - name: Verify portable first-run components
+        shell: pwsh
+        run: |
+          $required = @(
+            'dist/windows/SOL/SOL.exe',
+            'dist/windows/SOL/runtime/node.exe',
+            'dist/windows/SOL/apps/server/dist/index.js',
+            'dist/windows/SOL/apps/server/dist/database/migrate.js',
+            'dist/windows/SOL/packages/database/migrations/0001_initial.sql',
+            'dist/windows/SOL/.env.example'
+          )
+          foreach ($path in $required) { if (-not (Test-Path $path)) { throw "Missing package component: $path" } }
+          if (Test-Path dist/windows/SOL/.env) { throw 'Real .env must never be bundled' }
+          & dist/windows/SOL/runtime/node.exe --check dist/windows/SOL/apps/server/dist/database/migrate.js
+          if ($LASTEXITCODE -ne 0) { throw 'Migration entry syntax check failed' }
+      - name: Create preview ZIP
+        shell: pwsh
+        run: |
+          Compress-Archive -Path dist/windows/SOL -DestinationPath dist/SOL-Windows.zip -CompressionLevel Optimal
+          $hash=(Get-FileHash dist/SOL-Windows.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          Write-Host "SHA256=$hash"
+      - name: Publish preview
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag='sol-windows-preview-pr12'
+          gh release delete $tag -y --cleanup-tag 2>$null
+          gh release create $tag dist/SOL-Windows.zip --target $env:GITHUB_SHA --title 'SOL Windows preview · Neon setup + reset' --notes 'First-run Neon page, automatic migrations, Settings/reset controls, and Nexo dashboard access.' --prerelease
