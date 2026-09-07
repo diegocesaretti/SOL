@@ -2,7 +2,7 @@ name: Windows portable package
 
 on:
   push:
-    branches: [ main, feat/windows-standalone-package ]
+    branches: [ main, feat/windows-standalone-package, fix/windows-package-flat-node-modules ]
   workflow_dispatch:
 
 permissions:
@@ -44,13 +44,22 @@ jobs:
         shell: pwsh
         run: pnpm build
 
+      # Do not archive pnpm's linked node_modules layout. Windows ZIP extraction can
+      # lose those links, leaving packages such as `pg` unresolved at runtime.
+      # Build a real, flat production dependency tree inside the portable folder.
       - name: Create production server deployment
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force dist/windows/SOL/apps | Out-Null
-          pnpm --filter @sol/server deploy --prod --legacy dist/windows/SOL/apps/server
-          Remove-Item dist/windows/SOL/apps/server/dist -Recurse -Force -ErrorAction SilentlyContinue
-          Copy-Item apps/server/dist dist/windows/SOL/apps/server/dist -Recurse -Force
+          $server = 'dist/windows/SOL/apps/server'
+          New-Item -ItemType Directory -Force $server | Out-Null
+          Copy-Item apps/server/package.json "$server/package.json" -Force
+          Push-Location $server
+          try {
+            npm install --omit=dev --ignore-scripts --no-package-lock --no-audit --no-fund
+          } finally {
+            Pop-Location
+          }
+          Copy-Item apps/server/dist "$server/dist" -Recurse -Force
 
       - name: Add portable Node runtime and SOL support files
         shell: pwsh
@@ -67,6 +76,20 @@ jobs:
           dotnet publish packaging/windows/SolLauncher/SolLauncher.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o dist/windows/launcher
           Copy-Item dist/windows/launcher/SOL.exe dist/windows/SOL/SOL.exe
 
+      - name: Verify portable runtime resolves production packages
+        shell: pwsh
+        run: |
+          $node = (Resolve-Path 'dist/windows/SOL/runtime/node.exe').Path
+          Push-Location 'dist/windows/SOL/apps/server'
+          try {
+            & $node --input-type=module -e "await import('pg'); await import('pino'); await import('zod'); await import('qrcode'); await import('baileys'); console.log('portable production dependencies resolve')"
+            if ($LASTEXITCODE -ne 0) { throw 'Portable Node dependency resolution failed' }
+            & $node --input-type=module -e "await import('./dist/database/client.js'); console.log('database client imports successfully')"
+            if ($LASTEXITCODE -ne 0) { throw 'Portable database client import failed' }
+          } finally {
+            Pop-Location
+          }
+
       - name: Verify package structure
         shell: pwsh
         run: |
@@ -74,7 +97,8 @@ jobs:
             'dist/windows/SOL/SOL.exe',
             'dist/windows/SOL/runtime/node.exe',
             'dist/windows/SOL/apps/server/dist/index.js',
-            'dist/windows/SOL/apps/server/node_modules',
+            'dist/windows/SOL/apps/server/node_modules/pg/package.json',
+            'dist/windows/SOL/apps/server/node_modules/pino/package.json',
             'dist/windows/SOL/scripts/windows/sol-tray.ps1',
             'dist/windows/SOL/.env.example'
           )
