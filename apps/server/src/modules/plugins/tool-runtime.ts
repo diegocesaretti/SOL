@@ -40,7 +40,9 @@ class PluginToolRuntime {
     const activeProviders = await this.activeProviders();
     for (const tool of registration.tools) {
       const conflict = activeProviders.find(([pluginId, provider]) =>
-        pluginId !== principal.pluginId && provider.registration.tools.some((candidate) => candidate.name === tool.name));
+        pluginId !== principal.pluginId &&
+        sameScope(provider.principal, principal) &&
+        provider.registration.tools.some((candidate) => candidate.name === tool.name));
       if (conflict) throw new Error(`plugin_tool_name_conflict:${tool.name}:${conflict[0]}`);
     }
 
@@ -100,8 +102,14 @@ class PluginToolRuntime {
   private async activeProviders(): Promise<Array<[string, RuntimeToolProvider]>> {
     const result: Array<[string, RuntimeToolProvider]> = [];
     for (const [pluginId, provider] of this.providers) {
-      const snapshot = await pluginManager.get(pluginId).catch(() => undefined);
-      if (!snapshot || !snapshot.enabled || (snapshot.state !== "running" && snapshot.state !== "starting")) {
+      const [snapshot, runtimePrincipal] = await Promise.all([
+        pluginManager.get(pluginId).catch(() => undefined),
+        pluginManager.authenticateRuntimeToken(provider.token).catch(() => null),
+      ]);
+      const validToken = runtimePrincipal &&
+        runtimePrincipal.pluginId === pluginId &&
+        sameScope(runtimePrincipal, provider.principal);
+      if (!snapshot || !snapshot.enabled || !validToken || (snapshot.state !== "running" && snapshot.state !== "starting")) {
         this.providers.delete(pluginId);
         continue;
       }
