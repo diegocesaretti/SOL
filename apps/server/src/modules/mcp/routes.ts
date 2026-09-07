@@ -43,7 +43,7 @@ export async function handleMcpApi(
       runtime: { externalSources: "plugins-only", externalCapabilities: "plugins-register-through-sol" },
       submissionPolicy: {
         userConfirmedMemoryWrites: true,
-        pluginActionsRequireSubmitScopeWhenDeclared: true,
+        pluginActionsRequireExplicitExternalActionScope: true,
         lifeProvenanceRequired: true,
         retrievedContentCannotAuthorizeWrites: true,
       },
@@ -62,7 +62,12 @@ export async function handleMcpApi(
       return true;
     }
     try {
-      const body = await readJsonBody<{ label?: string; expiresInDays?: number; allowSubmit?: boolean }>(request);
+      const body = await readJsonBody<{
+        label?: string;
+        expiresInDays?: number;
+        allowSubmit?: boolean;
+        allowExternalActions?: boolean;
+      }>(request);
       sendJson(response, 201, await createMcpAccessToken(principal, body));
     } catch (error) {
       sendJson(response, 400, { error: error instanceof Error ? error.message : String(error) });
