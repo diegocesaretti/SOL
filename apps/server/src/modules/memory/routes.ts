@@ -10,6 +10,8 @@ import {
   type RememberMemoryInput,
 } from "./service.js";
 
+const BASE = "/v1/knowledge/memory";
+
 function requestUrl(request: IncomingMessage): URL {
   return new URL(request.url ?? "/", "http://sol.local");
 }
@@ -45,7 +47,7 @@ export async function handleMemoryApi(
   response: ServerResponse,
   principal: AuthPrincipal,
 ): Promise<boolean> {
-  if (path === "/v1/memory/search" && request.method === "GET") {
+  if (path === `${BASE}/search` && request.method === "GET") {
     const url = requestUrl(request);
     const limitRaw = Number(url.searchParams.get("limit") ?? "30");
     const includeInactive = url.searchParams.get("includeInactive") === "1";
@@ -59,7 +61,7 @@ export async function handleMemoryApi(
     return true;
   }
 
-  if (path === "/v1/memory/remember" && request.method === "POST") {
+  if (path === `${BASE}/remember` && request.method === "POST") {
     const body = await jsonBody<RememberMemoryInput & { confirmedByUser?: boolean }>(request, response);
     if (!body) return true;
     if (body.confirmedByUser !== true) {
@@ -75,7 +77,7 @@ export async function handleMemoryApi(
     return true;
   }
 
-  const correction = path.match(/^\/v1\/memory\/([0-9a-f-]{36})\/correct$/i);
+  const correction = path.match(/^\/v1\/knowledge\/memory\/([0-9a-f-]{36})\/correct$/i);
   if (correction && request.method === "POST") {
     const body = await jsonBody<CorrectMemoryInput & { confirmedByUser?: boolean }>(request, response);
     if (!body) return true;
@@ -92,7 +94,7 @@ export async function handleMemoryApi(
     return true;
   }
 
-  const forgetting = path.match(/^\/v1\/memory\/([0-9a-f-]{36})\/forget$/i);
+  const forgetting = path.match(/^\/v1\/knowledge\/memory\/([0-9a-f-]{36})\/forget$/i);
   if (forgetting && request.method === "POST") {
     const body = await jsonBody<{ confirmedByUser?: boolean }>(request, response);
     if (!body) return true;
