@@ -1,0 +1,110 @@
+{
+  "schemaVersion": 1,
+  "id": "home-assistant",
+  "name": "Home Assistant",
+  "version": "0.1.0",
+  "description": "Home Assistant bridge for SOL with persistent state cache, person identity sync and MCP tools for Codex.",
+  "runtime": "node",
+  "entry": "index.mjs",
+  "args": [],
+  "autoStart": true,
+  "restartPolicy": "on-failure",
+  "capabilities": [
+    "input.homeassistant",
+    "identity.homeassistant",
+    "mcp.homeassistant",
+    "cache.homeassistant",
+    "tool.homeassistant"
+  ],
+  "permissions": [
+    "input.register",
+    "input.write",
+    "input.status",
+    "identity.write",
+    "mcp.register",
+    "network.local",
+    "filesystem.plugin-data"
+  ],
+  "settings": [
+    {
+      "key": "home_assistant_url",
+      "label": "URL de Home Assistant",
+      "type": "text",
+      "description": "URL base, por ejemplo http://homeassistant.local:8123.",
+      "env": "HA_URL",
+      "required": true
+    },
+    {
+      "key": "home_assistant_token",
+      "label": "Token de larga duración",
+      "type": "secret",
+      "description": "Long-lived access token de Home Assistant. SOL lo inyecta solamente al proceso del plugin.",
+      "env": "HA_TOKEN",
+      "required": true
+    },
+    {
+      "key": "api_port",
+      "label": "Puerto API local",
+      "type": "number",
+      "env": "HA_SOL_API_PORT",
+      "required": false,
+      "default": 8767,
+      "min": 1024,
+      "max": 65535
+    },
+    {
+      "key": "cache_flush_ms",
+      "label": "Persistencia del caché (ms)",
+      "type": "number",
+      "env": "HA_SOL_CACHE_FLUSH_MS",
+      "required": false,
+      "default": 2000,
+      "min": 250,
+      "max": 60000
+    },
+    {
+      "key": "reconcile_seconds",
+      "label": "Reconciliación completa (segundos)",
+      "type": "number",
+      "env": "HA_SOL_RECONCILE_SECONDS",
+      "required": false,
+      "default": 300,
+      "min": 30,
+      "max": 3600
+    },
+    {
+      "key": "person_sync",
+      "label": "Sincronización de personas",
+      "type": "select",
+      "env": "HA_SOL_PERSON_SYNC",
+      "required": false,
+      "default": "safe-link",
+      "options": [
+        { "value": "off", "label": "Desactivada" },
+        { "value": "external", "label": "Personas externas" },
+        { "value": "safe-link", "label": "Vincular por nombre único" }
+      ]
+    },
+    {
+      "key": "ingest_presence_changes",
+      "label": "Guardar cambios de presencia en Life",
+      "type": "boolean",
+      "env": "HA_SOL_INGEST_PRESENCE",
+      "required": false,
+      "default": true
+    },
+    {
+      "key": "allow_control",
+      "label": "Permitir control desde Codex",
+      "type": "boolean",
+      "env": "HA_SOL_ALLOW_CONTROL",
+      "required": false,
+      "default": false
+    }
+  ],
+  "distribution": {
+    "type": "github-release",
+    "asset": "HomeAssistant.solplugin",
+    "tag": "home-assistant-plugin-latest"
+  }
+}
