@@ -1,0 +1,114 @@
+import type { SolPluginRuntimePrincipal, SolPluginScope } from "./types.js";
+import { pluginManager } from "./runtime.js";
+import {
+  type SolPluginToolRegistration,
+  type SolPluginToolView,
+  validatePluginToolRegistration,
+} from "./tool-registry.js";
+
+interface RuntimeToolProvider {
+  principal: SolPluginRuntimePrincipal;
+  token: string;
+  registration: SolPluginToolRegistration;
+  registeredAt: string;
+}
+
+function sameScope(a: SolPluginScope, b: SolPluginScope): boolean {
+  return a.householdId === b.householdId && a.memberId === b.memberId;
+}
+
+function objectInput(value: unknown): Record<string, unknown> {
+  if (value === undefined || value === null) return {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("plugin_tool_input_must_be_object");
+  return value as Record<string, unknown>;
+}
+
+class PluginToolRuntime {
+  private readonly providers = new Map<string, RuntimeToolProvider>();
+
+  async register(
+    principal: SolPluginRuntimePrincipal,
+    token: string,
+    value: unknown,
+  ): Promise<SolPluginToolView[]> {
+    const registration = validatePluginToolRegistration(value);
+    const snapshot = await pluginManager.get(principal.pluginId);
+    if (snapshot.state !== "running" && snapshot.state !== "starting") throw new Error("plugin_runtime_not_running");
+    if (!snapshot.approvedPermissions.includes("tool.register")) throw new Error("plugin_permission_required:tool.register");
+    if (!snapshot.approvedPermissions.includes("tool.execute")) throw new Error("plugin_permission_required:tool.execute");
+
+    const activeProviders = await this.activeProviders();
+    for (const tool of registration.tools) {
+      const conflict = activeProviders.find(([pluginId, provider]) =>
+        pluginId !== principal.pluginId && provider.registration.tools.some((candidate) => candidate.name === tool.name));
+      if (conflict) throw new Error(`plugin_tool_name_conflict:${tool.name}:${conflict[0]}`);
+    }
+
+    this.providers.set(principal.pluginId, {
+      principal: { ...principal, permissions: [...principal.permissions] },
+      token,
+      registration,
+      registeredAt: new Date().toISOString(),
+    });
+    return registration.tools.map((tool) => ({ ...tool, pluginId: principal.pluginId }));
+  }
+
+  async list(scope: SolPluginScope, allowSubmit: boolean): Promise<SolPluginToolView[]> {
+    const providers = await this.activeProviders();
+    return providers
+      .filter(([, provider]) => sameScope(provider.principal, scope))
+      .flatMap(([pluginId, provider]) => provider.registration.tools
+        .filter((tool) => allowSubmit || !tool.requiresSubmit)
+        .map((tool) => ({ ...tool, pluginId })))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  async execute(
+    scope: SolPluginScope,
+    allowSubmit: boolean,
+    toolName: string,
+    rawInput: unknown,
+  ): Promise<unknown> {
+    const providers = await this.activeProviders();
+    const entry = providers.find(([, provider]) =>
+      sameScope(provider.principal, scope) && provider.registration.tools.some((tool) => tool.name === toolName));
+    if (!entry) throw new Error("plugin_tool_not_found");
+    const [pluginId, provider] = entry;
+    const tool = provider.registration.tools.find((candidate) => candidate.name === toolName)!;
+    if (tool.requiresSubmit && !allowSubmit) throw new Error("mcp_submit_scope_required");
+    const snapshot = await pluginManager.get(pluginId);
+    if (snapshot.state !== "running") throw new Error("plugin_tool_provider_not_running");
+    if (!snapshot.approvedPermissions.includes("tool.execute")) throw new Error("plugin_permission_required:tool.execute");
+
+    const response = await fetch(`${provider.registration.baseUrl}/api/sol-tools/${encodeURIComponent(toolName)}`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${provider.token}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(objectInput(rawInput)),
+      signal: AbortSignal.timeout(20_000),
+    });
+    const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
+    if (!response.ok) {
+      const reason = typeof payload.error === "string" ? payload.error : `HTTP ${response.status}`;
+      throw new Error(`plugin_tool_failed:${pluginId}:${toolName}:${reason}`);
+    }
+    return payload;
+  }
+
+  private async activeProviders(): Promise<Array<[string, RuntimeToolProvider]>> {
+    const result: Array<[string, RuntimeToolProvider]> = [];
+    for (const [pluginId, provider] of this.providers) {
+      const snapshot = await pluginManager.get(pluginId).catch(() => undefined);
+      if (!snapshot || !snapshot.enabled || (snapshot.state !== "running" && snapshot.state !== "starting")) {
+        this.providers.delete(pluginId);
+        continue;
+      }
+      result.push([pluginId, provider]);
+    }
+    return result;
+  }
+}
+
+export const pluginToolRuntime = new PluginToolRuntime();
