@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "id": "hello-sol",
+  "name": "Hello SOL",
+  "version": "0.1.0",
+  "description": "Plugin de ejemplo para validar instalación, health, logs y supervisión de procesos.",
+  "runtime": "node",
+  "entry": "index.mjs",
+  "autoStart": true,
+  "restartPolicy": "on-failure",
+  "capabilities": ["demo.health", "demo.logs"],
+  "permissions": []
+}

@@ -11,6 +11,7 @@ import {
   updateSourceAccount,
   type SourceAccountRecord,
 } from "../identity/source-accounts.js";
+import { handlePluginsApi } from "../plugins/routes.js";
 
 function adult(principal: AuthPrincipal): boolean {
   return principal.role === "owner" || principal.role === "adult";
@@ -83,6 +84,11 @@ export async function handleInputsApi(
   response: ServerResponse,
   principal: AuthPrincipal,
 ): Promise<boolean> {
+  if (path === "/v1/inputs/plugins" || path.startsWith("/v1/inputs/plugins/")) {
+    const pluginPath = path.replace(/^\/v1\/inputs\/plugins/, "/v1/plugins");
+    return handlePluginsApi(pluginPath, request, response, principal);
+  }
+
   if (path === "/v1/inputs" && request.method === "GET") {
     const accounts = await listSourceAccounts(principal.householdId, principal.memberId, adult(principal));
     const visible = accounts.filter((account) => canRead(principal, account));
