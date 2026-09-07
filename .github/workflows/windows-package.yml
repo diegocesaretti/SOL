@@ -59,6 +59,8 @@ jobs:
             Pop-Location
           }
           Copy-Item apps/server/dist "$server/dist" -Recurse -Force
+          New-Item -ItemType Directory -Force dist/windows/SOL/packages/database | Out-Null
+          Copy-Item packages/database/migrations dist/windows/SOL/packages/database/migrations -Recurse -Force
 
       - name: Add portable Node runtime and SOL support files
         shell: pwsh
@@ -85,6 +87,8 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw 'Portable Node dependency resolution failed' }
             & $node --input-type=module -e "await import('./dist/database/client.js'); console.log('database client imports successfully')"
             if ($LASTEXITCODE -ne 0) { throw 'Portable database client import failed' }
+            & $node --check dist/database/migrate.js
+            if ($LASTEXITCODE -ne 0) { throw 'Portable migration entry failed syntax check' }
           } finally {
             Pop-Location
           }
@@ -96,8 +100,10 @@ jobs:
             'dist/windows/SOL/SOL.exe',
             'dist/windows/SOL/runtime/node.exe',
             'dist/windows/SOL/apps/server/dist/index.js',
+            'dist/windows/SOL/apps/server/dist/database/migrate.js',
             'dist/windows/SOL/apps/server/node_modules/pg/package.json',
             'dist/windows/SOL/apps/server/node_modules/zod/package.json',
+            'dist/windows/SOL/packages/database/migrations/0001_initial.sql',
             'dist/windows/SOL/scripts/windows/sol-tray.ps1',
             'dist/windows/SOL/.env.example'
           )
