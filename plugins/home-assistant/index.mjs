@@ -81,16 +81,22 @@ async function syncPeople() {
   const people = cache.listPeople();
   const signature = people.map((person) => `${person.entityId}:${person.attributes?.friendly_name || ""}`).sort().join("|");
   if (signature === lastPersonSignature) return;
-  lastPersonSignature = signature;
+  let allSucceeded = true;
   for (const person of people) {
     const label = person.attributes?.friendly_name || person.registry?.name || person.entityId;
-    await sol.upsertPerson({
-      entityId: person.entityId,
-      label,
-      autoLinkMember: config.personSync === "safe-link",
-      metadata: { source: "home_assistant", entityId: person.entityId }
-    }).catch((error) => console.warn(`SOL person sync failed for ${person.entityId}: ${error?.message || error}`));
+    try {
+      await sol.upsertPerson({
+        entityId: person.entityId,
+        label,
+        autoLinkMember: config.personSync === "safe-link",
+        metadata: { source: "home_assistant", entityId: person.entityId }
+      });
+    } catch (error) {
+      allSucceeded = false;
+      console.warn(`SOL person sync failed for ${person.entityId}: ${error?.message || error}`);
+    }
   }
+  if (allSucceeded) lastPersonSignature = signature;
 }
 
 let presenceQueue = Promise.resolve();
