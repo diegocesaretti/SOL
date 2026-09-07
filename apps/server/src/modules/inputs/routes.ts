@@ -2,8 +2,6 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { db } from "../../database/client.js";
 import { readJsonBody, sendJson } from "../../http.js";
 import type { AuthPrincipal } from "../auth/session.js";
-import { homeAssistantManager } from "../connectors/home-assistant/manager.js";
-import { whatsappManager } from "../connectors/whatsapp/manager.js";
 import {
   deleteSourceAccount,
   getSourceAccount,
@@ -29,11 +27,6 @@ function canManage(principal: AuthPrincipal, account: SourceAccountRecord): bool
   return adult(principal);
 }
 
-function runtimeFor(account: SourceAccountRecord): Record<string, unknown> | undefined {
-  if (account.provider === "whatsapp") return { ...whatsappManager.getStatus(account.id) };
-  if (account.provider === "home_assistant") return { ...homeAssistantManager.getStatus(account.id) };
-  return undefined;
-}
 
 async function sourceStats(accountIds: string[]): Promise<Map<string, Record<string, unknown>>> {
   if (!accountIds.length) return new Map();
@@ -103,7 +96,6 @@ export async function handleInputsApi(
           items24h: 0,
           textItems: 0,
         },
-        runtime: runtimeFor(account),
       })),
       server: {
         ok: true,
@@ -200,20 +192,12 @@ export async function handleInputsApi(
   }
 
   if (!action && request.method === "DELETE") {
-    try {
-      if (account.provider === "whatsapp") await whatsappManager.stopAll();
-      if (account.provider === "home_assistant") await homeAssistantManager.stopAll();
-      const deleted = await deleteSourceAccount(sourceAccountId, principal.householdId);
-      if (account.provider === "whatsapp") {
-        void whatsappManager.startLinkedAccounts().catch((error) => console.error("WhatsApp restart after input removal failed", error));
-      }
-      if (account.provider === "home_assistant") {
-        void homeAssistantManager.startConfiguredAccounts().catch((error) => console.error("Home Assistant restart after input removal failed", error));
-      }
-      sendJson(response, deleted ? 200 : 404, { ok: deleted });
-    } catch (error) {
-      sendJson(response, 503, { error: error instanceof Error ? error.message : String(error) });
+    if ((account.authMode ?? "").startsWith("plugin:")) {
+      sendJson(response, 409, { error: "input_is_plugin_managed", hint: "Manage this account from its plugin." });
+      return true;
     }
+    const deleted = await deleteSourceAccount(sourceAccountId, principal.householdId);
+    sendJson(response, deleted ? 200 : 404, { ok: deleted });
     return true;
   }
 

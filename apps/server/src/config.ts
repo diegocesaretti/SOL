@@ -46,8 +46,6 @@ function enumEnv<const T extends readonly string[]>(name: string, allowed: T, fa
 const codexHome = optionalEnv("SOL_CODEX_HOME") ?? resolve(repoRoot, ".sol", "codex");
 const host = process.env.SOL_HOST ?? "127.0.0.1";
 const port = integerEnv("SOL_PORT", 3000);
-const googleClientId = optionalEnv("SOL_GOOGLE_CLIENT_ID");
-const googleClientSecret = optionalEnv("SOL_GOOGLE_CLIENT_SECRET");
 
 export const config = {
   repoRoot,
@@ -63,11 +61,6 @@ export const config = {
   sessionDays: integerEnv("SOL_SESSION_DAYS", 30),
   cookieSecure: booleanEnv("SOL_COOKIE_SECURE", false),
 
-  // Nexo is the default product/runtime profile. Legacy provider adapters remain
-  // available for migration/debugging, but they do not background-sync unless
-  // explicitly re-enabled. Internal AI/Executive automation is also opt-in: the
-  // normal Nexo architecture expects the external Codex host to reason via MCP.
-  nexoLegacyConnectorsEnabled: booleanEnv("NEXO_LEGACY_CONNECTORS", false),
   nexoInternalAutomationEnabled: booleanEnv("NEXO_INTERNAL_AUTOMATION", false),
 
   // Optional legacy AI enrichment. Nexo leaves this dormant by default and exposes
@@ -86,28 +79,7 @@ export const config = {
     optionalEnv("SOL_CODEX_CWD") ?? resolve(codexHome, "workspace"),
   codexRequestTimeoutMs: integerEnv("SOL_CODEX_REQUEST_TIMEOUT_MS", 30_000),
   outboxPollMs: integerEnv("SOL_OUTBOX_RECOVERY_MS", 30 * 60 * 1000),
-  googleClientId,
-  googleClientSecret,
-  googleRedirectUri:
-    optionalEnv("SOL_GOOGLE_REDIRECT_URI") ??
-    `http://${host}:${port}/v1/google/callback`,
-  gmailClientId: optionalEnv("SOL_GMAIL_CLIENT_ID") ?? googleClientId,
-  gmailClientSecret: optionalEnv("SOL_GMAIL_CLIENT_SECRET") ?? googleClientSecret,
-  gmailRedirectUri:
-    optionalEnv("SOL_GMAIL_REDIRECT_URI") ??
-    `http://${host}:${port}/v1/gmail/callback`,
-  mercadoLibreClientId: optionalEnv("SOL_MERCADOLIBRE_CLIENT_ID"),
-  mercadoLibreClientSecret: optionalEnv("SOL_MERCADOLIBRE_CLIENT_SECRET"),
-  mercadoLibreRedirectUri: optionalEnv("SOL_MERCADOLIBRE_REDIRECT_URI"),
-  mercadoLibreAuthUrl:
-    optionalEnv("SOL_MERCADOLIBRE_AUTH_URL") ??
-    "https://auth.mercadolibre.com.ar/authorization",
-  calendarSyncMs: integerEnv("SOL_CALENDAR_SYNC_MS", 60 * 60 * 1000),
-  gmailSyncMs: integerEnv("SOL_GMAIL_SYNC_MS", 15 * 60 * 1000),
-  mercadoLibreSyncMs: integerEnv("SOL_MERCADOLIBRE_SYNC_MS", 60 * 60 * 1000),
   executivePollMs: integerEnv("SOL_EXECUTIVE_POLL_MS", 5 * 60 * 1000),
-  whatsappNexoUrl: optionalEnv("WHATSAPP_NEXO_URL") ?? "http://127.0.0.1:3210",
-  whatsappNexoAutomationToken: optionalEnv("NEXO_AUTOMATION_TOKEN"),
   knowledgeConsolidationMs: integerEnv("SOL_KNOWLEDGE_CONSOLIDATION_MS", 6 * 60 * 60 * 1000),
   knowledgeBatchesPerRun: integerEnv("SOL_KNOWLEDGE_BATCHES_PER_RUN", 2),
   knowledgeBatchItems: integerEnv("SOL_KNOWLEDGE_BATCH_ITEMS", 12),
