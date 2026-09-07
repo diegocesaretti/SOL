@@ -10,6 +10,15 @@ on:
       - "packages/database/migrations/**"
       - ".github/workflows/home-assistant-plugin.yml"
   push:
+    branches:
+      - main
+    paths:
+      - "plugins/home-assistant/**"
+      - "apps/server/src/modules/plugins/**"
+      - "apps/server/src/modules/ingestion/plugin-input-routes.ts"
+      - "apps/server/src/mcp/**"
+      - "packages/database/migrations/**"
+      - ".github/workflows/home-assistant-plugin.yml"
     tags:
       - "home-assistant-plugin-v*"
   workflow_dispatch:
@@ -50,12 +59,14 @@ jobs:
           path: dist/HomeAssistant.solplugin
           if-no-files-found: error
 
-      - name: Publish tagged plugin release
-        if: startsWith(github.ref, 'refs/tags/home-assistant-plugin-v')
+      - name: Publish stable plugin release
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/home-assistant-plugin-v')
         uses: softprops/action-gh-release@v2
         with:
           files: dist/HomeAssistant.solplugin
           tag_name: home-assistant-plugin-latest
+          target_commitish: ${{ github.sha }}
           name: Home Assistant SOL plugin
           body: "Latest Home Assistant plugin package for SOL."
           prerelease: false
+          overwrite_files: true
