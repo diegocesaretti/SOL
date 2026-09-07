@@ -29,7 +29,8 @@ CREATE TABLE plugin_mcp_tools (
   owner_member_id uuid REFERENCES members(id) ON DELETE CASCADE,
   visibility visibility_scope NOT NULL DEFAULT 'family',
   updated_at timestamptz NOT NULL DEFAULT now(),
-  PRIMARY KEY(household_id, plugin_id, name)
+  PRIMARY KEY(household_id, plugin_id, name),
+  UNIQUE(household_id, name)
 );
 CREATE INDEX plugin_mcp_tools_household_idx
   ON plugin_mcp_tools(household_id, name);
