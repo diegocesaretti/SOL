@@ -86,13 +86,14 @@ internal static class Program
         if (!File.Exists(env))
         {
             if (File.Exists(example)) File.Copy(example, env, overwrite: false);
-            MessageBox(IntPtr.Zero,
-                "Es el primer inicio de SOL. Se creó .env junto a SOL.exe. Configurá DATABASE_URL con tu conexión de Neon, guardá el archivo y volvé a abrir SOL.",
-                "SOL · configuración inicial", 0x40);
-            if (File.Exists(env))
-            {
-                Process.Start(new ProcessStartInfo("notepad.exe", $"\"{env}\"") { UseShellExecute = true });
-            }
+            ShowDatabaseConfiguration(env, firstRun: true);
+            return;
+        }
+
+        var databaseUrl = ReadEnvValue(env, "DATABASE_URL");
+        if (!HasConfiguredDatabaseUrl(databaseUrl))
+        {
+            ShowDatabaseConfiguration(env, firstRun: false);
             return;
         }
 
@@ -145,6 +146,60 @@ internal static class Program
             lock (log) log.WriteLine($"[{DateTimeOffset.Now:O}] LAUNCHER {ex}");
             MessageBox(IntPtr.Zero, $"No se pudo iniciar SOL.\n\n{ex.Message}\n\nLog: {logPath}", "SOL", 0x10);
         }
+    }
+
+    private static void ShowDatabaseConfiguration(string envPath, bool firstRun)
+    {
+        var prefix = firstRun
+            ? "Es el primer inicio de SOL. Se creó .env junto a SOL.exe."
+            : "SOL detectó que DATABASE_URL todavía contiene valores de ejemplo o está vacío.";
+
+        MessageBox(IntPtr.Zero,
+            $"{prefix}\n\nPegá en DATABASE_URL la cadena de conexión real de Neon, guardá el archivo y volvé a abrir SOL.\n\nSOL no iniciará servicios hasta que la base esté configurada.",
+            "SOL · configurar Neon",
+            0x40);
+
+        if (File.Exists(envPath))
+        {
+            Process.Start(new ProcessStartInfo("notepad.exe", $"\"{envPath}\"") { UseShellExecute = true });
+        }
+    }
+
+    private static string? ReadEnvValue(string envPath, string key)
+    {
+        try
+        {
+            foreach (var line in File.ReadLines(envPath))
+            {
+                var trimmed = line.Trim();
+                if (trimmed.Length == 0 || trimmed.StartsWith('#')) continue;
+                var equals = trimmed.IndexOf('=');
+                if (equals <= 0) continue;
+                if (!trimmed[..equals].Trim().Equals(key, StringComparison.OrdinalIgnoreCase)) continue;
+                return trimmed[(equals + 1)..].Trim().Trim('"');
+            }
+        }
+        catch { }
+        return null;
+    }
+
+    private static bool HasConfiguredDatabaseUrl(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return false;
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri)) return false;
+        if (!uri.Scheme.Equals("postgresql", StringComparison.OrdinalIgnoreCase) &&
+            !uri.Scheme.Equals("postgres", StringComparison.OrdinalIgnoreCase)) return false;
+
+        var host = uri.Host.Trim().ToLowerInvariant();
+        if (host.Length == 0 || host is "host" or "localhost.example") return false;
+
+        var userInfo = Uri.UnescapeDataString(uri.UserInfo ?? string.Empty).ToLowerInvariant();
+        if (userInfo.Length == 0 || userInfo.StartsWith("user:") || userInfo.Contains(":password")) return false;
+
+        var database = uri.AbsolutePath.Trim('/').ToLowerInvariant();
+        if (database.Length == 0 || database == "database") return false;
+
+        return true;
     }
 
     private static int ReadPort(string envPath, int fallback)
