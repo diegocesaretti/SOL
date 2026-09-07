@@ -55,8 +55,19 @@ async function body<T>(request: IncomingMessage, response: ServerResponse): Prom
   }
 }
 
+export function transientPluginInputDatabaseError(error: unknown): boolean {
+  const code = error && typeof error === "object" && "code" in error
+    ? String((error as { code?: unknown }).code ?? "")
+    : "";
+  return code === "40P01" || code === "40001";
+}
+
 function apiError(response: ServerResponse, error: unknown): void {
   const message = error instanceof Error ? error.message : String(error);
+  if (transientPluginInputDatabaseError(error)) {
+    sendJson(response, 503, { error: "plugin_input_temporarily_unavailable", detail: message });
+    return;
+  }
   if (message === "plugin_input_not_found") {
     sendJson(response, 404, { error: message });
     return;
