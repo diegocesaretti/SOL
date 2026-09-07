@@ -102,7 +102,8 @@ process.on('SIGTERM',()=>process.exit(0));
     assert.equal(started.state, "running");
     assert.ok(started.pid);
     await waitFor(async () => (await manager.get("hello-test")).health === "healthy");
-    assert.ok((await manager.getLogs("hello-test")).some((entry) => entry.message.includes("hello from test")));
+    await waitFor(async () => (await manager.getLogs("hello-test"))
+      .some((entry) => entry.message.includes("hello from test")));
 
     const firstPid = started.pid;
     const restarted = await manager.restart("hello-test");
@@ -116,6 +117,64 @@ process.on('SIGTERM',()=>process.exit(0));
 
     await manager.uninstall("hello-test");
     assert.deepEqual(await manager.list(), []);
+  } finally {
+    await manager.shutdown().catch(() => undefined);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("PluginManager stages auto-start plugins until required settings are configured", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sol-plugin-settings-test-"));
+  const manager = new PluginManager({ rootDir: root, coreUrl: "http://127.0.0.1:3000" });
+  try {
+    const manifest = {
+      schemaVersion: 1,
+      id: "configured-test",
+      name: "Configured Test",
+      version: "1.0.0",
+      runtime: "node",
+      entry: "index.mjs",
+      autoStart: true,
+      restartPolicy: "on-failure",
+      capabilities: [],
+      permissions: [],
+      settings: [
+        {
+          key: "endpoint",
+          label: "Endpoint",
+          type: "text",
+          env: "TEST_ENDPOINT",
+          required: true,
+        },
+      ],
+    };
+    const script = `
+console.log(JSON.stringify({type:'sol.plugin.ready',health:'healthy',details:{endpoint:process.env.TEST_ENDPOINT}}));
+setInterval(()=>{},1000);
+process.on('SIGTERM',()=>process.exit(0));
+`;
+    const installed = await manager.installPackage(storedZip({
+      "sol-plugin.json": JSON.stringify(manifest),
+      "index.mjs": script,
+    }));
+
+    assert.equal(installed.state, "stopped");
+    assert.equal(installed.enabled, false);
+    assert.deepEqual(installed.settings, {});
+    assert.ok((await manager.getLogs("configured-test"))
+      .some((entry) => entry.message.includes("Configuration required before start: endpoint")));
+
+    await assert.rejects(() => manager.start("configured-test"), /plugin_configuration_required:endpoint/);
+    assert.equal((await manager.get("configured-test")).enabled, false);
+
+    const configured = await manager.updateSettings("configured-test", {
+      endpoint: "http://example.local:8123",
+    });
+    assert.equal(configured.enabled, true);
+    assert.equal(configured.state, "running");
+    await waitFor(async () => (await manager.get("configured-test")).health === "healthy");
+    const ready = await manager.get("configured-test");
+    assert.equal(ready.healthDetails?.endpoint, "http://example.local:8123");
   } finally {
     await manager.shutdown().catch(() => undefined);
     await rm(root, { recursive: true, force: true });
