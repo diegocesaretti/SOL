@@ -29,6 +29,10 @@ function schema(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+function toolPrefix(pluginId: string): string {
+  return pluginId.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+}
+
 export interface PluginMcpTool {
   pluginId: string;
   name: string;
@@ -44,12 +48,14 @@ export async function registerPluginMcpTools(
   input: { callbackUrl?: unknown; tools?: unknown },
 ): Promise<PluginMcpTool[]> {
   const url = callbackUrl(input.callbackUrl);
+  const prefix = `${toolPrefix(principal.pluginId)}_`;
   if (!Array.isArray(input.tools) || input.tools.length > 40) throw new Error("tools_must_be_array_with_at_most_40_items");
   const parsed = input.tools.map((raw, index) => {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error(`tools_${index}_must_be_object`);
     const item = raw as Record<string, unknown>;
     const name = typeof item.name === "string" ? item.name.trim().toLowerCase() : "";
     if (!TOOL_RE.test(name)) throw new Error(`tools_${index}_name_invalid`);
+    if (!name.startsWith(prefix)) throw new Error(`tools_${index}_name_must_start_with_${prefix}`);
     const description = typeof item.description === "string" ? item.description.trim() : "";
     if (!description || description.length > 1000) throw new Error(`tools_${index}_description_invalid`);
     const visibility = item.visibility === "private" ? "private" as const : "family" as const;
