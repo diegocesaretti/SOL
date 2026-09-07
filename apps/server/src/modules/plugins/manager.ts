@@ -419,8 +419,11 @@ export class PluginManager {
         delete pluginEnv[key];
       }
     }
+    const pluginDataDir = resolve(this.rootDir, "..", "plugin-data", plugin.manifest.id);
+    await mkdir(pluginDataDir, { recursive: true });
     pluginEnv.SOL_PLUGIN_ID = plugin.manifest.id;
     pluginEnv.SOL_PLUGIN_ROOT = plugin.directory;
+    pluginEnv.SOL_PLUGIN_DATA_DIR = pluginDataDir;
     pluginEnv.SOL_CORE_URL = this.coreUrl;
     pluginEnv.SOL_PLUGIN_API_URL = this.coreUrl;
     pluginEnv.SOL_PLUGIN_APPROVED_PERMISSIONS = JSON.stringify(plugin.approvedPermissions);
