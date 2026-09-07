@@ -3,6 +3,7 @@ import { pluginManager } from "./runtime.js";
 import {
   type SolPluginToolRegistration,
   type SolPluginToolView,
+  validatePluginToolInput,
   validatePluginToolRegistration,
 } from "./tool-registry.js";
 
@@ -15,12 +16,6 @@ interface RuntimeToolProvider {
 
 function sameScope(a: SolPluginScope, b: SolPluginScope): boolean {
   return a.householdId === b.householdId && a.memberId === b.memberId;
-}
-
-function objectInput(value: unknown): Record<string, unknown> {
-  if (value === undefined || value === null) return {};
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("plugin_tool_input_must_be_object");
-  return value as Record<string, unknown>;
 }
 
 class PluginToolRuntime {
@@ -55,19 +50,19 @@ class PluginToolRuntime {
     return registration.tools.map((tool) => ({ ...tool, pluginId: principal.pluginId }));
   }
 
-  async list(scope: SolPluginScope, allowSubmit: boolean): Promise<SolPluginToolView[]> {
+  async list(scope: SolPluginScope, allowExternalActions: boolean): Promise<SolPluginToolView[]> {
     const providers = await this.activeProviders();
     return providers
       .filter(([, provider]) => sameScope(provider.principal, scope))
       .flatMap(([pluginId, provider]) => provider.registration.tools
-        .filter((tool) => allowSubmit || !tool.requiresSubmit)
+        .filter((tool) => allowExternalActions || !tool.requiresSubmit)
         .map((tool) => ({ ...tool, pluginId })))
       .sort((a, b) => a.name.localeCompare(b.name));
   }
 
   async execute(
     scope: SolPluginScope,
-    allowSubmit: boolean,
+    allowExternalActions: boolean,
     toolName: string,
     rawInput: unknown,
   ): Promise<unknown> {
@@ -77,7 +72,8 @@ class PluginToolRuntime {
     if (!entry) throw new Error("plugin_tool_not_found");
     const [pluginId, provider] = entry;
     const tool = provider.registration.tools.find((candidate) => candidate.name === toolName)!;
-    if (tool.requiresSubmit && !allowSubmit) throw new Error("mcp_submit_scope_required");
+    if (tool.requiresSubmit && !allowExternalActions) throw new Error("mcp_external_action_scope_required");
+    const input = validatePluginToolInput(tool, rawInput);
     const snapshot = await pluginManager.get(pluginId);
     if (snapshot.state !== "running") throw new Error("plugin_tool_provider_not_running");
     if (!snapshot.approvedPermissions.includes("tool.execute")) throw new Error("plugin_permission_required:tool.execute");
@@ -88,8 +84,8 @@ class PluginToolRuntime {
         authorization: `Bearer ${provider.token}`,
         "content-type": "application/json",
       },
-      body: JSON.stringify(objectInput(rawInput)),
-      signal: AbortSignal.timeout(20_000),
+      body: JSON.stringify(input),
+      signal: AbortSignal.timeout(130_000),
     });
     const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
     if (!response.ok) {
