@@ -1,4 +1,4 @@
-export type SolSection = "home" | "plugins" | "inputs" | "outputs" | "life" | "mcp" | "ai";
+export type SolSection = "home" | "plugins" | "inputs" | "outputs" | "life" | "mcp" | "ai" | "settings";
 
 export function solShellStyles(): string {
   return `
@@ -18,6 +18,7 @@ export function solSidebar(active: SolSection): string {
     ["life","/life","◫","Life"],
     ["mcp","/mcp","◇","MCP"],
     ["ai","/ai","✦","AI"],
+    ["settings","/settings","⚙","Config"],
   ];
   return `<aside class="sidebar"><div class="brand"><div class="brandmark">S</div><span>SOL</span></div><nav class="nav">${links.map(([id,href,icon,label])=>`<a href="${href}" class="${active===id?"active":""}"><span class="navicon">${icon}</span><span class="navlabel">${label}</span></a>`).join("")}</nav><div class="sidefoot"><div><span class="dot good"></span> SOL local</div><div style="margin-top:5px">servicios, memoria y contexto</div></div></aside>`;
 }
