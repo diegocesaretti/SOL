@@ -9,8 +9,11 @@ import {
   type SolPluginLogEntry,
   type SolPluginManifest,
   type SolPluginProcessState,
+  type SolPluginSettingValue,
   type SolPluginSnapshot,
+  type SolPluginSource,
   validatePluginManifest,
+  validateSettingValues,
 } from "./types.js";
 
 interface PluginManagerOptions {
@@ -22,16 +25,29 @@ interface PluginManagerOptions {
 
 interface PersistedPluginState {
   enabled: boolean;
+  approvedPermissions?: string[];
+  settings?: Record<string, SolPluginSettingValue>;
+  source?: SolPluginSource;
 }
 
 interface PersistedState {
   plugins: Record<string, PersistedPluginState>;
 }
 
+interface InstallPackageOptions {
+  approvedPermissions?: string[];
+  settings?: Record<string, SolPluginSettingValue>;
+  source?: SolPluginSource;
+  expectedManifest?: Pick<SolPluginManifest, "id" | "name" | "version" | "permissions">;
+}
+
 interface ManagedPlugin {
   manifest: SolPluginManifest;
   directory: string;
   enabled: boolean;
+  approvedPermissions: string[];
+  settings: Record<string, SolPluginSettingValue>;
+  source?: SolPluginSource;
   state: SolPluginProcessState;
   health: SolPluginHealth;
   healthDetails?: Record<string, unknown>;
@@ -69,6 +85,26 @@ function isWithin(parent: string, candidate: string): boolean {
   return target === root || target.startsWith(root + sep);
 }
 
+function sameStrings(a: string[], b: string[]): boolean {
+  return a.length === b.length && [...a].sort().every((value, index) => value === [...b].sort()[index]);
+}
+
+function approvedPermissions(manifest: SolPluginManifest, values?: string[]): string[] {
+  const approved = [...new Set((values ?? manifest.permissions).map((value) => String(value).trim().toLowerCase()).filter(Boolean))];
+  const unknown = approved.filter((permission) => !manifest.permissions.includes(permission));
+  if (unknown.length) throw new Error(`plugin_permission_not_requested:${unknown.join(",")}`);
+  const missing = manifest.permissions.filter((permission) => !approved.includes(permission));
+  if (missing.length) throw new Error(`plugin_permissions_required:${missing.join(",")}`);
+  return approved;
+}
+
+function assertExpectedManifest(actual: SolPluginManifest, expected?: InstallPackageOptions["expectedManifest"]): void {
+  if (!expected) return;
+  if (actual.id !== expected.id || actual.name !== expected.name || actual.version !== expected.version || !sameStrings(actual.permissions, expected.permissions)) {
+    throw new Error("github_plugin_package_manifest_mismatch");
+  }
+}
+
 export class PluginManager {
   private readonly rootDir: string;
   private readonly statePath: string;
@@ -101,10 +137,14 @@ export class PluginManager {
         const info = await stat(entryPath);
         if (!info.isFile()) throw new Error("plugin entry is not a file");
         if (this.plugins.has(manifest.id)) throw new Error(`duplicate plugin id ${manifest.id}`);
+        const saved = persisted.plugins[manifest.id];
         this.plugins.set(manifest.id, this.createRecord(
           manifest,
           directory,
-          persisted.plugins[manifest.id]?.enabled ?? manifest.autoStart,
+          saved?.enabled ?? manifest.autoStart,
+          saved?.approvedPermissions ?? manifest.permissions,
+          saved?.settings ?? {},
+          saved?.source,
         ));
       } catch (error) {
         console.error(`SOL plugin discovery ignored ${entry.name}: ${errorMessage(error)}`);
@@ -133,7 +173,26 @@ export class PluginManager {
     return plugin.logs.slice(-bounded);
   }
 
-  async installPackage(buffer: Buffer): Promise<SolPluginSnapshot> {
+  async getSettings(id: string): Promise<{ definitions: SolPluginManifest["settings"]; values: Record<string, SolPluginSettingValue> }> {
+    await this.init();
+    const plugin = this.requirePlugin(id);
+    return { definitions: plugin.manifest.settings, values: this.resolvedSettings(plugin) };
+  }
+
+  async updateSettings(id: string, values: unknown): Promise<SolPluginSnapshot> {
+    await this.init();
+    const plugin = this.requirePlugin(id);
+    plugin.settings = validateSettingValues(plugin.manifest.settings, values);
+    await this.persistState();
+    const running = !!plugin.child;
+    if (running) {
+      await this.terminate(plugin, true);
+      if (plugin.enabled) await this.startInternal(plugin, false);
+    }
+    return this.snapshot(plugin);
+  }
+
+  async installPackage(buffer: Buffer, options: InstallPackageOptions = {}): Promise<SolPluginSnapshot> {
     await this.init();
     if (!buffer.length) throw new Error("plugin package is empty");
     if (buffer.length > this.maxPackageBytes) throw new Error("plugin package exceeds the configured size limit");
@@ -142,18 +201,23 @@ export class PluginManager {
     try {
       extractZipBuffer(buffer, temporary, { maxUncompressedBytes: this.maxPackageBytes * 2 });
       const manifest = await this.readManifest(temporary);
+      assertExpectedManifest(manifest, options.expectedManifest);
       const entryPath = join(temporary, ...manifest.entry.split("/"));
       if (!isWithin(temporary, entryPath)) throw new Error("plugin entry escapes package directory");
       const info = await stat(entryPath).catch(() => undefined);
       if (!info?.isFile()) throw new Error(`plugin entry does not exist: ${manifest.entry}`);
       if (this.plugins.has(manifest.id)) throw new Error(`plugin_already_installed:${manifest.id}`);
 
+      const approvals = approvedPermissions(manifest, options.approvedPermissions);
+      const settings = validateSettingValues(manifest.settings, options.settings ?? {});
       const destination = join(this.rootDir, manifest.id);
       if (existsSync(destination)) throw new Error(`plugin directory already exists: ${manifest.id}`);
       await rename(temporary, destination);
-      const record = this.createRecord(manifest, destination, manifest.autoStart);
+      const source = options.source ?? { type: "file", installedAt: new Date().toISOString() };
+      const record = this.createRecord(manifest, destination, manifest.autoStart, approvals, settings, source);
       this.plugins.set(manifest.id, record);
       this.appendLog(record, "sol", "info", `Installed ${manifest.name} ${manifest.version}`);
+      if (source.type === "github" && source.repository) this.appendLog(record, "sol", "info", `Source: GitHub ${source.repository}${source.releaseTag ? ` · ${source.releaseTag}` : ""}`);
       await this.persistState();
       if (record.enabled) await this.startInternal(record, false);
       return this.snapshot(record);
@@ -217,11 +281,21 @@ export class PluginManager {
     await Promise.all([...this.plugins.values()].map((plugin) => this.terminate(plugin, false).catch(() => undefined)));
   }
 
-  private createRecord(manifest: SolPluginManifest, directory: string, enabled: boolean): ManagedPlugin {
+  private createRecord(
+    manifest: SolPluginManifest,
+    directory: string,
+    enabled: boolean,
+    permissions: string[],
+    settings: Record<string, SolPluginSettingValue>,
+    source?: SolPluginSource,
+  ): ManagedPlugin {
     return {
       manifest,
       directory,
       enabled,
+      approvedPermissions: [...permissions],
+      settings: { ...settings },
+      source,
       state: "stopped",
       health: "unknown",
       logs: [],
@@ -249,7 +323,14 @@ export class PluginManager {
 
   private async persistState(): Promise<void> {
     const state: PersistedState = { plugins: {} };
-    for (const plugin of this.plugins.values()) state.plugins[plugin.manifest.id] = { enabled: plugin.enabled };
+    for (const plugin of this.plugins.values()) {
+      state.plugins[plugin.manifest.id] = {
+        enabled: plugin.enabled,
+        approvedPermissions: plugin.approvedPermissions,
+        settings: plugin.settings,
+        source: plugin.source,
+      };
+    }
     const temporary = `${this.statePath}.${process.pid}.tmp`;
     await writeFile(temporary, JSON.stringify(state, null, 2) + "\n", "utf8");
     await rename(temporary, this.statePath);
@@ -261,6 +342,15 @@ export class PluginManager {
     return plugin;
   }
 
+  private resolvedSettings(plugin: ManagedPlugin): Record<string, SolPluginSettingValue> {
+    const result: Record<string, SolPluginSettingValue> = {};
+    for (const definition of plugin.manifest.settings) {
+      const value = plugin.settings[definition.key] ?? definition.default;
+      if (value !== undefined) result[definition.key] = value;
+    }
+    return result;
+  }
+
   private snapshot(plugin: ManagedPlugin): SolPluginSnapshot {
     return {
       manifest: plugin.manifest,
@@ -268,6 +358,9 @@ export class PluginManager {
       state: plugin.state,
       health: plugin.health,
       healthDetails: plugin.healthDetails,
+      approvedPermissions: [...plugin.approvedPermissions],
+      settings: this.resolvedSettings(plugin),
+      source: plugin.source,
       pid: plugin.pid,
       startedAt: plugin.startedAt,
       stoppedAt: plugin.stoppedAt,
@@ -280,6 +373,8 @@ export class PluginManager {
   private async startInternal(plugin: ManagedPlugin, automaticRestart: boolean): Promise<void> {
     if (this.shuttingDown) return;
     if (plugin.child && plugin.state !== "stopped" && plugin.state !== "error") return;
+    const missingPermissions = plugin.manifest.permissions.filter((permission) => !plugin.approvedPermissions.includes(permission));
+    if (missingPermissions.length) throw new Error(`plugin_permissions_required:${missingPermissions.join(",")}`);
     if (plugin.restartTimer) {
       clearTimeout(plugin.restartTimer);
       plugin.restartTimer = undefined;
@@ -298,16 +393,26 @@ export class PluginManager {
     plugin.lastError = undefined;
     this.appendLog(plugin, "sol", "info", `${automaticRestart ? "Restarting" : "Starting"} plugin`);
 
+    const pluginEnv: NodeJS.ProcessEnv = {
+      ...process.env,
+      SOL_PLUGIN_ID: plugin.manifest.id,
+      SOL_PLUGIN_ROOT: plugin.directory,
+      SOL_CORE_URL: this.coreUrl,
+      SOL_PLUGIN_APPROVED_PERMISSIONS: JSON.stringify(plugin.approvedPermissions),
+    };
+    const settings = this.resolvedSettings(plugin);
+    for (const definition of plugin.manifest.settings) {
+      const value = settings[definition.key];
+      if (value === undefined) continue;
+      const envName = definition.env || `SOL_PLUGIN_SETTING_${definition.key.toUpperCase()}`;
+      pluginEnv[envName] = String(value);
+    }
+
     const child = spawn(command, args, {
       cwd: plugin.directory,
       windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"],
-      env: {
-        ...process.env,
-        SOL_PLUGIN_ID: plugin.manifest.id,
-        SOL_PLUGIN_ROOT: plugin.directory,
-        SOL_CORE_URL: this.coreUrl,
-      },
+      env: pluginEnv,
     });
     plugin.child = child;
 
