@@ -26,6 +26,7 @@ import { handleMcpApi } from "./modules/mcp/routes.js";
 import { handleMcpRuntimeApi } from "./modules/mcp/runtime-routes.js";
 import { handlePluginToolApi } from "./modules/plugins/tool-routes.js";
 import { AlreadyConfiguredError, ValidationError, bootstrapHousehold, type BootstrapInput } from "./modules/onboarding/service.js";
+import { handleSystemAdminApi } from "./modules/system/routes.js";
 import { renderAiPage } from "./ui/ai.js";
 import { renderInputsPage } from "./ui/inputs.js";
 import { renderLifePage } from "./ui/life.js";
@@ -33,6 +34,7 @@ import { renderMcpPage } from "./ui/mcp.js";
 import { renderOnboardingPage } from "./ui/onboarding.js";
 import { renderOutputsPage } from "./ui/outputs.js";
 import { renderPluginsPage } from "./ui/plugins.js";
+import { renderSettingsPage } from "./ui/settings.js";
 import { solPage } from "./ui/shell.js";
 import { startWindowsTray, stopWindowsTray } from "./windows/tray.js";
 
@@ -97,6 +99,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     if (path === "/life") { sendHtml(response, 200, renderLifePage()); return; }
     if (path === "/mcp") { sendHtml(response, 200, renderMcpPage()); return; }
     if (path === "/ai") { sendHtml(response, 200, renderAiPage()); return; }
+    if (path === "/settings") { sendHtml(response, 200, renderSettingsPage()); return; }
   }
 
   if (request.method === "GET" && path === "/health") {
@@ -111,7 +114,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
       reasoningInterface: "mcp", aiProviderMode: config.aiProvider, optionalAiProviders: ["openai", "codex"],
       sourceMode: "plugins-only", toolMode: "plugins-register-through-sol", sources: [],
       interfaces: ["mcp_stdio", "web", "plugin_runtime", "windows_tray"],
-      views: ["services", "inputs", "outputs", "life_timeline", "people", "projects", "mcp_access", "ai"],
+      views: ["services", "inputs", "outputs", "life_timeline", "people", "projects", "mcp_access", "ai", "settings"],
     });
     return;
   }
@@ -147,6 +150,10 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     await revokeRequestSession(request); response.setHeader("set-cookie", clearedSessionCookie()); sendJson(response, 200, { ok: true }); return;
   }
 
+  if (path.startsWith("/v1/admin/")) {
+    const principal = await principalFor(request, response); if (!principal) return;
+    if (await handleSystemAdminApi(path, request, response, principal)) return;
+  }
   if (path === "/v1/inputs" || path.startsWith("/v1/inputs/")) {
     const principal = await principalFor(request, response); if (!principal) return;
     if (await handleInputsApi(path, request, response, principal)) return;
