@@ -144,7 +144,7 @@ export async function registerPluginInput(
   }
 }
 
-async function ownedInput(principal: PluginRuntimePrincipal, sourceAccountId: string) {
+async function ownedInput(principal: SolPluginRuntimePrincipal, sourceAccountId: string) {
   const result = await db.query<{
     id: string;
     household_id: string;
@@ -169,7 +169,7 @@ async function ownedInput(principal: PluginRuntimePrincipal, sourceAccountId: st
 }
 
 export async function updatePluginInputStatus(
-  principal: PluginRuntimePrincipal,
+  principal: SolPluginRuntimePrincipal,
   sourceAccountId: string,
   input: { status?: unknown; lastSyncAt?: unknown },
 ): Promise<PluginInputAccount> {
@@ -202,7 +202,7 @@ export async function updatePluginInputStatus(
 }
 
 export async function ingestPluginItem(
-  principal: PluginRuntimePrincipal,
+  principal: SolPluginRuntimePrincipal,
   sourceAccountId: string,
   input: {
     externalId?: unknown;
