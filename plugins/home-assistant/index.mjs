@@ -274,7 +274,9 @@ const server = createServer(async (request, response) => {
         sendJson(response, 400, { error: "domain_and_service_required" });
         return;
       }
-      const result = await ha.callService(domain, service, args.serviceData || {}, args.target || {});
+      const serviceDefinition = cache.services?.[domain]?.[service];
+      const returnResponse = Boolean(serviceDefinition?.response);
+      const result = await ha.callService(domain, service, args.serviceData || {}, args.target || {}, returnResponse);
       sendJson(response, 200, { ok: true, result: result ?? null, cache: cache.status() });
       return;
     }
