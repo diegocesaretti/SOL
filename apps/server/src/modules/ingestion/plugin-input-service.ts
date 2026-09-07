@@ -1,13 +1,7 @@
 import { createHash } from "node:crypto";
 import { db } from "../../database/client.js";
 import { scoreIntelligenceCandidate } from "../knowledge/intelligence-gate.js";
-
-export interface PluginRuntimePrincipal {
-  pluginId: string;
-  householdId: string;
-  memberId: string;
-  permissions: string[];
-}
+import type { SolPluginRuntimePrincipal } from "../plugins/types.js";
 
 export interface PluginInputAccount {
   id: string;
@@ -85,7 +79,7 @@ function pluginAuthMode(pluginId: string): string {
 }
 
 export async function registerPluginInput(
-  principal: PluginRuntimePrincipal,
+  principal: SolPluginRuntimePrincipal,
   input: { provider?: unknown; externalAccountId?: unknown; label?: unknown },
 ): Promise<PluginInputAccount> {
   const provider = requiredText(input.provider, "provider", 80).toLowerCase();

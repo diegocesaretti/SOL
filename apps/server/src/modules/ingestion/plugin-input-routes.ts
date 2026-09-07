@@ -5,8 +5,8 @@ import {
   ingestPluginItem,
   registerPluginInput,
   updatePluginInputStatus,
-  type PluginRuntimePrincipal,
 } from "./plugin-input-service.js";
+import type { SolPluginRuntimePrincipal } from "../plugins/types.js";
 
 function bearerToken(request: IncomingMessage): string | undefined {
   const header = request.headers.authorization?.trim();
@@ -17,7 +17,7 @@ function bearerToken(request: IncomingMessage): string | undefined {
 
 function requirePermission(
   response: ServerResponse,
-  principal: PluginRuntimePrincipal,
+  principal: SolPluginRuntimePrincipal,
   permission: string,
 ): boolean {
   if (principal.permissions.includes(permission)) return true;
@@ -28,7 +28,7 @@ function requirePermission(
 async function authenticate(
   request: IncomingMessage,
   response: ServerResponse,
-): Promise<PluginRuntimePrincipal | null> {
+): Promise<SolPluginRuntimePrincipal | null> {
   const token = bearerToken(request);
   if (!token) {
     sendJson(response, 401, { error: "plugin_token_required" });

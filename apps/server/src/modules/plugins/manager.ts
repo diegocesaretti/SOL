@@ -2,13 +2,15 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { extractZipBuffer } from "./zip.js";
 import {
   type SolPluginHealth,
   type SolPluginLogEntry,
   type SolPluginManifest,
   type SolPluginProcessState,
+  type SolPluginRuntimePrincipal,
+  type SolPluginScope,
   type SolPluginSettingValue,
   type SolPluginSnapshot,
   type SolPluginSource,
@@ -28,6 +30,7 @@ interface PersistedPluginState {
   approvedPermissions?: string[];
   settings?: Record<string, SolPluginSettingValue>;
   source?: SolPluginSource;
+  scope?: SolPluginScope;
 }
 
 interface PersistedState {
@@ -39,6 +42,7 @@ interface InstallPackageOptions {
   settings?: Record<string, SolPluginSettingValue>;
   source?: SolPluginSource;
   expectedManifest?: Pick<SolPluginManifest, "id" | "name" | "version" | "permissions">;
+  scope?: SolPluginScope;
 }
 
 interface ManagedPlugin {
@@ -48,6 +52,8 @@ interface ManagedPlugin {
   approvedPermissions: string[];
   settings: Record<string, SolPluginSettingValue>;
   source?: SolPluginSource;
+  scope?: SolPluginScope;
+  runtimeToken?: string;
   state: SolPluginProcessState;
   health: SolPluginHealth;
   healthDetails?: Record<string, unknown>;
@@ -112,6 +118,7 @@ export class PluginManager {
   private readonly maxPackageBytes: number;
   private readonly logLimit: number;
   private readonly plugins = new Map<string, ManagedPlugin>();
+  private readonly runtimeTokens = new Map<string, SolPluginRuntimePrincipal>();
   private initialized = false;
   private shuttingDown = false;
 
@@ -145,6 +152,7 @@ export class PluginManager {
           saved?.approvedPermissions ?? manifest.permissions,
           saved?.settings ?? {},
           saved?.source,
+          saved?.scope,
         ));
       } catch (error) {
         console.error(`SOL plugin discovery ignored ${entry.name}: ${errorMessage(error)}`);
@@ -164,6 +172,12 @@ export class PluginManager {
   async get(id: string): Promise<SolPluginSnapshot> {
     await this.init();
     return this.snapshot(this.requirePlugin(id));
+  }
+
+  async authenticateRuntimeToken(token: string): Promise<SolPluginRuntimePrincipal | null> {
+    await this.init();
+    const principal = this.runtimeTokens.get(token);
+    return principal ? { ...principal, permissions: [...principal.permissions] } : null;
   }
 
   async getLogs(id: string, limit = 200): Promise<SolPluginLogEntry[]> {
@@ -214,7 +228,7 @@ export class PluginManager {
       if (existsSync(destination)) throw new Error(`plugin directory already exists: ${manifest.id}`);
       await rename(temporary, destination);
       const source = options.source ?? { type: "file", installedAt: new Date().toISOString() };
-      const record = this.createRecord(manifest, destination, manifest.autoStart, approvals, settings, source);
+      const record = this.createRecord(manifest, destination, manifest.autoStart, approvals, settings, source, options.scope);
       this.plugins.set(manifest.id, record);
       this.appendLog(record, "sol", "info", `Installed ${manifest.name} ${manifest.version}`);
       if (source.type === "github" && source.repository) this.appendLog(record, "sol", "info", `Source: GitHub ${source.repository}${source.releaseTag ? ` · ${source.releaseTag}` : ""}`);
@@ -288,6 +302,7 @@ export class PluginManager {
     permissions: string[],
     settings: Record<string, SolPluginSettingValue>,
     source?: SolPluginSource,
+    scope?: SolPluginScope,
   ): ManagedPlugin {
     return {
       manifest,
@@ -296,6 +311,7 @@ export class PluginManager {
       approvedPermissions: [...permissions],
       settings: { ...settings },
       source,
+      scope,
       state: "stopped",
       health: "unknown",
       logs: [],
@@ -329,6 +345,7 @@ export class PluginManager {
         approvedPermissions: plugin.approvedPermissions,
         settings: plugin.settings,
         source: plugin.source,
+        scope: plugin.scope,
       };
     }
     const temporary = `${this.statePath}.${process.pid}.tmp`;
@@ -361,6 +378,7 @@ export class PluginManager {
       approvedPermissions: [...plugin.approvedPermissions],
       settings: this.resolvedSettings(plugin),
       source: plugin.source,
+      scope: plugin.scope,
       pid: plugin.pid,
       startedAt: plugin.startedAt,
       stoppedAt: plugin.stoppedAt,
@@ -393,13 +411,33 @@ export class PluginManager {
     plugin.lastError = undefined;
     this.appendLog(plugin, "sol", "info", `${automaticRestart ? "Restarting" : "Starting"} plugin`);
 
-    const pluginEnv: NodeJS.ProcessEnv = {
-      ...process.env,
-      SOL_PLUGIN_ID: plugin.manifest.id,
-      SOL_PLUGIN_ROOT: plugin.directory,
-      SOL_CORE_URL: this.coreUrl,
-      SOL_PLUGIN_APPROVED_PERMISSIONS: JSON.stringify(plugin.approvedPermissions),
-    };
+    this.revokeRuntimeToken(plugin);
+    const pluginEnv: NodeJS.ProcessEnv = { ...process.env };
+    for (const key of Object.keys(pluginEnv)) {
+      const upper = key.toUpperCase();
+      if (upper === "DATABASE_URL" || upper === "NEXO_DATABASE_URL" || /(SECRET|TOKEN|PASSWORD|API_KEY|PRIVATE_KEY)$/.test(upper)) {
+        delete pluginEnv[key];
+      }
+    }
+    pluginEnv.SOL_PLUGIN_ID = plugin.manifest.id;
+    pluginEnv.SOL_PLUGIN_ROOT = plugin.directory;
+    pluginEnv.SOL_CORE_URL = this.coreUrl;
+    pluginEnv.SOL_PLUGIN_API_URL = this.coreUrl;
+    pluginEnv.SOL_PLUGIN_APPROVED_PERMISSIONS = JSON.stringify(plugin.approvedPermissions);
+    if (plugin.scope) {
+      const token = randomBytes(32).toString("base64url");
+      const principal: SolPluginRuntimePrincipal = {
+        pluginId: plugin.manifest.id,
+        householdId: plugin.scope.householdId,
+        memberId: plugin.scope.memberId,
+        permissions: [...plugin.approvedPermissions],
+      };
+      plugin.runtimeToken = token;
+      this.runtimeTokens.set(token, principal);
+      pluginEnv.SOL_PLUGIN_TOKEN = token;
+      pluginEnv.SOL_HOUSEHOLD_ID = plugin.scope.householdId;
+      pluginEnv.SOL_MEMBER_ID = plugin.scope.memberId;
+    }
     const settings = this.resolvedSettings(plugin);
     for (const definition of plugin.manifest.settings) {
       const value = settings[definition.key];
@@ -445,6 +483,7 @@ export class PluginManager {
     }).catch((error) => {
       plugin.child = undefined;
       plugin.pid = undefined;
+      this.revokeRuntimeToken(plugin);
       plugin.state = "error";
       plugin.health = "unhealthy";
       plugin.lastError = errorMessage(error);
@@ -461,10 +500,17 @@ export class PluginManager {
     child.once("exit", (code, signal) => this.handleExit(plugin, child, code, signal));
   }
 
+  private revokeRuntimeToken(plugin: ManagedPlugin): void {
+    if (!plugin.runtimeToken) return;
+    this.runtimeTokens.delete(plugin.runtimeToken);
+    plugin.runtimeToken = undefined;
+  }
+
   private handleExit(plugin: ManagedPlugin, child: ChildProcess, code: number | null, signal: NodeJS.Signals | null): void {
     if (plugin.child !== child) return;
     plugin.child = undefined;
     plugin.pid = undefined;
+    this.revokeRuntimeToken(plugin);
     plugin.lastExitCode = code;
     plugin.stoppedAt = new Date().toISOString();
     plugin.health = "unknown";
@@ -500,6 +546,7 @@ export class PluginManager {
     }
     const child = plugin.child;
     if (!child) {
+      this.revokeRuntimeToken(plugin);
       plugin.state = "stopped";
       plugin.health = "unknown";
       plugin.pid = undefined;

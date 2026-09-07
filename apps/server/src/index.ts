@@ -47,6 +47,7 @@ import {
   SourceAccountValidationError,
 } from "./modules/identity/source-accounts.js";
 import { handleInputsApi } from "./modules/inputs/routes.js";
+import { handlePluginInputApi } from "./modules/ingestion/plugin-input-routes.js";
 import { handleLifeApi } from "./modules/life/routes.js";
 import { registerCandidateProcessor } from "./modules/knowledge/candidate-processor.js";
 import { handleKnowledgeApi } from "./modules/knowledge/routes.js";
@@ -138,6 +139,12 @@ function canCreateRole(principal: AuthPrincipal, role: NewMemberRole): boolean {
 
 async function handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
   const path = pathname(request);
+
+  // Plugin runtime calls use a short-lived bearer token issued by PluginManager,
+  // not a browser session cookie and never direct database credentials.
+  if (path.startsWith("/v1/plugin-api/")) {
+    if (await handlePluginInputApi(path, request, response)) return;
+  }
 
   // OAuth callbacks are authenticated by one-time state/PKCE rather than the SOL cookie.
   if (await handleGoogleOAuthCallback(request, response)) return;
@@ -480,16 +487,20 @@ server.listen(config.port, config.host, () => {
   console.log(`SOL Core listening on http://${config.host}:${config.port}`);
   startWindowsTray();
   outboxDispatcher.start();
-  calendarScheduler.start();
-  gmailScheduler.start();
-  mercadoLibreScheduler.start();
-  executiveScheduler.start();
-  void whatsappManager.startLinkedAccounts().catch((error) => {
-    console.error("WhatsApp autostart failed", error);
-  });
-  void homeAssistantManager.startConfiguredAccounts().catch((error) => {
-    console.error("Home Assistant autostart failed", error);
-  });
+  if (config.nexoLegacyConnectorsEnabled) {
+    calendarScheduler.start();
+    gmailScheduler.start();
+    mercadoLibreScheduler.start();
+    void whatsappManager.startLinkedAccounts().catch((error) => {
+      console.error("WhatsApp legacy autostart failed", error);
+    });
+    void homeAssistantManager.startConfiguredAccounts().catch((error) => {
+      console.error("Home Assistant legacy autostart failed", error);
+    });
+  } else {
+    console.log("External native connectors are disabled; install providers as SOL plugins (set NEXO_LEGACY_CONNECTORS=true for fallback).");
+  }
+  if (config.nexoInternalAutomationEnabled) executiveScheduler.start();
   if (config.host !== "127.0.0.1" && config.host !== "localhost") {
     console.warn(
       "SOL is listening beyond localhost. Use HTTPS and review member authentication before exposing it broadly.",

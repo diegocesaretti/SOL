@@ -87,7 +87,7 @@ export async function handlePluginsApi(
     }
     try {
       const packageBytes = await readBinary(request, 64 * 1024 * 1024);
-      sendJson(response, 201, { plugin: await pluginManager.installPackage(packageBytes) });
+      sendJson(response, 201, { plugin: await pluginManager.installPackage(packageBytes, { scope: { householdId: principal.householdId, memberId: principal.memberId } }) });
     } catch (error) {
       pluginError(response, error);
     }
@@ -126,6 +126,7 @@ export async function handlePluginsApi(
         approvedPermissions: Array.isArray(body.approvedPermissions) ? body.approvedPermissions : [],
         settings: body.settings,
         expectedManifest: preview.manifest,
+        scope: { householdId: principal.householdId, memberId: principal.memberId },
         source: {
           type: "github",
           repository: preview.repository,

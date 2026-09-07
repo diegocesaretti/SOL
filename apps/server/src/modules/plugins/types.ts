@@ -7,6 +7,16 @@ export type SolPluginHealth = "unknown" | "healthy" | "degraded" | "unhealthy";
 export type SolPluginSettingType = "text" | "boolean" | "number" | "select" | "path" | "secret";
 export type SolPluginSettingValue = string | number | boolean;
 
+export interface SolPluginScope {
+  householdId: string;
+  memberId: string;
+}
+
+export interface SolPluginRuntimePrincipal extends SolPluginScope {
+  pluginId: string;
+  permissions: string[];
+}
+
 export interface SolPluginSettingOption {
   value: string;
   label: string;
@@ -74,6 +84,7 @@ export interface SolPluginSnapshot {
   approvedPermissions: string[];
   settings: Record<string, SolPluginSettingValue>;
   source?: SolPluginSource;
+  scope?: SolPluginScope;
   pid?: number;
   startedAt?: string;
   stoppedAt?: string;
