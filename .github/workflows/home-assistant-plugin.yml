@@ -1,0 +1,61 @@
+name: Home Assistant SOL plugin
+
+on:
+  pull_request:
+    paths:
+      - "plugins/home-assistant/**"
+      - "apps/server/src/modules/plugins/**"
+      - "apps/server/src/modules/ingestion/plugin-input-routes.ts"
+      - "apps/server/src/mcp/**"
+      - "packages/database/migrations/**"
+      - ".github/workflows/home-assistant-plugin.yml"
+  push:
+    tags:
+      - "home-assistant-plugin-v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test-package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Syntax check runtime
+        run: |
+          node --check plugins/home-assistant/index.mjs
+          node --check plugins/home-assistant/lib/cache.mjs
+          node --check plugins/home-assistant/lib/ha-client.mjs
+          node --check plugins/home-assistant/lib/sol-client.mjs
+
+      - name: Cache tests
+        run: node --test plugins/home-assistant/test/*.test.mjs
+
+      - name: Package .solplugin
+        run: node scripts/pack-sol-plugin.mjs plugins/home-assistant dist/HomeAssistant.solplugin
+
+      - name: Upload package artifact
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: HomeAssistant-solplugin
+          path: dist/HomeAssistant.solplugin
+          if-no-files-found: error
+
+      - name: Publish tagged plugin release
+        if: startsWith(github.ref, 'refs/tags/home-assistant-plugin-v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/HomeAssistant.solplugin
+          tag_name: home-assistant-plugin-latest
+          name: Home Assistant SOL plugin
+          body: "Latest Home Assistant plugin package for SOL."
+          prerelease: false

@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { readJsonBody, sendJson } from "../../http.js";
 import { pluginManager } from "../plugins/runtime.js";
+import { handlePluginRuntimeApi } from "../plugins/runtime-routes.js";
 import {
   ingestPluginItem,
   registerPluginInput,
@@ -73,7 +74,9 @@ export async function handlePluginInputApi(
   request: IncomingMessage,
   response: ServerResponse,
 ): Promise<boolean> {
-  if (!path.startsWith("/v1/plugin-api/inputs")) return false;
+  if (!path.startsWith("/v1/plugin-api/inputs")) {
+    return await handlePluginRuntimeApi(path, request, response);
+  }
   const principal = await authenticate(request, response);
   if (!principal) return true;
 
