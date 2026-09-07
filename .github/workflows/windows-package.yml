@@ -45,8 +45,7 @@ jobs:
         run: pnpm build
 
       # Do not archive pnpm's linked node_modules layout. Windows ZIP extraction can
-      # lose those links, leaving packages such as `pg` unresolved at runtime.
-      # Build a real, flat production dependency tree inside the portable folder.
+      # lose those links. Build a real flat production tree inside the portable folder.
       - name: Create production server deployment
         shell: pwsh
         run: |
@@ -76,13 +75,13 @@ jobs:
           dotnet publish packaging/windows/SolLauncher/SolLauncher.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o dist/windows/launcher
           Copy-Item dist/windows/launcher/SOL.exe dist/windows/SOL/SOL.exe
 
-      - name: Verify portable runtime resolves production packages
+      - name: Verify portable runtime resolves SOL Core packages
         shell: pwsh
         run: |
           $node = (Resolve-Path 'dist/windows/SOL/runtime/node.exe').Path
           Push-Location 'dist/windows/SOL/apps/server'
           try {
-            & $node --input-type=module -e "await import('pg'); await import('pino'); await import('zod'); await import('qrcode'); await import('baileys'); console.log('portable production dependencies resolve')"
+            & $node --input-type=module -e "await import('pg'); await import('zod'); await import('@modelcontextprotocol/server'); console.log('portable SOL Core dependencies resolve')"
             if ($LASTEXITCODE -ne 0) { throw 'Portable Node dependency resolution failed' }
             & $node --input-type=module -e "await import('./dist/database/client.js'); console.log('database client imports successfully')"
             if ($LASTEXITCODE -ne 0) { throw 'Portable database client import failed' }
@@ -98,7 +97,7 @@ jobs:
             'dist/windows/SOL/runtime/node.exe',
             'dist/windows/SOL/apps/server/dist/index.js',
             'dist/windows/SOL/apps/server/node_modules/pg/package.json',
-            'dist/windows/SOL/apps/server/node_modules/pino/package.json',
+            'dist/windows/SOL/apps/server/node_modules/zod/package.json',
             'dist/windows/SOL/scripts/windows/sol-tray.ps1',
             'dist/windows/SOL/.env.example'
           )
@@ -126,7 +125,7 @@ jobs:
           $tag = 'sol-windows-latest'
           gh release view $tag --repo $env:GITHUB_REPOSITORY 2>$null
           if ($LASTEXITCODE -ne 0) {
-            gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'SOL Windows portable' --notes 'Portable Windows build of SOL. Open SOL.exe; Node is bundled. Real .env credentials are never included.' --prerelease --target $env:GITHUB_SHA
+            gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'SOL Windows portable' --notes 'Portable Windows build of SOL. Open SOL.exe; Node is bundled. External providers are installed as plugins and real .env credentials are never included.' --prerelease --target $env:GITHUB_SHA
           }
           gh release upload $tag dist/SOL-Windows.zip --repo $env:GITHUB_REPOSITORY --clobber
 
