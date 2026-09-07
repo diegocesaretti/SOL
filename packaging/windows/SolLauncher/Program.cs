@@ -1,0 +1,222 @@
+using System.Diagnostics;
+using System.Net.Http;
+using System.Runtime.InteropServices;
+using System.Text;
+
+namespace SolLauncher;
+
+internal static class Program
+{
+    private const uint JobObjectExtendedLimitInformation = 9;
+    private const uint JobObjectLimitKillOnJobClose = 0x00002000;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct JOBOBJECT_BASIC_LIMIT_INFORMATION
+    {
+        public long PerProcessUserTimeLimit;
+        public long PerJobUserTimeLimit;
+        public uint LimitFlags;
+        public UIntPtr MinimumWorkingSetSize;
+        public UIntPtr MaximumWorkingSetSize;
+        public uint ActiveProcessLimit;
+        public UIntPtr Affinity;
+        public uint PriorityClass;
+        public uint SchedulingClass;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct IO_COUNTERS
+    {
+        public ulong ReadOperationCount;
+        public ulong WriteOperationCount;
+        public ulong OtherOperationCount;
+        public ulong ReadTransferCount;
+        public ulong WriteTransferCount;
+        public ulong OtherTransferCount;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+    {
+        public JOBOBJECT_BASIC_LIMIT_INFORMATION BasicLimitInformation;
+        public IO_COUNTERS IoInfo;
+        public UIntPtr ProcessMemoryLimit;
+        public UIntPtr JobMemoryLimit;
+        public UIntPtr PeakProcessMemoryUsed;
+        public UIntPtr PeakJobMemoryUsed;
+    }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+    private static extern IntPtr CreateJobObject(IntPtr lpJobAttributes, string? lpName);
+
+    [DllImport("kernel32.dll")]
+    private static extern bool SetInformationJobObject(IntPtr hJob, uint infoType, IntPtr lpJobObjectInfo, uint cbJobObjectInfoLength);
+
+    [DllImport("kernel32.dll")]
+    private static extern bool AssignProcessToJobObject(IntPtr hJob, IntPtr hProcess);
+
+    [DllImport("kernel32.dll")]
+    private static extern bool CloseHandle(IntPtr hObject);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int MessageBox(IntPtr hWnd, string text, string caption, uint type);
+
+    [STAThread]
+    private static async Task Main()
+    {
+        using var singleton = new Mutex(true, "Local\\SOL.Desktop.Singleton", out var firstInstance);
+        if (!firstInstance)
+        {
+            OpenBrowser("http://127.0.0.1:3000/inputs/plugins/ui");
+            return;
+        }
+
+        var root = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var node = Path.Combine(root, "runtime", "node.exe");
+        var server = Path.Combine(root, "apps", "server", "dist", "index.js");
+        var env = Path.Combine(root, ".env");
+        var example = Path.Combine(root, ".env.example");
+
+        if (!File.Exists(node) || !File.Exists(server))
+        {
+            MessageBox(IntPtr.Zero, "El paquete de SOL está incompleto. Volvé a descargar SOL-Windows.zip.", "SOL", 0x10);
+            return;
+        }
+
+        if (!File.Exists(env))
+        {
+            if (File.Exists(example)) File.Copy(example, env, overwrite: false);
+            MessageBox(IntPtr.Zero,
+                "Es el primer inicio de SOL. Se creó .env junto a SOL.exe. Configurá DATABASE_URL con tu conexión de Neon, guardá el archivo y volvé a abrir SOL.",
+                "SOL · configuración inicial", 0x40);
+            if (File.Exists(env))
+            {
+                Process.Start(new ProcessStartInfo("notepad.exe", $"\"{env}\"") { UseShellExecute = true });
+            }
+            return;
+        }
+
+        var port = ReadPort(env, 3000);
+        var baseUrl = $"http://127.0.0.1:{port}";
+        var logDir = Path.Combine(root, ".sol", "logs");
+        Directory.CreateDirectory(logDir);
+        var logPath = Path.Combine(logDir, "server.log");
+
+        using var job = new JobHandle();
+        using var log = new StreamWriter(new FileStream(logPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite), Encoding.UTF8) { AutoFlush = true };
+        using var child = new Process
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = node,
+                Arguments = $"\"{server}\"",
+                WorkingDirectory = root,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            },
+            EnableRaisingEvents = true,
+        };
+
+        child.StartInfo.Environment["SOL_LAUNCHER_PID"] = Environment.ProcessId.ToString();
+        child.OutputDataReceived += (_, e) => { if (e.Data is not null) lock (log) log.WriteLine($"[{DateTimeOffset.Now:O}] OUT {e.Data}"); };
+        child.ErrorDataReceived += (_, e) => { if (e.Data is not null) lock (log) log.WriteLine($"[{DateTimeOffset.Now:O}] ERR {e.Data}"); };
+
+        try
+        {
+            if (!child.Start()) throw new InvalidOperationException("No se pudo iniciar el servidor de SOL.");
+            job.Assign(child);
+            child.BeginOutputReadLine();
+            child.BeginErrorReadLine();
+
+            var ready = await WaitForHealth(baseUrl, TimeSpan.FromSeconds(30));
+            if (ready) OpenBrowser(baseUrl + "/inputs/plugins/ui");
+            else MessageBox(IntPtr.Zero, $"SOL no respondió a tiempo. Revisá el log:\n{logPath}", "SOL · error de inicio", 0x10);
+
+            await child.WaitForExitAsync();
+            if (child.ExitCode != 0)
+            {
+                MessageBox(IntPtr.Zero, $"SOL se cerró con código {child.ExitCode}. Revisá el log:\n{logPath}", "SOL", 0x10);
+            }
+        }
+        catch (Exception ex)
+        {
+            lock (log) log.WriteLine($"[{DateTimeOffset.Now:O}] LAUNCHER {ex}");
+            MessageBox(IntPtr.Zero, $"No se pudo iniciar SOL.\n\n{ex.Message}\n\nLog: {logPath}", "SOL", 0x10);
+        }
+    }
+
+    private static int ReadPort(string envPath, int fallback)
+    {
+        try
+        {
+            foreach (var line in File.ReadLines(envPath))
+            {
+                var trimmed = line.Trim();
+                if (trimmed.StartsWith("#") || !trimmed.StartsWith("SOL_PORT=", StringComparison.OrdinalIgnoreCase)) continue;
+                if (int.TryParse(trimmed["SOL_PORT=".Length..].Trim(), out var port) && port is > 0 and <= 65535) return port;
+            }
+        }
+        catch { }
+        return fallback;
+    }
+
+    private static async Task<bool> WaitForHealth(string baseUrl, TimeSpan timeout)
+    {
+        using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
+        var until = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < until)
+        {
+            try
+            {
+                using var response = await client.GetAsync(baseUrl + "/health");
+                if (response.IsSuccessStatusCode) return true;
+            }
+            catch { }
+            await Task.Delay(500);
+        }
+        return false;
+    }
+
+    private static void OpenBrowser(string url)
+    {
+        try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); } catch { }
+    }
+
+    private sealed class JobHandle : IDisposable
+    {
+        private IntPtr _handle;
+
+        public JobHandle()
+        {
+            _handle = CreateJobObject(IntPtr.Zero, null);
+            if (_handle == IntPtr.Zero) throw new InvalidOperationException("No se pudo crear el job de procesos de SOL.");
+
+            var info = new JOBOBJECT_EXTENDED_LIMIT_INFORMATION();
+            info.BasicLimitInformation.LimitFlags = JobObjectLimitKillOnJobClose;
+            var length = Marshal.SizeOf<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>();
+            var pointer = Marshal.AllocHGlobal(length);
+            try
+            {
+                Marshal.StructureToPtr(info, pointer, false);
+                if (!SetInformationJobObject(_handle, JobObjectExtendedLimitInformation, pointer, (uint)length))
+                    throw new InvalidOperationException("No se pudo configurar el job de procesos de SOL.");
+            }
+            finally { Marshal.FreeHGlobal(pointer); }
+        }
+
+        public void Assign(Process process)
+        {
+            if (!AssignProcessToJobObject(_handle, process.Handle))
+                throw new InvalidOperationException("No se pudo asociar el servidor al launcher de SOL.");
+        }
+
+        public void Dispose()
+        {
+            if (_handle == IntPtr.Zero) return;
+            CloseHandle(_handle);
+            _handle = IntPtr.Zero;
+        }
+    }
+}
