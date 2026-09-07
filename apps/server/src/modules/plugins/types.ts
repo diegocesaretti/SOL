@@ -6,6 +6,17 @@ export type SolPluginProcessState = "stopped" | "starting" | "running" | "error"
 export type SolPluginHealth = "unknown" | "healthy" | "degraded" | "unhealthy";
 export type SolPluginSettingType = "text" | "boolean" | "number" | "select" | "path" | "secret";
 export type SolPluginSettingValue = string | number | boolean;
+export type SolPluginSchemaVersion = 1 | 2;
+
+export const SOL_PLUGIN_HOST_CAPABILITIES = [
+  "plugin-api.v1",
+  "input.register",
+  "input.write",
+  "input.status",
+  "identity.v1",
+  "mcp.register",
+  "filesystem.plugin-data",
+] as const;
 
 export interface SolPluginScope {
   householdId: string;
@@ -44,7 +55,7 @@ export interface SolPluginGithubReleaseDistribution {
 export type SolPluginDistribution = SolPluginGithubReleaseDistribution;
 
 export interface SolPluginManifest {
-  schemaVersion: 1;
+  schemaVersion: SolPluginSchemaVersion;
   id: string;
   name: string;
   version: string;
@@ -55,6 +66,7 @@ export interface SolPluginManifest {
   autoStart: boolean;
   restartPolicy: SolPluginRestartPolicy;
   capabilities: string[];
+  requires: string[];
   permissions: string[];
   settings: SolPluginSettingDefinition[];
   distribution?: SolPluginDistribution;
@@ -98,6 +110,7 @@ const VERSION_RE = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
 const TOKEN_RE = /^[a-z0-9](?:[a-z0-9._:-]{0,118}[a-z0-9])?$/;
 const SETTING_KEY_RE = /^[a-z][a-z0-9_]{0,62}$/;
 const ENV_RE = /^[A-Z_][A-Z0-9_]{0,127}$/;
+const HOST_CAPABILITIES = new Set<string>(SOL_PLUGIN_HOST_CAPABILITIES);
 
 function text(value: unknown, name: string, max: number): string {
   if (typeof value !== "string") throw new Error(`${name} must be a string`);
@@ -249,7 +262,11 @@ export function validateSettingValues(
 export function validatePluginManifest(value: unknown): SolPluginManifest {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("sol-plugin.json must contain an object");
   const input = value as Record<string, unknown>;
-  if (input.schemaVersion !== 1) throw new Error("Unsupported plugin schemaVersion; expected 1");
+  const schemaVersion = input.schemaVersion;
+  if (schemaVersion !== 1 && schemaVersion !== 2) throw new Error("Unsupported plugin schemaVersion; expected 1 or 2");
+  if (schemaVersion === 1 && input.requires !== undefined) {
+    throw new Error("requires is only supported by plugin schemaVersion 2");
+  }
 
   const id = text(input.id, "id", 64).toLowerCase();
   if (!ID_RE.test(id)) throw new Error("id must use lowercase letters, numbers, dot, underscore or hyphen");
@@ -273,9 +290,15 @@ export function validatePluginManifest(value: unknown): SolPluginManifest {
     throw new Error("restartPolicy must be never or on-failure");
   }
 
+  const requires = schemaVersion === 2 ? stringArray(input.requires, "requires", 100) : [];
+  const missingRequirements = requires.filter((requirement) => !HOST_CAPABILITIES.has(requirement));
+  if (missingRequirements.length) {
+    throw new Error(`plugin_host_capabilities_required:${missingRequirements.join(",")}`);
+  }
+
   const description = input.description === undefined ? undefined : text(input.description, "description", 500);
   return {
-    schemaVersion: 1,
+    schemaVersion,
     id,
     name,
     version,
@@ -286,6 +309,7 @@ export function validatePluginManifest(value: unknown): SolPluginManifest {
     autoStart,
     restartPolicy,
     capabilities: stringArray(input.capabilities, "capabilities", 100),
+    requires,
     permissions: stringArray(input.permissions, "permissions", 100),
     settings: validateSettings(input.settings),
     distribution: validateDistribution(input.distribution),
