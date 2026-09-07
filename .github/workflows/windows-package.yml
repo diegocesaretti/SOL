@@ -1,0 +1,102 @@
+name: Windows portable package
+
+on:
+  push:
+    branches: [ main, feat/windows-standalone-package ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-package:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Enable Corepack
+        shell: pwsh
+        run: corepack enable
+
+      - name: Install dependencies
+        shell: pwsh
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Typecheck and test
+        shell: pwsh
+        run: |
+          pnpm typecheck
+          pnpm test
+
+      - name: Build SOL server
+        shell: pwsh
+        run: pnpm build
+
+      - name: Create production server deployment
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist/windows/SOL/apps | Out-Null
+          pnpm --filter @sol/server deploy --prod --legacy dist/windows/SOL/apps/server
+          Remove-Item dist/windows/SOL/apps/server/dist -Recurse -Force -ErrorAction SilentlyContinue
+          Copy-Item apps/server/dist dist/windows/SOL/apps/server/dist -Recurse -Force
+
+      - name: Add portable Node runtime and SOL support files
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist/windows/SOL/runtime | Out-Null
+          New-Item -ItemType Directory -Force dist/windows/SOL/scripts/windows | Out-Null
+          Copy-Item (Get-Command node).Source dist/windows/SOL/runtime/node.exe
+          Copy-Item scripts/windows/sol-tray.ps1 dist/windows/SOL/scripts/windows/sol-tray.ps1
+          Copy-Item .env.example dist/windows/SOL/.env.example
+
+      - name: Publish SOL.exe launcher
+        shell: pwsh
+        run: |
+          dotnet publish packaging/windows/SolLauncher/SolLauncher.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o dist/windows/launcher
+          Copy-Item dist/windows/launcher/SOL.exe dist/windows/SOL/SOL.exe
+
+      - name: Verify package structure
+        shell: pwsh
+        run: |
+          $required = @(
+            'dist/windows/SOL/SOL.exe',
+            'dist/windows/SOL/runtime/node.exe',
+            'dist/windows/SOL/apps/server/dist/index.js',
+            'dist/windows/SOL/apps/server/node_modules',
+            'dist/windows/SOL/scripts/windows/sol-tray.ps1',
+            'dist/windows/SOL/.env.example'
+          )
+          foreach ($path in $required) { if (-not (Test-Path $path)) { throw "Missing package component: $path" } }
+          if (Test-Path dist/windows/SOL/.env) { throw 'Real .env must never be bundled' }
+          Write-Host "SOL.exe: $((Get-Item dist/windows/SOL/SOL.exe).Length) bytes"
+          Write-Host "node.exe: $((Get-Item dist/windows/SOL/runtime/node.exe).Length) bytes"
+
+      - name: Create SOL-Windows.zip
+        shell: pwsh
+        run: |
+          $zip = 'dist/SOL-Windows.zip'
+          if (Test-Path $zip) { Remove-Item $zip -Force }
+          Compress-Archive -Path dist/windows/SOL -DestinationPath $zip -CompressionLevel Optimal
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          Write-Host "SHA256=$hash"
+          "sha256=$hash" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+        id: package
+
+      - name: Upload SOL Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: SOL-Windows
+          path: dist/SOL-Windows.zip
+          if-no-files-found: error
+          retention-days: 30
