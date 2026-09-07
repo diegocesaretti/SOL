@@ -25,9 +25,10 @@ CREATE TABLE plugin_mcp_tools (
   description text NOT NULL,
   input_schema jsonb NOT NULL DEFAULT '{"type":"object","properties":{}}'::jsonb,
   callback_url text NOT NULL,
-  requires_submit boolean NOT NULL DEFAULT false,
+  required_scope text NOT NULL DEFAULT 'read'
+    CHECK (required_scope IN ('read', 'submit', 'actions')),
   owner_member_id uuid REFERENCES members(id) ON DELETE CASCADE,
-  visibility visibility_scope NOT NULL DEFAULT 'family',
+  visibility visibility_scope NOT NULL DEFAULT 'private',
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY(household_id, plugin_id, name),
   UNIQUE(household_id, name)
