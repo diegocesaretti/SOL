@@ -14,6 +14,7 @@ import {
   type SolPluginSettingValue,
   type SolPluginSnapshot,
   type SolPluginSource,
+  missingRequiredSettingKeys,
   validatePluginManifest,
   validateSettingValues,
 } from "./types.js";
@@ -145,12 +146,14 @@ export class PluginManager {
         if (!info.isFile()) throw new Error("plugin entry is not a file");
         if (this.plugins.has(manifest.id)) throw new Error(`duplicate plugin id ${manifest.id}`);
         const saved = persisted.plugins[manifest.id];
+        const settings = saved?.settings ?? {};
+        const missingSettings = missingRequiredSettingKeys(manifest.settings, settings);
         this.plugins.set(manifest.id, this.createRecord(
           manifest,
           directory,
-          saved?.enabled ?? manifest.autoStart,
+          missingSettings.length ? false : (saved?.enabled ?? manifest.autoStart),
           saved?.approvedPermissions ?? manifest.permissions,
-          saved?.settings ?? {},
+          settings,
           saved?.source,
           saved?.scope,
         ));
@@ -196,12 +199,17 @@ export class PluginManager {
   async updateSettings(id: string, values: unknown): Promise<SolPluginSnapshot> {
     await this.init();
     const plugin = this.requirePlugin(id);
+    const wasMissingRequired = this.missingRequiredSettings(plugin).length > 0;
     plugin.settings = validateSettingValues(plugin.manifest.settings, values);
-    await this.persistState();
     const running = !!plugin.child;
+    const shouldAutoStart = wasMissingRequired && plugin.manifest.autoStart && !running && !plugin.enabled;
+    if (shouldAutoStart) plugin.enabled = true;
+    await this.persistState();
     if (running) {
       await this.terminate(plugin, true);
       if (plugin.enabled) await this.startInternal(plugin, false);
+    } else if (shouldAutoStart) {
+      await this.startInternal(plugin, false);
     }
     return this.snapshot(plugin);
   }
@@ -223,14 +231,26 @@ export class PluginManager {
       if (this.plugins.has(manifest.id)) throw new Error(`plugin_already_installed:${manifest.id}`);
 
       const approvals = approvedPermissions(manifest, options.approvedPermissions);
-      const settings = validateSettingValues(manifest.settings, options.settings ?? {});
+      const settings = validateSettingValues(manifest.settings, options.settings ?? {}, { allowMissingRequired: true });
+      const missingSettings = missingRequiredSettingKeys(manifest.settings, settings);
       const destination = join(this.rootDir, manifest.id);
       if (existsSync(destination)) throw new Error(`plugin directory already exists: ${manifest.id}`);
       await rename(temporary, destination);
       const source = options.source ?? { type: "file", installedAt: new Date().toISOString() };
-      const record = this.createRecord(manifest, destination, manifest.autoStart, approvals, settings, source, options.scope);
+      const record = this.createRecord(
+        manifest,
+        destination,
+        manifest.autoStart && missingSettings.length === 0,
+        approvals,
+        settings,
+        source,
+        options.scope,
+      );
       this.plugins.set(manifest.id, record);
       this.appendLog(record, "sol", "info", `Installed ${manifest.name} ${manifest.version}`);
+      if (missingSettings.length) {
+        this.appendLog(record, "sol", "warn", `Configuration required before start: ${missingSettings.join(", ")}`);
+      }
       if (source.type === "github" && source.repository) this.appendLog(record, "sol", "info", `Source: GitHub ${source.repository}${source.releaseTag ? ` · ${source.releaseTag}` : ""}`);
       await this.persistState();
       if (record.enabled) await this.startInternal(record, false);
@@ -252,6 +272,7 @@ export class PluginManager {
   async start(id: string): Promise<SolPluginSnapshot> {
     await this.init();
     const plugin = this.requirePlugin(id);
+    this.assertConfigurationComplete(plugin);
     plugin.enabled = true;
     await this.persistState();
     await this.startInternal(plugin, false);
@@ -270,6 +291,7 @@ export class PluginManager {
   async restart(id: string): Promise<SolPluginSnapshot> {
     await this.init();
     const plugin = this.requirePlugin(id);
+    this.assertConfigurationComplete(plugin);
     plugin.enabled = true;
     await this.persistState();
     await this.terminate(plugin, true);
@@ -368,6 +390,15 @@ export class PluginManager {
     return result;
   }
 
+  private missingRequiredSettings(plugin: ManagedPlugin): string[] {
+    return missingRequiredSettingKeys(plugin.manifest.settings, this.resolvedSettings(plugin));
+  }
+
+  private assertConfigurationComplete(plugin: ManagedPlugin): void {
+    const missing = this.missingRequiredSettings(plugin);
+    if (missing.length) throw new Error(`plugin_configuration_required:${missing.join(",")}`);
+  }
+
   private snapshot(plugin: ManagedPlugin): SolPluginSnapshot {
     return {
       manifest: plugin.manifest,
@@ -391,6 +422,7 @@ export class PluginManager {
   private async startInternal(plugin: ManagedPlugin, automaticRestart: boolean): Promise<void> {
     if (this.shuttingDown) return;
     if (plugin.child && plugin.state !== "stopped" && plugin.state !== "error") return;
+    this.assertConfigurationComplete(plugin);
     const missingPermissions = plugin.manifest.permissions.filter((permission) => !plugin.approvedPermissions.includes(permission));
     if (missingPermissions.length) throw new Error(`plugin_permissions_required:${missingPermissions.join(",")}`);
     if (plugin.restartTimer) {
