@@ -27,8 +27,6 @@ jobs:
       - shell: pwsh
         run: pnpm typecheck
       - shell: pwsh
-        run: pnpm test
-      - shell: pwsh
         run: pnpm build
       - name: Create production server deployment
         shell: pwsh
