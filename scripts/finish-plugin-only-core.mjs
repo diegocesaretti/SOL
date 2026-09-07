@@ -62,9 +62,4 @@ delete pkg.scripts["mcp:legacy"];
 for (const dep of ["baileys", "pino", "qrcode"]) delete pkg.dependencies[dep];
 await write(packagePath, JSON.stringify(pkg, null, 2) + "\n");
 
-let win = await read(".github/workflows/windows-package.yml");
-win = replace(win, `            & $node --input-type=module -e "await import('pg'); await import('pino'); await import('zod'); await import('qrcode'); await import('baileys'); console.log('portable production dependencies resolve')"`, `            & $node --input-type=module -e "await import('pg'); await import('zod'); await import('@modelcontextprotocol/server'); console.log('portable production dependencies resolve')"`, "windows dependency check");
-win = replace(win, `            'dist/windows/SOL/apps/server/node_modules/pg/package.json',\n            'dist/windows/SOL/apps/server/node_modules/pino/package.json',`, `            'dist/windows/SOL/apps/server/node_modules/pg/package.json',\n            'dist/windows/SOL/apps/server/node_modules/zod/package.json',`, "windows required deps");
-await write(".github/workflows/windows-package.yml", win);
-
 console.log("Final plugin-only core cleanup applied");
