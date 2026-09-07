@@ -27,6 +27,8 @@ import { handleLifeApi } from "./modules/life/routes.js";
 import { registerCandidateProcessor } from "./modules/knowledge/candidate-processor.js";
 import { handleKnowledgeApi } from "./modules/knowledge/routes.js";
 import { handleMcpApi } from "./modules/mcp/routes.js";
+import { handleMcpRuntimeApi } from "./modules/mcp/runtime-routes.js";
+import { handlePluginToolApi } from "./modules/plugins/tool-routes.js";
 import {
   AlreadyConfiguredError,
   ValidationError,
@@ -107,8 +109,14 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
   // not a browser session cookie and never direct database credentials.
   if (path.startsWith("/v1/plugin-api/")) {
     if (await handlePluginInputApi(path, request, response)) return;
+    if (await handlePluginToolApi(path, request, response)) return;
   }
 
+  // The stdio SOL MCP process uses its member-scoped MCP token to discover and
+  // execute tools dynamically registered by installed plugins.
+  if (path.startsWith("/v1/mcp/runtime/")) {
+    if (await handleMcpRuntimeApi(path, request, response)) return;
+  }
 
   if (request.method === "GET" && path === "/") {
     sendHtml(response, 200, renderOnboardingPage());
@@ -135,7 +143,6 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     return;
   }
 
-
   if (request.method === "GET" && path === "/health") {
     const database = await checkDatabase();
     sendJson(response, database ? 200 : 503, {
@@ -151,12 +158,13 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     sendJson(response, 200, {
       name: "SOL",
       architecture: "family-first data/knowledge OS + MCP",
-      version: "0.11.0",
+      version: "0.13.0",
       database,
       reasoningInterface: "mcp",
       aiProviderMode: config.aiProvider,
       optionalAiProviders: ["openai", "codex"],
       sourceMode: "plugins-only",
+      toolMode: "plugins-register-through-sol",
       sources: [],
       interfaces: ["mcp_stdio", "web", "plugin_runtime", "windows_tray"],
       views: ["inputs", "outputs", "life_timeline", "people", "projects", "mcp_access"],
@@ -333,7 +341,7 @@ server.listen(config.port, config.host, () => {
   console.log(`SOL Core listening on http://${config.host}:${config.port}`);
   startWindowsTray();
   outboxDispatcher.start();
-  console.log("External sources are plugin-only; install providers from Services.");
+  console.log("External sources and provider tools are plugin-only; install providers from Services.");
   if (config.host !== "127.0.0.1" && config.host !== "localhost") {
     console.warn(
       "SOL is listening beyond localhost. Use HTTPS and review member authentication before exposing it broadly.",
