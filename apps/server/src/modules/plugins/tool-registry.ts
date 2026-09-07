@@ -31,6 +31,20 @@ export interface SolPluginToolView extends SolPluginToolDefinition {
 const TOOL_NAME_RE = /^[a-z][a-z0-9_-]{1,79}$/;
 const ARG_NAME_RE = /^[a-zA-Z][a-zA-Z0-9_]{0,63}$/;
 
+export const CORE_MCP_TOOL_NAMES = new Set([
+  "sol_status",
+  "get_timeline",
+  "search_life",
+  "list_people",
+  "list_projects",
+  "memory_search",
+  "save_observation",
+  "remember_fact",
+  "correct_memory",
+  "forget_memory",
+  "save_schedule",
+]);
+
 function stringValue(value: unknown, name: string, max: number): string {
   if (typeof value !== "string") throw new Error(`${name} must be a string`);
   const result = value.trim();
@@ -94,6 +108,7 @@ export function validatePluginToolRegistration(value: unknown): SolPluginToolReg
     const record = value as Record<string, unknown>;
     const name = stringValue(record.name, `tools[${toolIndex}].name`, 80).toLowerCase();
     if (!TOOL_NAME_RE.test(name)) throw new Error(`invalid tool name: ${name}`);
+    if (CORE_MCP_TOOL_NAMES.has(name)) throw new Error(`reserved core tool name: ${name}`);
     if (seenTools.has(name)) throw new Error(`duplicate tool name: ${name}`);
     seenTools.add(name);
     const description = stringValue(record.description, `tools[${toolIndex}].description`, 1000);
@@ -111,4 +126,50 @@ export function validatePluginToolRegistration(value: unknown): SolPluginToolReg
     return { name, description, requiresSubmit, input: argumentsList };
   });
   return { transport: "http", baseUrl, tools };
+}
+
+export function validatePluginToolInput(
+  tool: SolPluginToolDefinition,
+  value: unknown,
+): Record<string, unknown> {
+  if (value === undefined || value === null) value = {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("plugin_tool_input_must_be_object");
+  }
+  const input = value as Record<string, unknown>;
+  const definitions = new Map(tool.input.map((argument) => [argument.name, argument]));
+  for (const name of Object.keys(input)) {
+    if (!definitions.has(name)) throw new Error(`plugin_tool_input_unknown:${name}`);
+  }
+
+  const result: Record<string, unknown> = {};
+  for (const argument of tool.input) {
+    const present = Object.prototype.hasOwnProperty.call(input, argument.name);
+    if (!present) {
+      if (argument.required) throw new Error(`plugin_tool_input_required:${argument.name}`);
+      continue;
+    }
+    const current = input[argument.name];
+    if (argument.type === "boolean") {
+      if (typeof current !== "boolean") throw new Error(`plugin_tool_input_boolean:${argument.name}`);
+      if (argument.literalTrue && current !== true) throw new Error(`plugin_tool_input_literal_true:${argument.name}`);
+    } else if (argument.type === "number") {
+      if (typeof current !== "number" || !Number.isFinite(current)) throw new Error(`plugin_tool_input_number:${argument.name}`);
+      if (argument.min !== undefined && current < argument.min) throw new Error(`plugin_tool_input_min:${argument.name}`);
+      if (argument.max !== undefined && current > argument.max) throw new Error(`plugin_tool_input_max:${argument.name}`);
+    } else if (argument.type === "string_array") {
+      if (!Array.isArray(current) || current.some((item) => typeof item !== "string")) {
+        throw new Error(`plugin_tool_input_string_array:${argument.name}`);
+      }
+      if (argument.min !== undefined && current.length < argument.min) throw new Error(`plugin_tool_input_min:${argument.name}`);
+      if (argument.max !== undefined && current.length > argument.max) throw new Error(`plugin_tool_input_max:${argument.name}`);
+    } else {
+      if (typeof current !== "string") throw new Error(`plugin_tool_input_string:${argument.name}`);
+      if (argument.min !== undefined && current.length < argument.min) throw new Error(`plugin_tool_input_min:${argument.name}`);
+      if (argument.max !== undefined && current.length > argument.max) throw new Error(`plugin_tool_input_max:${argument.name}`);
+      if (argument.enum?.length && !argument.enum.includes(current)) throw new Error(`plugin_tool_input_enum:${argument.name}`);
+    }
+    result[argument.name] = current;
+  }
+  return result;
 }
