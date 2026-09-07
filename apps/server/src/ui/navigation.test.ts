@@ -7,6 +7,7 @@ import { renderMcpPage } from "./mcp.js";
 import { renderOnboardingPage } from "./onboarding.js";
 import { renderOutputsPage } from "./outputs.js";
 import { renderPluginsPage } from "./plugins.js";
+import { renderSettingsPage } from "./settings.js";
 import { solSidebar } from "./shell.js";
 
 const renderedPages = [
@@ -17,6 +18,7 @@ const renderedPages = [
   ["mcp", renderMcpPage()],
   ["ai", renderAiPage()],
   ["services", renderPluginsPage()],
+  ["settings", renderSettingsPage()],
 ] as const;
 const pages = renderedPages.map(([, html]) => html).join("\n");
 
@@ -42,7 +44,7 @@ test("current SOL UI does not link to removed native provider surfaces", () => {
 
 test("sidebar exposes every canonical SOL page", () => {
   const html = solSidebar("home");
-  for (const route of ["/", "/services", "/inputs", "/outputs", "/life", "/mcp", "/ai"]) {
+  for (const route of ["/", "/services", "/inputs", "/outputs", "/life", "/mcp", "/ai", "/settings"]) {
     assert.match(html, new RegExp(`href=\\"${route === "/" ? "\\/" : route.replaceAll("/", "\\/")}\\"`));
   }
 });
@@ -50,8 +52,6 @@ test("sidebar exposes every canonical SOL page", () => {
 test("all embedded UI scripts are syntactically valid JavaScript", () => {
   for (const [name, html] of renderedPages) {
     const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1] ?? "");
-    for (const script of scripts) {
-      assert.doesNotThrow(() => new Function(script), `${name} contains invalid embedded JavaScript`);
-    }
+    for (const script of scripts) assert.doesNotThrow(() => new Function(script), `${name} contains invalid embedded JavaScript`);
   }
 });
