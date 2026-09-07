@@ -1,6 +1,6 @@
 {
   "name": "@sol/server",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -11,7 +11,7 @@
     "test": "tsx --test src/**/*.test.ts",
     "db:check": "tsx src/database/check.ts",
     "db:migrate": "tsx src/database/migrate.ts",
-    "mcp": "tsx src/mcp/nexo-stdio.ts",
+    "mcp": "tsx src/mcp/sol-stdio.ts",
     "mcp:token": "tsx src/mcp/create-token.ts",
     "knowledge:consolidate": "tsx src/knowledge/consolidate.ts"
   },
