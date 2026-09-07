@@ -1,6 +1,7 @@
 param(
   [string]$HostName = "127.0.0.1",
-  [int]$Port = 3000
+  [int]$Port = 3000,
+  [int]$LauncherPid = 0
 )
 
 Add-Type -AssemblyName System.Windows.Forms
@@ -36,23 +37,30 @@ $notify.Icon = $yellowIcon
 
 $menu = New-Object System.Windows.Forms.ContextMenuStrip
 $openInputs = $menu.Items.Add("Abrir Inputs")
+$openServices = $menu.Items.Add("Abrir Servicios")
 $openHome = $menu.Items.Add("Abrir SOL")
 $openLife = $menu.Items.Add("Abrir Life")
 [void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
-$exitItem = $menu.Items.Add("Cerrar icono")
+$exitItem = $menu.Items.Add($(if ($LauncherPid -gt 0) { "Cerrar SOL" } else { "Cerrar icono" }))
 $notify.ContextMenuStrip = $menu
 
 function Open-Sol([string]$path) {
   try { Start-Process ($baseUrl + $path) | Out-Null } catch {}
 }
 $openInputs.add_Click({ Open-Sol "/inputs" })
+$openServices.add_Click({ Open-Sol "/inputs/plugins/ui" })
 $openHome.add_Click({ Open-Sol "/" })
 $openLife.add_Click({ Open-Sol "/life" })
-$notify.add_DoubleClick({ Open-Sol "/inputs" })
+$notify.add_DoubleClick({ Open-Sol "/inputs/plugins/ui" })
 
 $script:failedChecks = 0
 $script:shouldExit = $false
-$exitItem.add_Click({ $script:shouldExit = $true })
+$exitItem.add_Click({
+  $script:shouldExit = $true
+  if ($LauncherPid -gt 0) {
+    try { Stop-Process -Id $LauncherPid -Force -ErrorAction Stop } catch {}
+  }
+})
 
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 5000
