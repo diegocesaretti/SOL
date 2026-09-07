@@ -29,9 +29,12 @@ function normalizeLabel(label: unknown): string {
 
 export async function createMcpAccessToken(
   principal: AuthPrincipal,
-  input: { label?: string; expiresInDays?: number; allowSubmit?: boolean } = {},
+  input: { label?: string; expiresInDays?: number; allowSubmit?: boolean; allowActions?: boolean } = {},
 ): Promise<{ token: string; access: McpAccessTokenView }> {
   if (principal.role === "guest") throw new Error("guests cannot create MCP access tokens");
+  if (input.allowActions === true && principal.role !== "owner" && principal.role !== "adult") {
+    throw new Error("only owners and adults can grant MCP external-action access");
+  }
   const label = normalizeLabel(input.label ?? "Codex · Nexo");
   const requestedDays = Number(input.expiresInDays ?? 90);
   const expiresInDays = Number.isFinite(requestedDays)
@@ -39,7 +42,9 @@ export async function createMcpAccessToken(
     : 90;
   const expiresAt = new Date(Date.now() + expiresInDays * 86_400_000);
   const token = `nexo_mcp_${randomBytes(32).toString("base64url")}`;
-  const scopes = input.allowSubmit === true ? ["read", "submit"] : ["read"];
+  const scopes = ["read"];
+  if (input.allowSubmit === true) scopes.push("submit");
+  if (input.allowActions === true) scopes.push("actions");
   const result = await db.query<{
     id: string;
     label: string;
