@@ -2,7 +2,7 @@ name: Windows portable package
 
 on:
   push:
-    branches: [ main, feat/windows-standalone-package, fix/windows-package-flat-node-modules ]
+    branches: [ main, feat/windows-standalone-package, fix/windows-package-flat-node-modules, fix/first-run-database-config ]
   workflow_dispatch:
 
 permissions:
