@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   windows-package:
@@ -94,7 +94,20 @@ jobs:
           "sha256=$hash" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
         id: package
 
-      - name: Upload SOL Windows package
+      - name: Publish stable SOL Windows release asset
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = 'sol-windows-latest'
+          gh release view $tag --repo $env:GITHUB_REPOSITORY 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'SOL Windows portable' --notes 'Portable Windows build of SOL. Open SOL.exe; Node is bundled. Real .env credentials are never included.' --prerelease --target $env:GITHUB_SHA
+          }
+          gh release upload $tag dist/SOL-Windows.zip --repo $env:GITHUB_REPOSITORY --clobber
+
+      - name: Upload SOL Windows package artifact
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: SOL-Windows
