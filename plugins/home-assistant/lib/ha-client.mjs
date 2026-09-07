@@ -85,6 +85,15 @@ export class HomeAssistantClient {
     });
   }
 
+  async optionalCommand(type, fallback) {
+    try {
+      return await this.command(type);
+    } catch (error) {
+      console.warn(`Home Assistant optional command ${type} unavailable: ${error?.message || error}`);
+      return fallback;
+    }
+  }
+
   async callService(domain, service, serviceData = {}, target = {}) {
     return await this.command("call_service", {
       domain,
@@ -151,12 +160,13 @@ export class HomeAssistantClient {
   }
 
   async reconcile(includeStates) {
+    const statesPromise = includeStates ? this.command("get_states") : Promise.resolve(null);
     const [states, entities, devices, areas, services] = await Promise.all([
-      includeStates ? this.command("get_states") : Promise.resolve(null),
-      this.command("config/entity_registry/list"),
-      this.command("config/device_registry/list"),
-      this.command("config/area_registry/list"),
-      this.command("get_services")
+      statesPromise,
+      this.optionalCommand("config/entity_registry/list", Object.values(this.cache.entities)),
+      this.optionalCommand("config/device_registry/list", Object.values(this.cache.devices)),
+      this.optionalCommand("config/area_registry/list", Object.values(this.cache.areas)),
+      this.optionalCommand("get_services", this.cache.services)
     ]);
     if (includeStates) this.cache.installSnapshot({ states, entities, devices, areas, services });
     else this.cache.replaceRegistries({ entities, devices, areas, services });
