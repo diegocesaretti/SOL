@@ -25,11 +25,11 @@ export async function handleMcpRuntimeApi(
     sendJson(response, 401, { error: "mcp_token_invalid" });
     return true;
   }
-  const allowSubmit = access.scopes.includes("submit");
+  const allowExternalActions = access.scopes.includes("external_action");
   const scope = { householdId: access.principal.householdId, memberId: access.principal.memberId };
 
   if (path === "/v1/mcp/runtime/tools" && request.method === "GET") {
-    sendJson(response, 200, { tools: await pluginToolRuntime.list(scope, allowSubmit) });
+    sendJson(response, 200, { tools: await pluginToolRuntime.list(scope, allowExternalActions) });
     return true;
   }
 
@@ -42,11 +42,15 @@ export async function handleMcpRuntimeApi(
     try {
       const input = await readJsonBody<unknown>(request);
       const name = decodeURIComponent(match[1]!);
-      const result = await pluginToolRuntime.execute(scope, allowSubmit, name, input);
+      const result = await pluginToolRuntime.execute(scope, allowExternalActions, name, input);
       sendJson(response, 200, { result });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      const status = message === "plugin_tool_not_found" ? 404 : message === "mcp_submit_scope_required" ? 403 : 400;
+      const status = message === "plugin_tool_not_found"
+        ? 404
+        : message === "mcp_external_action_scope_required"
+          ? 403
+          : 400;
       sendJson(response, status, { error: message });
     }
     return true;
