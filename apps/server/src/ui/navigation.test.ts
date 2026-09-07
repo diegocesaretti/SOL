@@ -9,15 +9,16 @@ import { renderOutputsPage } from "./outputs.js";
 import { renderPluginsPage } from "./plugins.js";
 import { solSidebar } from "./shell.js";
 
-const pages = [
-  renderOnboardingPage(),
-  renderInputsPage(),
-  renderOutputsPage(),
-  renderLifePage(),
-  renderMcpPage(),
-  renderAiPage(),
-  renderPluginsPage(),
-].join("\n");
+const renderedPages = [
+  ["home", renderOnboardingPage()],
+  ["inputs", renderInputsPage()],
+  ["outputs", renderOutputsPage()],
+  ["life", renderLifePage()],
+  ["mcp", renderMcpPage()],
+  ["ai", renderAiPage()],
+  ["services", renderPluginsPage()],
+] as const;
+const pages = renderedPages.map(([, html]) => html).join("\n");
 
 const removedNativeSurfaces = [
   "/whatsapp?advanced=1",
@@ -36,14 +37,21 @@ const removedNativeSurfaces = [
 ];
 
 test("current SOL UI does not link to removed native provider surfaces", () => {
-  for (const route of removedNativeSurfaces) {
-    assert.equal(pages.includes(route), false, `removed route leaked into UI: ${route}`);
-  }
+  for (const route of removedNativeSurfaces) assert.equal(pages.includes(route), false, `removed route leaked into UI: ${route}`);
 });
 
 test("sidebar exposes every canonical SOL page", () => {
   const html = solSidebar("home");
   for (const route of ["/", "/services", "/inputs", "/outputs", "/life", "/mcp", "/ai"]) {
     assert.match(html, new RegExp(`href=\\"${route === "/" ? "\\/" : route.replaceAll("/", "\\/")}\\"`));
+  }
+});
+
+test("all embedded UI scripts are syntactically valid JavaScript", () => {
+  for (const [name, html] of renderedPages) {
+    const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1] ?? "");
+    for (const script of scripts) {
+      assert.doesNotThrow(() => new Function(script), `${name} contains invalid embedded JavaScript`);
+    }
   }
 });
