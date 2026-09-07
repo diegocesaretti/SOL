@@ -73,7 +73,9 @@ await mkdir(config.dataDir, { recursive: true });
 const cache = new HaStateCache(config.dataDir, config.flushMs);
 await cache.load();
 const sol = new SolPluginClient();
+const pluginId = process.env.SOL_PLUGIN_ID?.trim() || "home-assistant";
 const mcpPath = `/mcp/${randomBytes(24).toString("base64url")}`;
+const callbackUrl = `http://127.0.0.1:${config.apiPort}${mcpPath}`;
 
 let lastPersonSignature = "";
 async function syncPeople() {
@@ -139,7 +141,7 @@ const tools = [
     name: "home_assistant_cache_status",
     description: "Return Home Assistant connection and local cache freshness. Use this before relying on cached state when freshness matters.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    requiresSubmit: false
+    requiredScope: "read"
   },
   {
     name: "home_assistant_get_state",
@@ -150,7 +152,7 @@ const tools = [
       required: ["entityId"],
       additionalProperties: false
     },
-    requiresSubmit: false
+    requiredScope: "read"
   },
   {
     name: "home_assistant_search_states",
@@ -164,19 +166,19 @@ const tools = [
       required: ["query"],
       additionalProperties: false
     },
-    requiresSubmit: false
+    requiredScope: "read"
   },
   {
     name: "home_assistant_list_people",
     description: "List cached Home Assistant person entities and their current states.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    requiresSubmit: false
+    requiredScope: "read"
   },
   {
     name: "home_assistant_list_areas",
     description: "List Home Assistant areas from the cached area registry with current entity counts.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    requiresSubmit: false
+    requiredScope: "read"
   },
   {
     name: "home_assistant_get_services",
@@ -186,11 +188,11 @@ const tools = [
       properties: { domain: { type: "string" } },
       additionalProperties: false
     },
-    requiresSubmit: false
+    requiredScope: "read"
   },
   {
     name: "home_assistant_call_service",
-    description: "Execute a Home Assistant service/action. Requires SOL submit scope, plugin control enabled and explicit confirmation from the current human.",
+    description: "Execute a Home Assistant service/action. Requires SOL actions scope, plugin control enabled and explicit confirmation from the current human.",
     inputSchema: {
       type: "object",
       properties: {
@@ -203,9 +205,21 @@ const tools = [
       required: ["confirmedByUser", "domain", "service"],
       additionalProperties: false
     },
-    requiresSubmit: true
+    requiredScope: "actions"
   }
 ];
+
+let toolsRegistered = false;
+async function registerTools() {
+  if (!sol.enabled) return;
+  try {
+    await sol.registerMcpTools(callbackUrl, tools);
+    toolsRegistered = true;
+  } catch (error) {
+    toolsRegistered = false;
+    console.warn(`SOL MCP tool registration failed: ${error?.message || error}`);
+  }
+}
 
 const server = createServer(async (request, response) => {
   const path = new URL(request.url || "/", "http://127.0.0.1").pathname;
@@ -220,6 +234,19 @@ const server = createServer(async (request, response) => {
     }
 
     const body = await readJson(request);
+    if (body?.type === "sol.plugin.mcp.probe") {
+      if (body.pluginId !== pluginId) {
+        sendJson(response, 403, { error: "plugin_id_mismatch" });
+        return;
+      }
+      sendJson(response, 200, { ok: true, pluginId });
+      return;
+    }
+    if (body?.type !== "sol.plugin.mcp.invoke" || body.pluginId !== pluginId) {
+      sendJson(response, 403, { error: "invalid_plugin_mcp_envelope" });
+      return;
+    }
+
     const tool = String(body?.tool || "");
     const args = body?.arguments && typeof body.arguments === "object" ? body.arguments : {};
 
@@ -287,18 +314,17 @@ const server = createServer(async (request, response) => {
 });
 
 server.listen(config.apiPort, "127.0.0.1", async () => {
-  const callbackUrl = `http://127.0.0.1:${config.apiPort}${mcpPath}`;
   console.log(`Home Assistant SOL plugin API listening on loopback port ${config.apiPort}`);
-  if (sol.enabled) {
-    await sol.registerMcpTools(callbackUrl, tools).catch((error) => {
-      console.warn(`SOL MCP tool registration failed: ${error?.message || error}`);
-    });
-  }
+  await registerTools();
   void ha.start();
 });
 
 const peopleTimer = setInterval(() => void syncPeople(), 30000);
 peopleTimer.unref?.();
+const registrationRetryTimer = setInterval(() => {
+  if (!toolsRegistered) void registerTools();
+}, 15000);
+registrationRetryTimer.unref?.();
 
 let stopping = false;
 async function shutdown(signal) {
@@ -306,6 +332,8 @@ async function shutdown(signal) {
   stopping = true;
   console.log(`${signal}: stopping Home Assistant SOL plugin`);
   clearInterval(peopleTimer);
+  clearInterval(registrationRetryTimer);
+  if (sol.enabled) await sol.registerMcpTools(callbackUrl, []).catch(() => undefined);
   server.close();
   await ha.stop();
   await presenceQueue.catch(() => undefined);
