@@ -16,6 +16,7 @@ export const SOL_PLUGIN_HOST_CAPABILITIES = [
   "identity.v1",
   "identity.read",
   "mcp.register",
+  "mcp.invoke.read",
   "filesystem.plugin-data",
 ] as const;
 
