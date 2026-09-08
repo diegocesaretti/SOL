@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { config } from "./config.js";
+import "./database/auto-migrate.js";
 import { InMemoryEventBus } from "./core/event-bus.js";
 import { OutboxDispatcher } from "./core/outbox-dispatcher.js";
 import { checkDatabase, closeDatabase } from "./database/client.js";
@@ -109,7 +110,6 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     if (await handlePluginInputApi(path, request, response)) return;
   }
 
-
   if (request.method === "GET" && path === "/") {
     sendHtml(response, 200, renderOnboardingPage());
     return;
@@ -134,7 +134,6 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     sendHtml(response, 200, renderAiPage());
     return;
   }
-
 
   if (request.method === "GET" && path === "/health") {
     const database = await checkDatabase();
