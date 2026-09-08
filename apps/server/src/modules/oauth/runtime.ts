@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { readJsonBody, sendJson } from "../../http.js";
 import type { SolPluginRuntimePrincipal } from "../plugins/types.js";
+import { refreshOAuthCredential } from "./refresh.js";
 import {
   getOAuthFlow,
   listOAuthProviders,
@@ -85,6 +86,20 @@ export async function handlePluginOAuthRuntime(
     if (!input) return true;
     try {
       sendJson(response, 201, await startOAuthFlow(principal, input));
+    } catch (error) {
+      runtimeError(response, error);
+    }
+    return true;
+  }
+
+  const refreshMatch = path.match(/^\/v1\/plugin-api\/oauth\/credentials\/([0-9a-f-]{36})\/refresh$/i);
+  if (refreshMatch) {
+    if (request.method !== "POST") {
+      sendJson(response, 405, { error: "method_not_allowed" });
+      return true;
+    }
+    try {
+      sendJson(response, 200, await refreshOAuthCredential(principal, refreshMatch[1]!));
     } catch (error) {
       runtimeError(response, error);
     }
