@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { readJsonBody, sendJson } from "../../http.js";
 import { handlePluginConnectionsApi } from "../connections/runtime.js";
 import { handlePluginCredentialRuntime } from "../credentials/runtime.js";
+import { handlePluginOAuthRuntime } from "../oauth/runtime.js";
 import { upsertPluginPersonIdentity } from "./identity-service.js";
 import { getPluginVisiblePerson, listPluginVisiblePeople } from "./identity-read-service.js";
 import { registerPluginMcpTools } from "./mcp-registry.js";
@@ -68,6 +69,7 @@ export async function handlePluginRuntimeApi(
   const connectionPath = path === "/v1/plugin-api/connections"
     || /^\/v1\/plugin-api\/connections\/[0-9a-f-]{36}$/i.test(path);
   const credentialPath = path.startsWith("/v1/plugin-api/credentials");
+  const oauthPath = path.startsWith("/v1/plugin-api/oauth/");
   if (
     path !== "/v1/plugin-api/identities/person"
     && path !== "/v1/plugin-api/mcp/tools/register"
@@ -75,6 +77,7 @@ export async function handlePluginRuntimeApi(
     && !peopleMatch
     && !connectionPath
     && !credentialPath
+    && !oauthPath
   ) {
     return false;
   }
@@ -87,6 +90,10 @@ export async function handlePluginRuntimeApi(
 
   if (credentialPath) {
     return await handlePluginCredentialRuntime(path, request, response, principal);
+  }
+
+  if (oauthPath) {
+    return await handlePluginOAuthRuntime(path, request, response, principal);
   }
 
   if (peopleMatch && request.method === "GET") {
