@@ -37,7 +37,7 @@ CREATE TABLE oauth_flows (
   consumed_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  CHECK (status IN ('pending', 'completed', 'error', 'expired'))
+  CHECK (status IN ('pending', 'processing', 'completed', 'error', 'expired'))
 );
 
 CREATE INDEX oauth_flows_owner_idx
