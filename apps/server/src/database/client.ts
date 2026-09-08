@@ -1,11 +1,12 @@
 import pg from "pg";
 import { config } from "../config.js";
 import { wakeOutbox } from "../core/outbox-wakeup.js";
+import { normalizePostgresConnectionString } from "./postgres-url.js";
 
 const { Pool } = pg;
 
 export const db = new Pool({
-  connectionString: config.databaseUrl,
+  connectionString: normalizePostgresConnectionString(config.databaseUrl),
   max: config.databasePoolMax,
   idleTimeoutMillis: config.databaseIdleTimeoutMs,
   connectionTimeoutMillis: config.databaseConnectionTimeoutMs,

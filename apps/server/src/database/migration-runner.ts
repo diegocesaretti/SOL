@@ -13,6 +13,18 @@ const migrationsDir = fileURLToPath(
 const MIGRATION_LOCK_CLASS = 139770581;
 const MIGRATION_LOCK_INSTANCE = 1;
 
+// Migrations through 0020 existed before SOL introduced automatic migration
+// bookkeeping. Some installed databases therefore already contain the schema
+// produced by a migration while schema_migrations does not contain its filename.
+// Keep this list explicit: a migration is adopted only when every object that
+// uniquely proves that migration ran already exists.
+const LEGACY_MIGRATION_SENTINELS: Readonly<Record<string, readonly string[]>> = {
+  "0020_plugin_runtime_capabilities.sql": [
+    "plugin_identity_bindings",
+    "plugin_mcp_tools",
+  ],
+};
+
 async function ensureMigrationTable(client: PoolClient): Promise<void> {
   await client.query(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -20,6 +32,14 @@ async function ensureMigrationTable(client: PoolClient): Promise<void> {
       applied_at timestamptz NOT NULL DEFAULT now()
     )
   `);
+}
+
+async function recordMigration(client: PoolClient, filename: string, label: string): Promise<void> {
+  await client.query(
+    "INSERT INTO schema_migrations(filename) VALUES ($1) ON CONFLICT DO NOTHING",
+    [filename],
+  );
+  console.log(`${label}: ${filename}`);
 }
 
 async function baselineLegacyInitialMigration(
@@ -33,11 +53,26 @@ async function baselineLegacyInitialMigration(
   );
   if (!result.rows[0]?.exists) return false;
 
-  await client.query(
-    "INSERT INTO schema_migrations(filename) VALUES ($1) ON CONFLICT DO NOTHING",
-    [filename],
-  );
-  console.log(`Baseline recorded: ${filename}`);
+  await recordMigration(client, filename, "Baseline recorded");
+  return true;
+}
+
+async function adoptLegacyMigrationIfSatisfied(
+  client: PoolClient,
+  filename: string,
+): Promise<boolean> {
+  const sentinels = LEGACY_MIGRATION_SENTINELS[filename];
+  if (!sentinels?.length) return false;
+
+  for (const relation of sentinels) {
+    const result = await client.query<{ exists: string | null }>(
+      "SELECT to_regclass($1)::text AS exists",
+      [`public.${relation}`],
+    );
+    if (!result.rows[0]?.exists) return false;
+  }
+
+  await recordMigration(client, filename, "Legacy migration adopted");
   return true;
 }
 
@@ -69,6 +104,7 @@ export async function migrateDatabase(): Promise<void> {
       );
       if (applied.rowCount) continue;
       if (await baselineLegacyInitialMigration(client, filename)) continue;
+      if (await adoptLegacyMigrationIfSatisfied(client, filename)) continue;
 
       const sql = stripOuterTransaction(await readFile(`${migrationsDir}${filename}`, "utf8"));
       try {
