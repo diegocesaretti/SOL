@@ -37,6 +37,8 @@ test("plugin schema v2 accepts supported host capability requirements", () => {
     "input.register",
     "input.write",
     "input.status",
+    "identity.v1",
+    "identity.read",
     "mcp.register",
     "filesystem.plugin-data",
   ]));
@@ -45,6 +47,8 @@ test("plugin schema v2 accepts supported host capability requirements", () => {
     "input.register",
     "input.write",
     "input.status",
+    "identity.v1",
+    "identity.read",
     "mcp.register",
     "filesystem.plugin-data",
   ]);

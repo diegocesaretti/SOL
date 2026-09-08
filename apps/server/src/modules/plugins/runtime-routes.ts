@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { readJsonBody, sendJson } from "../../http.js";
 import { upsertPluginPersonIdentity } from "./identity-service.js";
+import { getPluginVisiblePerson, listPluginVisiblePeople } from "./identity-read-service.js";
 import { registerPluginMcpTools } from "./mcp-registry.js";
 import { pluginManager } from "./runtime.js";
 import type { SolPluginRuntimePrincipal } from "./types.js";
@@ -60,11 +61,36 @@ export async function handlePluginRuntimeApi(
   request: IncomingMessage,
   response: ServerResponse,
 ): Promise<boolean> {
-  if (path !== "/v1/plugin-api/identities/person" && path !== "/v1/plugin-api/mcp/tools/register") {
+  const peopleMatch = path.match(/^\/v1\/plugin-api\/identities\/people(?:\/([0-9a-f-]{36}))?$/i);
+  if (
+    path !== "/v1/plugin-api/identities/person"
+    && path !== "/v1/plugin-api/mcp/tools/register"
+    && !peopleMatch
+  ) {
     return false;
   }
   const principal = await authenticate(request, response);
   if (!principal) return true;
+
+  if (peopleMatch && request.method === "GET") {
+    if (!requirePermission(response, principal, "identity.read")) return true;
+    try {
+      const entityId = peopleMatch[1];
+      if (entityId) {
+        const person = await getPluginVisiblePerson(principal, entityId);
+        if (!person) {
+          sendJson(response, 404, { error: "person_not_found" });
+          return true;
+        }
+        sendJson(response, 200, { person });
+      } else {
+        sendJson(response, 200, { people: await listPluginVisiblePeople(principal) });
+      }
+    } catch (error) {
+      runtimeError(response, error);
+    }
+    return true;
+  }
 
   if (path === "/v1/plugin-api/identities/person" && request.method === "POST") {
     if (!requirePermission(response, principal, "identity.write")) return true;
