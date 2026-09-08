@@ -29,6 +29,7 @@ import { handleLifeApi } from "./modules/life/routes.js";
 import { registerCandidateProcessor } from "./modules/knowledge/candidate-processor.js";
 import { handleKnowledgeApi } from "./modules/knowledge/routes.js";
 import { handleMcpApi } from "./modules/mcp/routes.js";
+import { handleOAuthCallback } from "./modules/oauth/callback.js";
 import {
   AlreadyConfiguredError,
   ValidationError,
@@ -104,6 +105,12 @@ function canCreateRole(principal: AuthPrincipal, role: NewMemberRole): boolean {
 
 async function handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
   const path = pathname(request);
+
+  // OAuth providers redirect a browser back here. The callback is unauthenticated
+  // by design, but it is bound to a short-lived random state + PKCE flow.
+  if (path === "/v1/oauth/callback") {
+    if (await handleOAuthCallback(request, response)) return;
+  }
 
   // Plugin runtime calls use a short-lived bearer token issued by PluginManager,
   // not a browser session cookie and never direct database credentials.
