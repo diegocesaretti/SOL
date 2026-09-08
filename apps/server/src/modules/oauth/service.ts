@@ -4,11 +4,12 @@ import type { SolPluginRuntimePrincipal } from "../plugins/types.js";
 import {
   assertPluginCredentialOwned,
   createPluginCredential,
+  deletePluginCredential,
   resolvePluginCredential,
 } from "../credentials/service.js";
 
 export type OAuthClientAuth = "none" | "body" | "basic";
-export type OAuthFlowStatus = "pending" | "completed" | "error" | "expired";
+export type OAuthFlowStatus = "pending" | "processing" | "completed" | "error" | "expired";
 
 interface ProviderRow {
   id: string;
@@ -92,11 +93,11 @@ function scopes(value: unknown, fallback: string[] = []): string[] {
   return [...new Set(result)];
 }
 
-function hashState(state: string): string {
+export function hashOAuthState(state: string): string {
   return createHash("sha256").update(state, "utf8").digest("base64url");
 }
 
-function pkceChallenge(verifier: string): string {
+export function oauthPkceChallenge(verifier: string): string {
   return createHash("sha256").update(verifier, "utf8").digest("base64url");
 }
 
@@ -252,7 +253,7 @@ export async function startOAuthFlow(
      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
     [
       flowId,
-      hashState(state),
+      hashOAuthState(state),
       principal.householdId,
       principal.memberId,
       principal.pluginId,
@@ -271,7 +272,7 @@ export async function startOAuthFlow(
   auth.searchParams.set("redirect_uri", provider.redirect_uri);
   if (requestedScopes.length) auth.searchParams.set("scope", requestedScopes.join(" "));
   auth.searchParams.set("state", state);
-  auth.searchParams.set("code_challenge", pkceChallenge(verifier));
+  auth.searchParams.set("code_challenge", oauthPkceChallenge(verifier));
   auth.searchParams.set("code_challenge_method", "S256");
 
   return { flowId, authorizationUrl: auth.toString(), expiresAt: expiresAt.toISOString() };
@@ -359,22 +360,75 @@ async function exchangeCode(flow: FlowRow, provider: ProviderRow, code: string):
   return token;
 }
 
-async function attachCredentialToConnection(
-  flow: FlowRow,
-  credentialId: string,
-): Promise<void> {
-  if (!flow.connection_id) return;
-  const result = await db.query(
-    `UPDATE connections SET
-       credential_id = $5,
-       status = 'connected',
-       scopes = $6,
-       last_error = NULL,
-       updated_at = now()
-     WHERE id = $1 AND household_id = $2 AND owner_member_id = $3 AND plugin_id = $4`,
-    [flow.connection_id, flow.household_id, flow.owner_member_id, flow.plugin_id, credentialId, flow.scopes],
+async function finalizeOAuthSuccess(flow: FlowRow, credentialId: string): Promise<void> {
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    if (flow.connection_id) {
+      const connection = await client.query(
+        `UPDATE connections SET
+           credential_id = $5,
+           status = 'connected',
+           scopes = $6,
+           last_error = NULL,
+           updated_at = now()
+         WHERE id = $1 AND household_id = $2 AND owner_member_id = $3 AND plugin_id = $4`,
+        [flow.connection_id, flow.household_id, flow.owner_member_id, flow.plugin_id, credentialId, flow.scopes],
+      );
+      if (!connection.rowCount) throw new Error("connection_not_found");
+    }
+    const completed = await client.query(
+      `UPDATE oauth_flows SET
+         status='completed', credential_id=$2, last_error=NULL,
+         consumed_at=now(), updated_at=now()
+       WHERE id=$1 AND status='processing'`,
+      [flow.id, credentialId],
+    );
+    if (!completed.rowCount) throw new Error("oauth_flow_claim_lost");
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function markFlowError(flowId: string, message: string): Promise<void> {
+  await db.query(
+    `UPDATE oauth_flows SET
+       status='error', last_error=$2, consumed_at=now(), updated_at=now()
+     WHERE id=$1 AND status='processing'`,
+    [flowId, message.slice(0, 2000)],
   );
-  if (!result.rowCount) throw new Error("connection_not_found");
+}
+
+async function claimOAuthFlow(state: string): Promise<FlowRow | null> {
+  const result = await db.query<FlowRow>(
+    `UPDATE oauth_flows SET status='processing', updated_at=now()
+     WHERE state_hash=$1 AND status='pending' AND expires_at >= now()
+     RETURNING *`,
+    [hashOAuthState(state)],
+  );
+  return result.rows[0] ?? null;
+}
+
+async function explainUnclaimedFlow(state: string): Promise<{ provider?: string; error: string }> {
+  const result = await db.query<FlowRow>(
+    `SELECT * FROM oauth_flows WHERE state_hash=$1`,
+    [hashOAuthState(state)],
+  );
+  const flow = result.rows[0];
+  if (!flow) return { error: "oauth_flow_not_found" };
+  if (flow.status === "pending" && flow.expires_at.getTime() < Date.now()) {
+    await db.query(
+      `UPDATE oauth_flows SET status='expired', updated_at=now()
+       WHERE id=$1 AND status='pending'`,
+      [flow.id],
+    );
+    return { provider: flow.provider, error: "oauth_flow_expired" };
+  }
+  return { provider: flow.provider, error: "oauth_flow_already_consumed" };
 }
 
 export async function completeOAuthCallback(
@@ -383,28 +437,24 @@ export async function completeOAuthCallback(
   const state = input.state?.trim();
   if (!state) return { ok: false, error: "oauth_state_missing" };
 
-  const result = await db.query<FlowRow>(
-    `SELECT * FROM oauth_flows WHERE state_hash = $1 FOR UPDATE`,
-    [hashState(state)],
-  );
-  const flow = result.rows[0];
-  if (!flow) return { ok: false, error: "oauth_flow_not_found" };
-  if (flow.status !== "pending") return { ok: false, provider: flow.provider, error: "oauth_flow_already_consumed" };
-  if (flow.expires_at.getTime() < Date.now()) {
-    await db.query(`UPDATE oauth_flows SET status='expired', updated_at=now() WHERE id=$1`, [flow.id]);
-    return { ok: false, provider: flow.provider, error: "oauth_flow_expired" };
+  const flow = await claimOAuthFlow(state);
+  if (!flow) {
+    return { ok: false, ...(await explainUnclaimedFlow(state)) };
   }
+
   if (input.error) {
     const detail = `${input.error}${input.errorDescription ? `: ${input.errorDescription}` : ""}`.slice(0, 2000);
-    await db.query(
-      `UPDATE oauth_flows SET status='error', last_error=$2, consumed_at=now(), updated_at=now() WHERE id=$1`,
-      [flow.id, detail],
-    );
+    await markFlowError(flow.id, detail);
     return { ok: false, provider: flow.provider, error: detail };
   }
   const code = input.code?.trim();
-  if (!code) return { ok: false, provider: flow.provider, error: "oauth_code_missing" };
+  if (!code) {
+    await markFlowError(flow.id, "oauth_code_missing");
+    return { ok: false, provider: flow.provider, error: "oauth_code_missing" };
+  }
 
+  let credentialId: string | undefined;
+  const principal = runtimePrincipal(flow);
   try {
     const provider = await providerForFlow(flow);
     const token = await exchangeCode(flow, provider, code);
@@ -413,10 +463,9 @@ export async function completeOAuthCallback(
       : typeof token.expires_in === "string"
         ? Number(token.expires_in)
         : undefined;
-    const expiresAt = expiresIn && Number.isFinite(expiresIn)
+    const expiresAt = expiresIn !== undefined && Number.isFinite(expiresIn)
       ? new Date(Date.now() + Math.max(0, expiresIn) * 1000).toISOString()
       : undefined;
-    const principal = runtimePrincipal(flow);
     const credential = await createPluginCredential(principal, {
       provider: flow.provider,
       kind: "oauth-token",
@@ -425,21 +474,15 @@ export async function completeOAuthCallback(
       metadata: { scopes: flow.scopes, source: "oauth.v1" },
       expiresAt,
     });
-    await attachCredentialToConnection(flow, credential.id);
-    await db.query(
-      `UPDATE oauth_flows SET
-         status='completed', credential_id=$2, last_error=NULL,
-         consumed_at=now(), updated_at=now()
-       WHERE id=$1`,
-      [flow.id, credential.id],
-    );
+    credentialId = credential.id;
+    await finalizeOAuthSuccess(flow, credential.id);
     return { ok: true, provider: flow.provider };
   } catch (error) {
     const message = (error instanceof Error ? error.message : String(error)).slice(0, 2000);
-    await db.query(
-      `UPDATE oauth_flows SET status='error', last_error=$2, consumed_at=now(), updated_at=now() WHERE id=$1`,
-      [flow.id, message],
-    );
+    if (credentialId) {
+      await deletePluginCredential(principal, credentialId).catch(() => undefined);
+    }
+    await markFlowError(flow.id, message);
     return { ok: false, provider: flow.provider, error: message };
   }
 }
