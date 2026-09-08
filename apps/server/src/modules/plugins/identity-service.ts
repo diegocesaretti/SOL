@@ -131,6 +131,10 @@ export async function upsertPluginPersonIdentity(
         [identity.id, entityId],
       );
     } else {
+      // Once an identity has been explicitly linked to a canonical Person, the
+      // source plugin may keep updating the identity/aliases but must not rename,
+      // re-own or change visibility on that Person. Only the placeholder created
+      // specifically for this same identity remains plugin-managed.
       await client.query(
         `UPDATE entities
          SET canonical_name = $2,
@@ -138,7 +142,11 @@ export async function upsertPluginPersonIdentity(
              visibility = $4::visibility_scope,
              metadata = metadata || $5::jsonb,
              updated_at = now()
-         WHERE id = $1 AND household_id = $6`,
+         WHERE id = $1
+           AND household_id = $6
+           AND metadata->>'origin' = 'plugin_identity'
+           AND metadata->>'pluginId' = $7
+           AND metadata->>'identityId' = $8`,
         [
           entityId,
           label,
@@ -146,6 +154,8 @@ export async function upsertPluginPersonIdentity(
           linkedMemberId ? "private" : "family",
           JSON.stringify({ pluginId: principal.pluginId, identityId: identity.id, externalId }),
           principal.householdId,
+          principal.pluginId,
+          identity.id,
         ],
       );
     }
