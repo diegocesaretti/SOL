@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { config } from "./config.js";
+import "./database/auto-migrate.js";
 import { InMemoryEventBus } from "./core/event-bus.js";
 import { OutboxDispatcher } from "./core/outbox-dispatcher.js";
 import { checkDatabase, closeDatabase } from "./database/client.js";
@@ -14,6 +15,7 @@ import {
 } from "./modules/auth/session.js";
 import { handleAiApi } from "./modules/ai/routes.js";
 import { codexAppServer } from "./modules/ai/codex/runtime.js";
+import { handleConnectionsApi } from "./modules/connections/routes.js";
 import {
   createMember,
   MemberValidationError,
@@ -109,7 +111,6 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     if (await handlePluginInputApi(path, request, response)) return;
   }
 
-
   if (request.method === "GET" && path === "/") {
     sendHtml(response, 200, renderOnboardingPage());
     return;
@@ -134,7 +135,6 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     sendHtml(response, 200, renderAiPage());
     return;
   }
-
 
   if (request.method === "GET" && path === "/health") {
     const database = await checkDatabase();
@@ -247,6 +247,11 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     const principal = await principalFor(request, response);
     if (!principal) return;
     if (await handleMcpApi(path, request, response, principal)) return;
+  }
+  if (path === "/v1/connections") {
+    const principal = await principalFor(request, response);
+    if (!principal) return;
+    if (await handleConnectionsApi(path, request, response, principal)) return;
   }
 
   if (path === "/v1/source-accounts") {
