@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { McpServer } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import * as z from "zod/v4";
+import { legacyInputSchema } from "../modules/plugins/legacy-tools.js";
 import { config } from "../config.js";
 import { closeDatabase } from "../database/client.js";
 import { authenticateMcpAccess } from "../modules/mcp/access.js";
@@ -27,6 +28,7 @@ interface PluginToolArgument {
 }
 
 interface PluginTool {
+  inputSchema?: Record<string, unknown>;
   pluginId: string;
   name: string;
   description: string;
@@ -237,7 +239,7 @@ async function main(): Promise<void> {
       for (const argument of tool.input) shape[argument.name] = argumentSchema(argument);
       server.registerTool(tool.name, {
         description: `${tool.description} [plugin: ${tool.pluginId}]`,
-        inputSchema: z.object(shape),
+        inputSchema: tool.inputSchema ? legacyInputSchema(tool.inputSchema) : z.object(shape),
       }, async (input) => {
         const payload = await pluginRequest<{ result: unknown }>(
           token,
