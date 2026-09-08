@@ -27,7 +27,6 @@ function canManage(principal: AuthPrincipal, account: SourceAccountRecord): bool
   return adult(principal);
 }
 
-
 async function sourceStats(accountIds: string[]): Promise<Map<string, Record<string, unknown>>> {
   if (!accountIds.length) return new Map();
   const result = await db.query<{
@@ -91,6 +90,9 @@ export async function handleInputsApi(
         ...account,
         shared: !account.ownerMemberId,
         canManage: canManage(principal, account),
+        pluginManaged: (account.authMode ?? "").startsWith("plugin:"),
+        pluginId: (account.authMode ?? "").startsWith("plugin:") ? account.authMode!.slice("plugin:".length) : undefined,
+        canCleanupResidual: canManage(principal, account) && (account.authMode ?? "").startsWith("plugin:") && account.status !== "connected",
         stats: stats.get(account.id) ?? {
           totalItems: 0,
           items24h: 0,
@@ -192,12 +194,29 @@ export async function handleInputsApi(
   }
 
   if (!action && request.method === "DELETE") {
-    if ((account.authMode ?? "").startsWith("plugin:")) {
-      sendJson(response, 409, { error: "input_is_plugin_managed", hint: "Manage this account from its plugin." });
+    const pluginManaged = (account.authMode ?? "").startsWith("plugin:");
+    const url = new URL(request.url ?? path, "http://sol.local");
+    const cleanupResidual = url.searchParams.get("cleanup") === "1";
+    if (pluginManaged && !cleanupResidual) {
+      sendJson(response, 409, {
+        error: "input_is_plugin_managed",
+        hint: "Remove the real account from its plugin. If this is only a stale SOL projection, retry with ?cleanup=1 while it is disconnected.",
+        canCleanupResidual: account.status !== "connected",
+      });
+      return true;
+    }
+    if (pluginManaged && cleanupResidual && account.status === "connected") {
+      sendJson(response, 409, {
+        error: "connected_plugin_input_cannot_be_cleaned",
+        hint: "Disconnect or remove the account from its plugin first.",
+      });
       return true;
     }
     const deleted = await deleteSourceAccount(sourceAccountId, principal.householdId);
-    sendJson(response, deleted ? 200 : 404, { ok: deleted });
+    sendJson(response, deleted ? 200 : 404, {
+      ok: deleted,
+      residualCleanup: Boolean(pluginManaged && cleanupResidual && deleted),
+    });
     return true;
   }
 
