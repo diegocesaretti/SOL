@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { readJsonBody, sendJson } from "../../http.js";
 import { pluginManager } from "../plugins/runtime.js";
 import { handlePluginRuntimeApi } from "../plugins/runtime-routes.js";
+import { unregisterPluginInput } from "./plugin-input-cleanup.js";
 import {
   ingestPluginItem,
   registerPluginInput,
@@ -86,6 +87,19 @@ export async function handlePluginInputApi(
     if (!input) return true;
     try {
       sendJson(response, 200, { input: await registerPluginInput(principal, input) });
+    } catch (error) {
+      apiError(response, error);
+    }
+    return true;
+  }
+
+  const unregisterMatch = path.match(/^\/v1\/plugin-api\/inputs\/([0-9a-f-]{36})$/i);
+  if (unregisterMatch && request.method === "DELETE") {
+    // Unregister is the inverse lifecycle operation of input.register and uses
+    // the same permission so existing plugin manifests remain compatible.
+    if (!requirePermission(response, principal, "input.register")) return true;
+    try {
+      sendJson(response, 200, { ok: await unregisterPluginInput(principal, unregisterMatch[1]!) });
     } catch (error) {
       apiError(response, error);
     }

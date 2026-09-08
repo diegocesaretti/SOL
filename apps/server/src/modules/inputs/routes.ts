@@ -10,6 +10,7 @@ import {
   type SourceAccountRecord,
 } from "../identity/source-accounts.js";
 import { handlePluginsApi } from "../plugins/routes.js";
+import { pluginManager } from "../plugins/runtime.js";
 
 function adult(principal: AuthPrincipal): boolean {
   return principal.role === "owner" || principal.role === "adult";
@@ -27,6 +28,15 @@ function canManage(principal: AuthPrincipal, account: SourceAccountRecord): bool
   return adult(principal);
 }
 
+function pluginIdFor(account: SourceAccountRecord): string | undefined {
+  const authMode = account.authMode ?? "";
+  return authMode.startsWith("plugin:") ? authMode.slice("plugin:".length) : undefined;
+}
+
+async function installedPluginIds(): Promise<Set<string>> {
+  const plugins = await pluginManager.list();
+  return new Set(plugins.map((plugin) => plugin.manifest.id));
+}
 
 async function sourceStats(accountIds: string[]): Promise<Map<string, Record<string, unknown>>> {
   if (!accountIds.length) return new Map();
@@ -83,20 +93,36 @@ export async function handleInputsApi(
   }
 
   if (path === "/v1/inputs" && request.method === "GET") {
-    const accounts = await listSourceAccounts(principal.householdId, principal.memberId, adult(principal));
+    const [accounts, installed] = await Promise.all([
+      listSourceAccounts(principal.householdId, principal.memberId, adult(principal)),
+      installedPluginIds(),
+    ]);
     const visible = accounts.filter((account) => canRead(principal, account));
     const stats = await sourceStats(visible.map((account) => account.id));
     sendJson(response, 200, {
-      inputs: visible.map((account) => ({
-        ...account,
-        shared: !account.ownerMemberId,
-        canManage: canManage(principal, account),
-        stats: stats.get(account.id) ?? {
-          totalItems: 0,
-          items24h: 0,
-          textItems: 0,
-        },
-      })),
+      inputs: visible.map((account) => {
+        const pluginId = pluginIdFor(account);
+        const pluginManaged = Boolean(pluginId);
+        const owningPluginInstalled = pluginId ? installed.has(pluginId) : false;
+        return {
+          ...account,
+          shared: !account.ownerMemberId,
+          canManage: canManage(principal, account),
+          pluginManaged,
+          pluginId,
+          owningPluginInstalled,
+          // A disconnected/error runtime is not evidence that an account is stale.
+          // Manual residual cleanup is offered only when the owning plugin itself
+          // is no longer installed. Installed plugins must unregister their own
+          // accounts through the plugin input lifecycle.
+          canCleanupResidual: canManage(principal, account) && pluginManaged && !owningPluginInstalled,
+          stats: stats.get(account.id) ?? {
+            totalItems: 0,
+            items24h: 0,
+            textItems: 0,
+          },
+        };
+      }),
       server: {
         ok: true,
         uptimeSeconds: Math.round(process.uptime()),
@@ -192,12 +218,37 @@ export async function handleInputsApi(
   }
 
   if (!action && request.method === "DELETE") {
-    if ((account.authMode ?? "").startsWith("plugin:")) {
-      sendJson(response, 409, { error: "input_is_plugin_managed", hint: "Manage this account from its plugin." });
+    const pluginId = pluginIdFor(account);
+    const pluginManaged = Boolean(pluginId);
+    const url = new URL(request.url ?? path, "http://sol.local");
+    const cleanupResidual = url.searchParams.get("cleanup") === "1";
+    if (pluginManaged && !cleanupResidual) {
+      const installed = await installedPluginIds();
+      const owningPluginInstalled = pluginId ? installed.has(pluginId) : false;
+      sendJson(response, 409, {
+        error: "input_is_plugin_managed",
+        hint: owningPluginInstalled
+          ? "Remove the real account from its plugin. Installed plugins own their account lifecycle and must unregister it from SOL."
+          : "The owning plugin is no longer installed. Retry with ?cleanup=1 to remove this stale SOL projection.",
+        canCleanupResidual: !owningPluginInstalled,
+      });
       return true;
     }
+    if (pluginManaged && cleanupResidual) {
+      const installed = await installedPluginIds();
+      if (pluginId && installed.has(pluginId)) {
+        sendJson(response, 409, {
+          error: "installed_plugin_input_cannot_be_cleaned",
+          hint: "This plugin is still installed. Remove the account from the plugin so it can unregister the SOL projection safely.",
+        });
+        return true;
+      }
+    }
     const deleted = await deleteSourceAccount(sourceAccountId, principal.householdId);
-    sendJson(response, deleted ? 200 : 404, { ok: deleted });
+    sendJson(response, deleted ? 200 : 404, {
+      ok: deleted,
+      residualCleanup: Boolean(pluginManaged && cleanupResidual && deleted),
+    });
     return true;
   }
 
