@@ -10,8 +10,8 @@ export function solShellStyles(): string {
 }
 
 function primarySection(active: SolSection): "home" | "connections" | "people" | "life" | "system" {
-  if (active === "plugins" || active === "inputs" || active === "outputs" || active === "connections") return "connections";
-  if (active === "mcp" || active === "ai" || active === "executive" || active === "system") return "system";
+  if (active === "inputs" || active === "outputs" || active === "connections") return "connections";
+  if (active === "plugins" || active === "mcp" || active === "ai" || active === "executive" || active === "system") return "system";
   if (active === "people") return "people";
   if (active === "life") return "life";
   return "home";
@@ -21,10 +21,10 @@ export function solSidebar(active: SolSection): string {
   const current = primarySection(active);
   const links: Array<[typeof current,string,string,string]> = [
     ["home","/","⌂","Inicio"],
-    ["connections","/connections","⌁","Conexiones"],
-    ["people","/people","◎","Personas"],
+    ["connections","/inputs","⌁","Conexiones"],
+    ["people","/inputs?view=people","◎","Personas"],
     ["life","/life","◫","Actividad"],
-    ["system","/system","⚙","Sistema"],
+    ["system","/v1/inputs/plugins/ui","⚙","Sistema"],
   ];
   return `<aside class="sidebar"><div class="brand"><div class="brandmark">S</div><div class="brandcopy"><span>SOL</span><span class="brandsub">asistente + contexto</span></div></div><div class="navcaption">Principal</div><nav class="nav">${links.map(([id,href,icon,label])=>`<a href="${href}" class="${current===id?"active":""}"><span class="navicon">${icon}</span><span class="navlabel">${label}</span></a>`).join("")}</nav><div class="sidefoot"><div><span class="dot good"></span> SOL local</div><div style="margin-top:5px">Las conexiones traen datos. Las personas explican a quién pertenecen.</div></div></aside>`;
 }
