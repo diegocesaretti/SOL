@@ -36,8 +36,13 @@ function pluginError(response: ServerResponse, error: unknown): void {
     sendJson(response, 409, { error: message });
     return;
   }
-  if (message.startsWith("plugin_permissions_required:")) {
-    sendJson(response, 403, { error: message });
+  if (message.startsWith("plugin_permissions_required:") || message.startsWith("plugin_update_permissions_required:")) {
+    const permissions = message.split(":", 2)[1]?.split(",").filter(Boolean) ?? [];
+    sendJson(response, 403, { error: message, permissions });
+    return;
+  }
+  if (message.startsWith("plugin_update_rolled_back:")) {
+    sendJson(response, 409, { error: message, rolledBack: true });
     return;
   }
   if (message === "plugin_package_too_large") {
@@ -136,6 +141,60 @@ export async function handlePluginsApi(
         },
       });
       sendJson(response, 201, { plugin });
+    } catch (error) {
+      pluginError(response, error);
+    }
+    return true;
+  }
+
+  const fileUpdateMatch = path.match(/^\/v1\/plugins\/([a-z0-9][a-z0-9._-]{0,63})\/update$/);
+  if (fileUpdateMatch && request.method === "POST") {
+    if (!canManage(principal)) {
+      sendJson(response, 403, { error: "forbidden" });
+      return true;
+    }
+    const contentType = request.headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase();
+    if (contentType !== "application/octet-stream" && contentType !== "application/zip") {
+      sendJson(response, 415, { error: "Upload the replacement .solplugin as application/octet-stream or application/zip" });
+      return true;
+    }
+    try {
+      const packageBytes = await readBinary(request, 64 * 1024 * 1024);
+      const plugin = await pluginManager.upgradePackage(fileUpdateMatch[1]!, packageBytes);
+      sendJson(response, 200, { plugin, updated: true });
+    } catch (error) {
+      pluginError(response, error);
+    }
+    return true;
+  }
+
+  const githubUpdateMatch = path.match(/^\/v1\/plugins\/([a-z0-9][a-z0-9._-]{0,63})\/github\/update$/);
+  if (githubUpdateMatch && request.method === "POST") {
+    if (!canManage(principal)) {
+      sendJson(response, 403, { error: "forbidden" });
+      return true;
+    }
+    try {
+      const id = githubUpdateMatch[1]!;
+      const current = await pluginManager.get(id);
+      if (current.source?.type !== "github" || !current.source.repository) {
+        throw new Error(`plugin_update_source_not_github:${id}`);
+      }
+      const body = await readJson<{ approvedPermissions?: string[] }>(request);
+      const preview = await inspectGithubPlugin(current.source.repository);
+      const downloaded = await downloadGithubPlugin(preview);
+      const plugin = await pluginManager.upgradePackage(id, downloaded.bytes, {
+        approvedPermissions: Array.isArray(body.approvedPermissions) ? body.approvedPermissions : undefined,
+        expectedManifest: preview.manifest,
+        source: {
+          type: "github",
+          repository: preview.repository,
+          ref: preview.defaultBranch,
+          releaseTag: downloaded.releaseTag,
+          installedAt: new Date().toISOString(),
+        },
+      });
+      sendJson(response, 200, { plugin, updated: true, previousVersion: current.manifest.version });
     } catch (error) {
       pluginError(response, error);
     }
