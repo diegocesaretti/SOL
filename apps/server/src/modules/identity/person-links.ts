@@ -126,6 +126,7 @@ async function assertUserVisibleTarget(principal: AuthPrincipal, entityId: strin
     `SELECT e.id
      FROM entities e
      WHERE e.id = $1 AND e.household_id = $2 AND e.kind = 'person'
+       AND COALESCE(e.metadata->>'supersededBy', '') = ''
        AND (
          e.owner_member_id = $3
          OR (e.visibility = 'family' AND $4::text <> 'guest')
@@ -149,6 +150,7 @@ async function assertPluginVisibleTarget(principal: SolPluginRuntimePrincipal, e
     `SELECT id
      FROM entities
      WHERE id = $1 AND household_id = $2 AND kind = 'person'
+       AND COALESCE(metadata->>'supersededBy', '') = ''
        AND (owner_member_id IS NULL OR owner_member_id = $3)
      LIMIT 1`,
     [entityId, principal.householdId, principal.memberId],
@@ -219,11 +221,22 @@ async function moveIdentity(
       await client.query(`UPDATE entities SET updated_at = now() WHERE id = $1`, [targetEntityId]);
 
       if (previousPersonEntityId) {
-        const remaining = await client.query<{ count: string }>(
-          `SELECT count(*)::text AS count FROM identity_entity_links WHERE entity_id = $1`,
+        const previousState = await client.query<{
+          identity_count: string;
+          fact_count: string;
+          relation_count: string;
+        }>(
+          `SELECT
+             (SELECT count(*) FROM identity_entity_links WHERE entity_id = $1)::text AS identity_count,
+             (SELECT count(*) FROM facts WHERE subject_entity_id = $1 OR object_entity_id = $1)::text AS fact_count,
+             (SELECT count(*) FROM relations WHERE subject_entity_id = $1 OR object_entity_id = $1)::text AS relation_count`,
           [previousPersonEntityId],
         );
-        if (Number(remaining.rows[0]?.count ?? "0") === 0) {
+        const previous = previousState.rows[0];
+        const isEmptyPlaceholder = Number(previous?.identity_count ?? "0") === 0
+          && Number(previous?.fact_count ?? "0") === 0
+          && Number(previous?.relation_count ?? "0") === 0;
+        if (isEmptyPlaceholder) {
           await client.query(
             `UPDATE entities
              SET metadata = metadata || jsonb_build_object('supersededBy', $2::text),
