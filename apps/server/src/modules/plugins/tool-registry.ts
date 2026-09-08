@@ -12,6 +12,7 @@ export interface SolPluginToolArgumentDefinition {
 }
 
 export interface SolPluginToolDefinition {
+  inputSchema?: Record<string, unknown>;
   name: string;
   description: string;
   requiresSubmit: boolean;
@@ -19,6 +20,7 @@ export interface SolPluginToolDefinition {
 }
 
 export interface SolPluginToolRegistration {
+  callbackUrl?: string;
   transport: "http";
   baseUrl: string;
   tools: SolPluginToolDefinition[];

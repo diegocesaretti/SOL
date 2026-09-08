@@ -15,7 +15,8 @@ export async function handlePluginToolApi(
   request: IncomingMessage,
   response: ServerResponse,
 ): Promise<boolean> {
-  const isToolRoute = path.startsWith("/v1/plugin-api/tools");
+  const legacy = path === "/v1/plugin-api/mcp/tools/register";
+  const isToolRoute = legacy || path.startsWith("/v1/plugin-api/tools");
   const isIdentityRoute = path.startsWith("/v1/plugin-api/identities");
   if (!isToolRoute && !isIdentityRoute) return false;
 
@@ -62,11 +63,12 @@ export async function handlePluginToolApi(
     return true;
   }
 
-  if (!principal.permissions.includes("tool.register")) {
-    sendJson(response, 403, { error: "plugin_permission_required", permission: "tool.register" });
+  const permission = legacy ? "mcp.register" : "tool.register";
+  if (!principal.permissions.includes(permission)) {
+    sendJson(response, 403, { error: "plugin_permission_required", permission });
     return true;
   }
-  if (path !== "/v1/plugin-api/tools/register") {
+  if (!legacy && path !== "/v1/plugin-api/tools/register") {
     sendJson(response, 404, { error: "plugin_tool_route_not_found" });
     return true;
   }
@@ -80,7 +82,7 @@ export async function handlePluginToolApi(
   }
   try {
     const body = await readJsonBody<unknown>(request);
-    const tools = await pluginToolRuntime.register(principal, token, body);
+    const tools = await pluginToolRuntime.register(principal, token, body, legacy);
     sendJson(response, 200, { ok: true, pluginId: principal.pluginId, tools });
   } catch (error) {
     sendJson(response, 400, { error: error instanceof Error ? error.message : String(error) });

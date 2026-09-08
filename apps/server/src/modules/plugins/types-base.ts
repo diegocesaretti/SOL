@@ -6,6 +6,19 @@ export type SolPluginProcessState = "stopped" | "starting" | "running" | "error"
 export type SolPluginHealth = "unknown" | "healthy" | "degraded" | "unhealthy";
 export type SolPluginSettingType = "text" | "boolean" | "number" | "select" | "path" | "secret";
 export type SolPluginSettingValue = string | number | boolean;
+export type SolPluginSchemaVersion = 1 | 2;
+
+export const SOL_PLUGIN_HOST_CAPABILITIES = [
+  "plugin-api.v1",
+  "input.register",
+  "input.write",
+  "input.status",
+  "identity.v1",
+  "mcp.register",
+  "tool.register",
+  "tool.execute",
+  "filesystem.plugin-data",
+] as const;
 
 export interface SolPluginScope {
   householdId: string;
@@ -44,7 +57,7 @@ export interface SolPluginGithubReleaseDistribution {
 export type SolPluginDistribution = SolPluginGithubReleaseDistribution;
 
 export interface SolPluginManifest {
-  schemaVersion: 1;
+  schemaVersion: SolPluginSchemaVersion;
   id: string;
   name: string;
   version: string;
@@ -55,6 +68,7 @@ export interface SolPluginManifest {
   autoStart: boolean;
   restartPolicy: SolPluginRestartPolicy;
   capabilities: string[];
+  requires: string[];
   permissions: string[];
   settings: SolPluginSettingDefinition[];
   distribution?: SolPluginDistribution;
@@ -98,6 +112,7 @@ const VERSION_RE = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
 const TOKEN_RE = /^[a-z0-9](?:[a-z0-9._:-]{0,118}[a-z0-9])?$/;
 const SETTING_KEY_RE = /^[a-z][a-z0-9_]{0,62}$/;
 const ENV_RE = /^[A-Z_][A-Z0-9_]{0,127}$/;
+const HOST_CAPABILITIES = new Set<string>(SOL_PLUGIN_HOST_CAPABILITIES);
 
 function text(value: unknown, name: string, max: number): string {
   if (typeof value !== "string") throw new Error(`${name} must be a string`);
@@ -200,9 +215,19 @@ function validateDistribution(value: unknown): SolPluginDistribution | undefined
   return { type: "github-release", asset, tag };
 }
 
+export function missingRequiredSettingKeys(
+  definitions: SolPluginSettingDefinition[],
+  values: Record<string, SolPluginSettingValue>,
+): string[] {
+  return definitions
+    .filter((definition) => definition.required && values[definition.key] === undefined && definition.default === undefined)
+    .map((definition) => definition.key);
+}
+
 export function validateSettingValues(
   definitions: SolPluginSettingDefinition[],
   value: unknown,
+  options: { allowMissingRequired?: boolean } = {},
 ): Record<string, SolPluginSettingValue> {
   if (value === undefined) return {};
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("settings values must be an object");
@@ -213,7 +238,7 @@ export function validateSettingValues(
     const definition = definitionsByKey.get(key);
     if (!definition) throw new Error(`unknown plugin setting: ${key}`);
     if (raw === undefined || raw === null || raw === "") {
-      if (definition.required) throw new Error(`setting ${key} is required`);
+      if (definition.required && !options.allowMissingRequired) throw new Error(`setting ${key} is required`);
       continue;
     }
     if (definition.type === "boolean") {
@@ -231,17 +256,16 @@ export function validateSettingValues(
     }
     if (typeof raw !== "string") throw new Error(`setting ${key} must be text`);
     const stringValue = raw.trim();
-    if (!stringValue && definition.required) throw new Error(`setting ${key} is required`);
+    if (!stringValue && definition.required && !options.allowMissingRequired) throw new Error(`setting ${key} is required`);
     if (stringValue.length > 2_000) throw new Error(`setting ${key} is too long`);
     if (definition.type === "select" && !definition.options?.some((option) => option.value === stringValue)) {
       throw new Error(`setting ${key} must match one of its options`);
     }
     if (stringValue) result[key] = stringValue;
   }
-  for (const definition of definitions) {
-    if (definition.required && result[definition.key] === undefined && definition.default === undefined) {
-      throw new Error(`setting ${definition.key} is required`);
-    }
+  if (!options.allowMissingRequired) {
+    const missing = missingRequiredSettingKeys(definitions, result);
+    if (missing.length) throw new Error(`setting ${missing[0]} is required`);
   }
   return result;
 }
@@ -249,7 +273,11 @@ export function validateSettingValues(
 export function validatePluginManifest(value: unknown): SolPluginManifest {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("sol-plugin.json must contain an object");
   const input = value as Record<string, unknown>;
-  if (input.schemaVersion !== 1) throw new Error("Unsupported plugin schemaVersion; expected 1");
+  const schemaVersion = input.schemaVersion;
+  if (schemaVersion !== 1 && schemaVersion !== 2) throw new Error("Unsupported plugin schemaVersion; expected 1 or 2");
+  if (schemaVersion === 1 && input.requires !== undefined) {
+    throw new Error("requires is only supported by plugin schemaVersion 2");
+  }
 
   const id = text(input.id, "id", 64).toLowerCase();
   if (!ID_RE.test(id)) throw new Error("id must use lowercase letters, numbers, dot, underscore or hyphen");
@@ -273,9 +301,15 @@ export function validatePluginManifest(value: unknown): SolPluginManifest {
     throw new Error("restartPolicy must be never or on-failure");
   }
 
+  const requires = schemaVersion === 2 ? stringArray(input.requires, "requires", 100) : [];
+  const missingRequirements = requires.filter((requirement) => !HOST_CAPABILITIES.has(requirement));
+  if (missingRequirements.length) {
+    throw new Error(`plugin_host_capabilities_required:${missingRequirements.join(",")}`);
+  }
+
   const description = input.description === undefined ? undefined : text(input.description, "description", 500);
   return {
-    schemaVersion: 1,
+    schemaVersion,
     id,
     name,
     version,
@@ -286,6 +320,7 @@ export function validatePluginManifest(value: unknown): SolPluginManifest {
     autoStart,
     restartPolicy,
     capabilities: stringArray(input.capabilities, "capabilities", 100),
+    requires,
     permissions: stringArray(input.permissions, "permissions", 100),
     settings: validateSettings(input.settings),
     distribution: validateDistribution(input.distribution),

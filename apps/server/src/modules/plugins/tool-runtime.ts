@@ -1,5 +1,6 @@
 import type { SolPluginRuntimePrincipal, SolPluginScope } from "./types.js";
 import { pluginManager } from "./runtime.js";
+import { legacyInputSchema, validateLegacyRegistration } from "./legacy-tools.js";
 import {
   type SolPluginToolRegistration,
   type SolPluginToolView,
@@ -18,19 +19,22 @@ function sameScope(a: SolPluginScope, b: SolPluginScope): boolean {
   return a.householdId === b.householdId && a.memberId === b.memberId;
 }
 
-class PluginToolRuntime {
+export class PluginToolRuntime {
+  constructor(private readonly manager = pluginManager) {}
   private readonly providers = new Map<string, RuntimeToolProvider>();
 
   async register(
     principal: SolPluginRuntimePrincipal,
     token: string,
     value: unknown,
+    legacy = false,
   ): Promise<SolPluginToolView[]> {
-    const registration = validatePluginToolRegistration(value);
-    const snapshot = await pluginManager.get(principal.pluginId);
+    const registration = legacy ? validateLegacyRegistration(value) : validatePluginToolRegistration(value);
+    const snapshot = await this.manager.get(principal.pluginId);
     if (snapshot.state !== "running" && snapshot.state !== "starting") throw new Error("plugin_runtime_not_running");
-    if (!snapshot.approvedPermissions.includes("tool.register")) throw new Error("plugin_permission_required:tool.register");
-    if (!snapshot.approvedPermissions.includes("tool.execute")) throw new Error("plugin_permission_required:tool.execute");
+    for (const permission of legacy ? ["mcp.register"] : ["tool.register", "tool.execute"]) {
+      if (!snapshot.approvedPermissions.includes(permission)) throw new Error(`plugin_permission_required:${permission}`);
+    }
 
     const activeProviders = await this.activeProviders();
     for (const tool of registration.tools) {
@@ -73,18 +77,22 @@ class PluginToolRuntime {
     const [pluginId, provider] = entry;
     const tool = provider.registration.tools.find((candidate) => candidate.name === toolName)!;
     if (tool.requiresSubmit && !allowExternalActions) throw new Error("mcp_external_action_scope_required");
-    const input = validatePluginToolInput(tool, rawInput);
-    const snapshot = await pluginManager.get(pluginId);
+    const input = tool.inputSchema ? legacyInputSchema(tool.inputSchema).parse(rawInput ?? {}) : validatePluginToolInput(tool, rawInput);
+    const snapshot = await this.manager.get(pluginId);
     if (snapshot.state !== "running") throw new Error("plugin_tool_provider_not_running");
-    if (!snapshot.approvedPermissions.includes("tool.execute")) throw new Error("plugin_permission_required:tool.execute");
+    const permission = provider.registration.callbackUrl ? "mcp.register" : "tool.execute";
+    if (!snapshot.approvedPermissions.includes(permission)) throw new Error(`plugin_permission_required:${permission}`);
 
-    const response = await fetch(`${provider.registration.baseUrl}/api/sol-tools/${encodeURIComponent(toolName)}`, {
+    const response = await fetch(provider.registration.callbackUrl ?? `${provider.registration.baseUrl}/api/sol-tools/${encodeURIComponent(toolName)}`, {
       method: "POST",
       headers: {
         authorization: `Bearer ${provider.token}`,
         "content-type": "application/json",
       },
-      body: JSON.stringify(input),
+      body: JSON.stringify(provider.registration.callbackUrl ? {
+        type: "sol.plugin.mcp.invoke", pluginId, tool: toolName, arguments: input, caller: scope,
+      } : input),
+      redirect: "error",
       signal: AbortSignal.timeout(130_000),
     });
     const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
@@ -99,8 +107,8 @@ class PluginToolRuntime {
     const result: Array<[string, RuntimeToolProvider]> = [];
     for (const [pluginId, provider] of this.providers) {
       const [snapshot, runtimePrincipal] = await Promise.all([
-        pluginManager.get(pluginId).catch(() => undefined),
-        pluginManager.authenticateRuntimeToken(provider.token).catch(() => null),
+        this.manager.get(pluginId).catch(() => undefined),
+        this.manager.authenticateRuntimeToken(provider.token).catch(() => null),
       ]);
       const validToken = runtimePrincipal &&
         runtimePrincipal.pluginId === pluginId &&
