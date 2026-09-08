@@ -26,6 +26,22 @@ async function readJson<T>(request: IncomingMessage): Promise<T> {
   return await readJsonBody<T>(request);
 }
 
+function approvedPermissionsFromHeader(request: IncomingMessage): string[] | undefined {
+  const value = request.headers["x-sol-plugin-approved-permissions"];
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (!raw) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("invalid_plugin_permission_approval_header");
+  }
+  if (!Array.isArray(parsed) || parsed.some((item) => typeof item !== "string")) {
+    throw new Error("invalid_plugin_permission_approval_header");
+  }
+  return parsed;
+}
+
 function pluginError(response: ServerResponse, error: unknown): void {
   const message = error instanceof Error ? error.message : String(error);
   if (message.startsWith("plugin_not_found:")) {
@@ -160,7 +176,9 @@ export async function handlePluginsApi(
     }
     try {
       const packageBytes = await readBinary(request, 64 * 1024 * 1024);
-      const plugin = await pluginManager.upgradePackage(fileUpdateMatch[1]!, packageBytes);
+      const plugin = await pluginManager.upgradePackage(fileUpdateMatch[1]!, packageBytes, {
+        approvedPermissions: approvedPermissionsFromHeader(request),
+      });
       sendJson(response, 200, { plugin, updated: true });
     } catch (error) {
       pluginError(response, error);
