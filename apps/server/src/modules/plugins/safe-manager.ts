@@ -1,9 +1,10 @@
 import { existsSync } from "node:fs";
-import { copyFile, cp, mkdir, readFile, rename, rm } from "node:fs/promises";
+import { mkdir, readFile, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { PluginManager } from "./manager.js";
 import { extractZipBuffer } from "./zip.js";
+import { packPluginDirectory } from "./zip-pack.js";
 import {
   type SolPluginManifest,
   type SolPluginRuntimePrincipal,
@@ -46,22 +47,57 @@ function assertExpectedManifest(actual: SolPluginManifest, expected?: UpgradePac
   }
 }
 
-function semverParts(version: string): [number, number, number, string] {
-  const match = version.match(/^(\d+)\.(\d+)\.(\d+)(?:-([^+]+))?(?:\+.*)?$/);
-  if (!match) return [0, 0, 0, version];
-  return [Number(match[1]), Number(match[2]), Number(match[3]), match[4] ?? ""];
+interface ParsedSemver {
+  major: number;
+  minor: number;
+  patch: number;
+  prerelease: string[] | null;
 }
 
-function compareSemver(a: string, b: string): number {
-  const left = semverParts(a);
-  const right = semverParts(b);
-  for (let index = 0; index < 3; index += 1) {
-    if (left[index] !== right[index]) return Number(left[index]) - Number(right[index]);
+function parseSemver(version: string): ParsedSemver {
+  const match = version.match(/^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/);
+  if (!match) throw new Error(`invalid_semantic_version:${version}`);
+  return {
+    major: Number(match[1]),
+    minor: Number(match[2]),
+    patch: Number(match[3]),
+    prerelease: match[4] ? match[4].split(".") : null,
+  };
+}
+
+function numericIdentifier(value: string): number | undefined {
+  return /^\d+$/.test(value) ? Number(value) : undefined;
+}
+
+function comparePrerelease(left: string[] | null, right: string[] | null): number {
+  if (!left && !right) return 0;
+  if (!left) return 1;
+  if (!right) return -1;
+  const length = Math.max(left.length, right.length);
+  for (let index = 0; index < length; index += 1) {
+    const a = left[index];
+    const b = right[index];
+    if (a === undefined) return -1;
+    if (b === undefined) return 1;
+    if (a === b) continue;
+    const aNumber = numericIdentifier(a);
+    const bNumber = numericIdentifier(b);
+    if (aNumber !== undefined && bNumber !== undefined) return aNumber - bNumber;
+    if (aNumber !== undefined) return -1;
+    if (bNumber !== undefined) return 1;
+    const compared = a.localeCompare(b, "en", { sensitivity: "case" });
+    if (compared !== 0) return compared;
   }
-  if (left[3] === right[3]) return 0;
-  if (!left[3]) return 1;
-  if (!right[3]) return -1;
-  return String(left[3]).localeCompare(String(right[3]));
+  return 0;
+}
+
+export function comparePluginVersions(a: string, b: string): number {
+  const left = parseSemver(a);
+  const right = parseSemver(b);
+  if (left.major !== right.major) return left.major - right.major;
+  if (left.minor !== right.minor) return left.minor - right.minor;
+  if (left.patch !== right.patch) return left.patch - right.patch;
+  return comparePrerelease(left.prerelease, right.prerelease);
 }
 
 function normalizedPermissions(values: string[]): string[] {
@@ -84,28 +120,20 @@ function preservedSettings(
 
 /**
  * Compatibility wrapper around PluginManager.
- *
  * Existing install/start/runtime behaviour remains delegated to the proven manager.
- * Only upgrades are added here, so old plugins do not need to opt into a new lifecycle.
+ * Upgrades replace only the target plugin; all other plugin processes and runtime tokens
+ * stay owned by the same manager for the whole transaction.
  */
 export class SafePluginManager {
-  private readonly options: SafePluginManagerOptions;
   private readonly rootDir: string;
-  private readonly statePath: string;
   private readonly maxPackageBytes: number;
-  private inner: PluginManager;
+  private readonly inner: PluginManager;
   private upgradeTail: Promise<void> = Promise.resolve();
 
   constructor(options: SafePluginManagerOptions) {
-    this.options = { ...options };
     this.rootDir = resolve(options.rootDir);
-    this.statePath = join(this.rootDir, ".plugin-state.json");
     this.maxPackageBytes = options.maxPackageBytes ?? 64 * 1024 * 1024;
-    this.inner = this.newManager();
-  }
-
-  private newManager(): PluginManager {
-    return new PluginManager(this.options as ConstructorParameters<typeof PluginManager>[0]);
+    this.inner = new PluginManager(options as ConstructorParameters<typeof PluginManager>[0]);
   }
 
   init(): Promise<void> { return this.inner.init(); }
@@ -158,7 +186,7 @@ export class SafePluginManager {
     if (nextManifest.id !== current.manifest.id) {
       throw new Error(`plugin_update_id_mismatch:${current.manifest.id}:${nextManifest.id}`);
     }
-    if (compareSemver(nextManifest.version, current.manifest.version) < 0) {
+    if (comparePluginVersions(nextManifest.version, current.manifest.version) < 0) {
       throw new Error(`plugin_downgrade_not_allowed:${current.manifest.version}:${nextManifest.version}`);
     }
 
@@ -178,19 +206,14 @@ export class SafePluginManager {
 
     const destination = join(this.rootDir, id);
     if (!existsSync(destination)) throw new Error(`plugin_directory_missing:${id}`);
-    const backupDirectory = join(this.rootDir, `.rollback-${id}-${randomUUID()}`);
-    const backupState = join(this.rootDir, `.rollback-state-${randomUUID()}.json`);
-    const hadState = existsSync(this.statePath);
+    const rollbackPackage = await packPluginDirectory(destination);
     const oldEnabled = current.enabled;
+    const oldSource = current.source ?? { type: "file" as const, installedAt: new Date().toISOString() };
 
-    await cp(destination, backupDirectory, { recursive: true, force: false, errorOnExist: true });
-    if (hadState) await copyFile(this.statePath, backupState);
-
-    let newInstalled = false;
     try {
       await this.inner.stop(id);
       await this.inner.uninstall(id);
-      const source = options.source ?? current.source ?? { type: "file", installedAt: new Date().toISOString() };
+      const source = options.source ?? oldSource;
       let installed = await this.inner.installPackage(buffer, {
         approvedPermissions: approved,
         settings,
@@ -198,7 +221,6 @@ export class SafePluginManager {
         scope: current.scope,
         source,
       });
-      newInstalled = true;
 
       // Preserve the user's enable/disable choice across versions.
       if (!oldEnabled && installed.enabled) installed = await this.inner.stop(id);
@@ -208,28 +230,24 @@ export class SafePluginManager {
           .map((definition) => definition.key);
         if (!missingRequired.length) installed = await this.inner.start(id);
       }
-
-      await rm(backupDirectory, { recursive: true, force: true });
-      await rm(backupState, { force: true });
       return installed;
     } catch (error) {
       const updateError = error instanceof Error ? error.message : String(error);
       try {
-        if (newInstalled) await this.inner.uninstall(id).catch(() => undefined);
-        await rm(destination, { recursive: true, force: true });
-        if (existsSync(backupDirectory)) await rename(backupDirectory, destination);
-        if (hadState && existsSync(backupState)) await copyFile(backupState, this.statePath);
-        else if (!hadState) await rm(this.statePath, { force: true });
-
-        this.inner = this.newManager();
-        await this.inner.init();
-        if (oldEnabled) await this.inner.start(id);
+        // installPackage can leave a record behind when autostart fails, so always
+        // remove the target if present. Other plugins remain owned by this same manager.
+        await this.inner.uninstall(id).catch(() => undefined);
+        let restored = await this.inner.installPackage(rollbackPackage, {
+          approvedPermissions: oldApproved,
+          settings: currentSettings,
+          scope: current.scope,
+          source: oldSource,
+        });
+        if (!oldEnabled && restored.enabled) restored = await this.inner.stop(id);
+        if (oldEnabled && !restored.enabled) restored = await this.inner.start(id);
       } catch (rollbackError) {
         const rollbackReason = rollbackError instanceof Error ? rollbackError.message : String(rollbackError);
         throw new Error(`plugin_update_failed_and_rollback_failed:${updateError}:${rollbackReason}`);
-      } finally {
-        await rm(backupDirectory, { recursive: true, force: true }).catch(() => undefined);
-        await rm(backupState, { force: true }).catch(() => undefined);
       }
       throw new Error(`plugin_update_rolled_back:${updateError}`);
     }
