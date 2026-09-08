@@ -20,6 +20,7 @@ export const SOL_PLUGIN_HOST_CAPABILITIES = [
   "credentials.v1",
   "credentials.read",
   "credentials.write",
+  "oauth.v1",
   "mcp.register",
   "mcp.invoke.read",
   "filesystem.plugin-data",
