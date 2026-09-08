@@ -32,6 +32,7 @@ export class CodexAppServerClient {
   private process?: ChildProcessWithoutNullStreams;
   private initialized = false;
   private startPromise?: Promise<void>;
+  private stopPromise?: Promise<void>;
   private nextId = 1;
   private readonly pending = new Map<number, PendingRequest>();
   private readonly notificationHandlers = new Set<CodexNotificationHandler>();
@@ -50,6 +51,7 @@ export class CodexAppServerClient {
   }
 
   async start(): Promise<void> {
+    if (this.stopPromise) await this.stopPromise;
     if (this.startPromise) {
       await this.startPromise;
       return;
@@ -176,12 +178,28 @@ export class CodexAppServerClient {
   }
 
   async stop(): Promise<void> {
+    if (this.stopPromise) return this.stopPromise;
     const child = this.process;
     this.initialized = false;
     this.process = undefined;
     if (!child) return;
-    child.kill("SIGTERM");
     this.rejectAllPending(new CodexAppServerError("Codex app-server stopped"));
+    // kill() only requests termination. Wait for pipes/handles to close before
+    // callers remove the working directory or start another process on Windows.
+    this.stopPromise = new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        child.off("close", onClose);
+        child.kill("SIGKILL");
+        reject(new CodexAppServerError("Codex app-server did not close after stop"));
+      }, 5_000);
+      const onClose = () => {
+        clearTimeout(timeout);
+        resolve();
+      };
+      child.once("close", onClose);
+      child.kill("SIGTERM");
+    }).finally(() => { this.stopPromise = undefined; });
+    return this.stopPromise;
   }
 
   private handleLine(line: string): void {
