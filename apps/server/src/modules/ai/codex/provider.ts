@@ -10,6 +10,10 @@ import {
   type CodexNotification,
 } from "./app-server.js";
 
+const SOL_CODEX_MODEL = "gpt-5.6-sol";
+const SOL_CODEX_REASONING_EFFORT = "low";
+const SOL_CODEX_VERBOSITY = "low";
+
 interface ThreadStartResult {
   thread: { id: string; modelProvider?: string };
 }
@@ -79,7 +83,15 @@ export class CodexProvider implements AiProvider {
       throw new CodexAppServerError("Codex is not connected to a ChatGPT account");
     }
 
+    // SOL owns its reasoning profile. Do not inherit the user's global Codex
+    // model (for example an experimental Astra selection) because that makes
+    // a background SOL feature dependent on unrelated desktop preferences.
     const threadResult = await this.client.request<ThreadStartResult>("thread/start", {
+      model: SOL_CODEX_MODEL,
+      config: {
+        model_reasoning_effort: SOL_CODEX_REASONING_EFFORT,
+        model_verbosity: SOL_CODEX_VERBOSITY,
+      },
       approvalPolicy: "never",
       sandbox: "read-only",
       serviceName: "sol_core",
@@ -189,6 +201,8 @@ export class CodexProvider implements AiProvider {
         metadata: {
           threadId,
           turnId,
+          model: SOL_CODEX_MODEL,
+          reasoningEffort: SOL_CODEX_REASONING_EFFORT,
           modelProvider: threadResult.thread.modelProvider,
           purpose: request.purpose,
         },
