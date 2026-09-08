@@ -46,6 +46,8 @@ internal static class Program
         public UIntPtr PeakJobMemoryUsed;
     }
 
+    private sealed record PersistentPaths(string DataRoot, string EnvPath);
+
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
     private static extern IntPtr CreateJobObject(IntPtr lpJobAttributes, string? lpName);
 
@@ -74,8 +76,9 @@ internal static class Program
         var root = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         var node = Path.Combine(root, "runtime", "node.exe");
         var server = Path.Combine(root, "apps", "server", "dist", "index.js");
-        var env = Path.Combine(root, ".env");
         var example = Path.Combine(root, ".env.example");
+        var persistent = ResolvePersistentPaths(root);
+        var env = persistent.EnvPath;
 
         if (!File.Exists(node) || !File.Exists(server))
         {
@@ -85,6 +88,7 @@ internal static class Program
 
         if (!File.Exists(env))
         {
+            Directory.CreateDirectory(Path.GetDirectoryName(env)!);
             if (File.Exists(example)) File.Copy(example, env, overwrite: false);
             ShowDatabaseConfiguration(env, firstRun: true);
             return;
@@ -99,7 +103,7 @@ internal static class Program
 
         var port = ReadPort(env, 3000);
         var baseUrl = $"http://127.0.0.1:{port}";
-        var logDir = Path.Combine(root, ".sol", "logs");
+        var logDir = Path.Combine(persistent.DataRoot, "logs");
         Directory.CreateDirectory(logDir);
         var logPath = Path.Combine(logDir, "server.log");
 
@@ -121,6 +125,8 @@ internal static class Program
         };
 
         child.StartInfo.Environment["SOL_LAUNCHER_PID"] = Environment.ProcessId.ToString();
+        child.StartInfo.Environment["SOL_DATA_DIR"] = persistent.DataRoot;
+        child.StartInfo.Environment["SOL_ENV_FILE"] = env;
         child.OutputDataReceived += (_, e) => { if (e.Data is not null) lock (log) log.WriteLine($"[{DateTimeOffset.Now:O}] OUT {e.Data}"); };
         child.ErrorDataReceived += (_, e) => { if (e.Data is not null) lock (log) log.WriteLine($"[{DateTimeOffset.Now:O}] ERR {e.Data}"); };
 
@@ -148,14 +154,74 @@ internal static class Program
         }
     }
 
+    private static PersistentPaths ResolvePersistentPaths(string root)
+    {
+        var explicitData = Environment.GetEnvironmentVariable("SOL_DATA_DIR")?.Trim();
+        var explicitEnv = Environment.GetEnvironmentVariable("SOL_ENV_FILE")?.Trim();
+        if (!string.IsNullOrWhiteSpace(explicitData))
+        {
+            var data = Path.GetFullPath(explicitData);
+            Directory.CreateDirectory(data);
+            return new PersistentPaths(data, !string.IsNullOrWhiteSpace(explicitEnv) ? Path.GetFullPath(explicitEnv) : Path.Combine(data, ".env"));
+        }
+
+        try
+        {
+            var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            if (string.IsNullOrWhiteSpace(local)) throw new InvalidOperationException("LOCALAPPDATA no está disponible");
+            var data = Path.Combine(local, "SOL");
+            Directory.CreateDirectory(data);
+            MigrateLegacyState(root, data);
+            return new PersistentPaths(data, Path.Combine(data, ".env"));
+        }
+        catch
+        {
+            // Compatibility fallback: exactly the historical portable locations.
+            return new PersistentPaths(Path.Combine(root, ".sol"), Path.Combine(root, ".env"));
+        }
+    }
+
+    private static void MigrateLegacyState(string root, string dataRoot)
+    {
+        var marker = Path.Combine(dataRoot, ".legacy-portable-migration-v1");
+        if (File.Exists(marker)) return;
+
+        var legacyData = Path.Combine(root, ".sol");
+        var legacyEnv = Path.Combine(root, ".env");
+        if (Directory.Exists(legacyData)) CopyDirectoryMissing(legacyData, dataRoot);
+        if (File.Exists(legacyEnv))
+        {
+            var targetEnv = Path.Combine(dataRoot, ".env");
+            if (!File.Exists(targetEnv)) File.Copy(legacyEnv, targetEnv, overwrite: false);
+        }
+        File.WriteAllText(marker, $"Migrated {DateTimeOffset.Now:O}{Environment.NewLine}");
+    }
+
+    private static void CopyDirectoryMissing(string source, string destination)
+    {
+        Directory.CreateDirectory(destination);
+        foreach (var directory in Directory.EnumerateDirectories(source, "*", SearchOption.AllDirectories))
+        {
+            var relative = Path.GetRelativePath(source, directory);
+            Directory.CreateDirectory(Path.Combine(destination, relative));
+        }
+        foreach (var file in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
+        {
+            var relative = Path.GetRelativePath(source, file);
+            var target = Path.Combine(destination, relative);
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            if (!File.Exists(target)) File.Copy(file, target, overwrite: false);
+        }
+    }
+
     private static void ShowDatabaseConfiguration(string envPath, bool firstRun)
     {
         var prefix = firstRun
-            ? "Es el primer inicio de SOL. Se creó .env junto a SOL.exe."
+            ? "Es el primer inicio de SOL. Se creó la configuración en la carpeta de datos persistentes de SOL."
             : "SOL detectó que DATABASE_URL todavía contiene valores de ejemplo o está vacío.";
 
         MessageBox(IntPtr.Zero,
-            $"{prefix}\n\nPegá en DATABASE_URL la cadena de conexión real de Neon, guardá el archivo y volvé a abrir SOL.\n\nSOL no iniciará servicios hasta que la base esté configurada.",
+            $"{prefix}\n\nPegá en DATABASE_URL la cadena de conexión real de Neon, guardá el archivo y volvé a abrir SOL.\n\nSOL no iniciará servicios hasta que la base esté configurada.\n\nArchivo: {envPath}",
             "SOL · configurar Neon",
             0x40);
 

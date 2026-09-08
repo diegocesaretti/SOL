@@ -1,0 +1,37 @@
+name: Windows launcher check
+
+on:
+  pull_request:
+    paths:
+      - 'packaging/windows/**'
+      - 'apps/server/src/config.ts'
+      - 'apps/server/src/modules/plugins/**'
+      - '.github/workflows/windows-launcher-check.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  launcher:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Build SOL launcher
+        shell: pwsh
+        run: dotnet build packaging/windows/SolLauncher/SolLauncher.csproj -c Release
+
+      - name: Verify launcher contains persistent-state contract
+        shell: pwsh
+        run: |
+          $source = Get-Content -Raw packaging/windows/SolLauncher/Program.cs
+          foreach ($required in @('SOL_DATA_DIR','SOL_ENV_FILE','LocalApplicationData','.legacy-portable-migration-v1')) {
+            if (-not $source.Contains($required)) { throw "Launcher missing persistent-state contract: $required" }
+          }
