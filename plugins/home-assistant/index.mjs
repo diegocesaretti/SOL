@@ -76,29 +76,71 @@ const sol = new SolPluginClient();
 const pluginId = process.env.SOL_PLUGIN_ID?.trim() || "home-assistant";
 const mcpPath = `/mcp/${randomBytes(24).toString("base64url")}`;
 const callbackUrl = `http://127.0.0.1:${config.apiPort}${mcpPath}`;
+const personBindings = new Map();
+
+function personBindingSummary(binding) {
+  if (!binding) return null;
+  return {
+    entityId: binding.entityId,
+    linkedToSolMember: Boolean(binding.linkedMemberId),
+    linkedBy: binding.linkedBy || "none"
+  };
+}
+
+function compactPerson(entity) {
+  return {
+    ...compactEntity(entity),
+    solPerson: personBindingSummary(personBindings.get(entity.entityId)),
+    semantics: "Person is a human identity; this binding does not grant SOL account access or permissions."
+  };
+}
+
+function personSyncStatus() {
+  const people = cache.listPeople();
+  return {
+    mode: config.personSync,
+    cachedPeople: people.length,
+    resolvedToSol: people.filter((person) => personBindings.has(person.entityId)).length,
+    grantsAccess: false
+  };
+}
 
 let lastPersonSignature = "";
-async function syncPeople() {
+let personSyncRun = null;
+async function syncPeopleOnce() {
   if (config.personSync === "off" || !sol.enabled) return;
   const people = cache.listPeople();
   const signature = people.map((person) => `${person.entityId}:${person.attributes?.friendly_name || ""}`).sort().join("|");
-  if (signature === lastPersonSignature) return;
+  if (signature === lastPersonSignature && people.every((person) => personBindings.has(person.entityId))) return;
+
+  const liveIds = new Set(people.map((person) => person.entityId));
+  for (const entityId of personBindings.keys()) {
+    if (!liveIds.has(entityId)) personBindings.delete(entityId);
+  }
+
   let allSucceeded = true;
   for (const person of people) {
     const label = person.attributes?.friendly_name || person.registry?.name || person.entityId;
     try {
-      await sol.upsertPerson({
+      const binding = await sol.upsertPerson({
         entityId: person.entityId,
         label,
         autoLinkMember: config.personSync === "safe-link",
         metadata: { source: "home_assistant", entityId: person.entityId }
       });
+      if (binding?.entityId) personBindings.set(person.entityId, binding);
     } catch (error) {
       allSucceeded = false;
       console.warn(`SOL person sync failed for ${person.entityId}: ${error?.message || error}`);
     }
   }
   if (allSucceeded) lastPersonSignature = signature;
+}
+
+async function syncPeople() {
+  if (personSyncRun) return personSyncRun;
+  personSyncRun = syncPeopleOnce().finally(() => { personSyncRun = null; });
+  return personSyncRun;
 }
 
 let presenceQueue = Promise.resolve();
@@ -139,7 +181,7 @@ const ha = new HomeAssistantClient({
 const tools = [
   {
     name: "home_assistant_cache_status",
-    description: "Return Home Assistant connection and local cache freshness. Use this before relying on cached state when freshness matters.",
+    description: "Return Home Assistant connection, local cache freshness and Person sync status. Use this before relying on cached state when freshness matters.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     requiredScope: "read"
   },
@@ -170,7 +212,7 @@ const tools = [
   },
   {
     name: "home_assistant_list_people",
-    description: "List cached Home Assistant person entities and their current states.",
+    description: "List cached Home Assistant person entities with their canonical SOL Person binding. Person identity does not imply a SOL account or access grant.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     requiredScope: "read"
   },
@@ -225,7 +267,13 @@ const server = createServer(async (request, response) => {
   const path = new URL(request.url || "/", "http://127.0.0.1").pathname;
   try {
     if (request.method === "GET" && path === "/health") {
-      sendJson(response, 200, { ok: true, provider: "home_assistant", cache: cache.status(), controlEnabled: config.allowControl });
+      sendJson(response, 200, {
+        ok: true,
+        provider: "home_assistant",
+        cache: cache.status(),
+        personSync: personSyncStatus(),
+        controlEnabled: config.allowControl
+      });
       return;
     }
     if (request.method !== "POST" || path !== mcpPath) {
@@ -251,7 +299,12 @@ const server = createServer(async (request, response) => {
     const args = body?.arguments && typeof body.arguments === "object" ? body.arguments : {};
 
     if (tool === "home_assistant_cache_status") {
-      sendJson(response, 200, { cache: cache.status(), baseUrl: config.baseUrl, controlEnabled: config.allowControl });
+      sendJson(response, 200, {
+        cache: cache.status(),
+        baseUrl: config.baseUrl,
+        personSync: personSyncStatus(),
+        controlEnabled: config.allowControl
+      });
       return;
     }
     if (tool === "home_assistant_get_state") {
@@ -271,7 +324,12 @@ const server = createServer(async (request, response) => {
       return;
     }
     if (tool === "home_assistant_list_people") {
-      sendJson(response, 200, { people: cache.listPeople().map(compactEntity), cache: cache.status() });
+      await syncPeople().catch(() => undefined);
+      sendJson(response, 200, {
+        people: cache.listPeople().map(compactPerson),
+        personSync: personSyncStatus(),
+        cache: cache.status()
+      });
       return;
     }
     if (tool === "home_assistant_list_areas") {
@@ -336,6 +394,7 @@ async function shutdown(signal) {
   if (sol.enabled) await sol.registerMcpTools(callbackUrl, []).catch(() => undefined);
   server.close();
   await ha.stop();
+  await personSyncRun?.catch(() => undefined);
   await presenceQueue.catch(() => undefined);
   await cache.close();
   process.exit(0);
