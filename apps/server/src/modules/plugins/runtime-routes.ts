@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { readJsonBody, sendJson } from "../../http.js";
+import { handlePluginConnectionsApi } from "../connections/runtime.js";
 import { upsertPluginPersonIdentity } from "./identity-service.js";
 import { getPluginVisiblePerson, listPluginVisiblePeople } from "./identity-read-service.js";
 import { registerPluginMcpTools } from "./mcp-registry.js";
@@ -63,16 +64,23 @@ export async function handlePluginRuntimeApi(
   response: ServerResponse,
 ): Promise<boolean> {
   const peopleMatch = path.match(/^\/v1\/plugin-api\/identities\/people(?:\/([0-9a-f-]{36}))?$/i);
+  const connectionPath = path === "/v1/plugin-api/connections"
+    || /^\/v1\/plugin-api\/connections\/[0-9a-f-]{36}$/i.test(path);
   if (
     path !== "/v1/plugin-api/identities/person"
     && path !== "/v1/plugin-api/mcp/tools/register"
     && path !== "/v1/plugin-api/mcp/tools/invoke-read"
     && !peopleMatch
+    && !connectionPath
   ) {
     return false;
   }
   const principal = await authenticate(request, response);
   if (!principal) return true;
+
+  if (connectionPath) {
+    return await handlePluginConnectionsApi(path, request, response, principal);
+  }
 
   if (peopleMatch && request.method === "GET") {
     if (!requirePermission(response, principal, "identity.read")) return true;
