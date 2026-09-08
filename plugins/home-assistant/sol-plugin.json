@@ -1,9 +1,9 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "id": "home-assistant",
   "name": "Home Assistant",
-  "version": "0.1.0",
-  "description": "Home Assistant bridge for SOL with persistent state cache, person identity sync and MCP tools for Codex.",
+  "version": "0.2.0",
+  "description": "Home Assistant bridge for SOL with persistent state cache, canonical Person identity sync, Life presence events and MCP tools for Codex.",
   "runtime": "node",
   "entry": "index.mjs",
   "args": [],
@@ -15,6 +15,15 @@
     "mcp.homeassistant",
     "cache.homeassistant",
     "tool.homeassistant"
+  ],
+  "requires": [
+    "plugin-api.v1",
+    "input.register",
+    "input.write",
+    "input.status",
+    "identity.v1",
+    "mcp.register",
+    "filesystem.plugin-data"
   ],
   "permissions": [
     "input.register",
@@ -56,6 +65,7 @@
       "key": "cache_flush_ms",
       "label": "Persistencia del caché (ms)",
       "type": "number",
+      "description": "Debounce para persistir el caché event-driven en SOL_PLUGIN_DATA_DIR.",
       "env": "HA_SOL_CACHE_FLUSH_MS",
       "required": false,
       "default": 2000,
@@ -66,6 +76,7 @@
       "key": "reconcile_seconds",
       "label": "Reconciliación completa (segundos)",
       "type": "number",
+      "description": "Intervalo de reconciliación completa que complementa las actualizaciones WebSocket del caché.",
       "env": "HA_SOL_RECONCILE_SECONDS",
       "required": false,
       "default": 300,
@@ -74,21 +85,23 @@
     },
     {
       "key": "person_sync",
-      "label": "Sincronización de personas",
+      "label": "Sincronización de Personas",
       "type": "select",
+      "description": "Una Persona representa al humano; no es una cuenta de SOL ni otorga acceso. Safe-link sólo enlaza con un miembro existente cuando hay una coincidencia única de nombre.",
       "env": "HA_SOL_PERSON_SYNC",
       "required": false,
       "default": "safe-link",
       "options": [
         { "value": "off", "label": "Desactivada" },
-        { "value": "external", "label": "Personas externas" },
-        { "value": "safe-link", "label": "Vincular por nombre único" }
+        { "value": "external", "label": "Crear Personas externas · sin acceso" },
+        { "value": "safe-link", "label": "Vincular por nombre único · sin otorgar acceso" }
       ]
     },
     {
       "key": "ingest_presence_changes",
-      "label": "Guardar cambios de presencia en Life",
+      "label": "Guardar cambios de presencia en Actividad",
       "type": "boolean",
+      "description": "Guarda cambios de person.* como eventos de actividad; no convierte presencia en permisos ni autenticación.",
       "env": "HA_SOL_INGEST_PRESENCE",
       "required": false,
       "default": true
@@ -97,6 +110,7 @@
       "key": "allow_control",
       "label": "Permitir control desde Codex",
       "type": "boolean",
+      "description": "Habilita acciones de Home Assistant desde Codex. Cada acción sigue requiriendo el scope correspondiente y confirmación humana explícita.",
       "env": "HA_SOL_ALLOW_CONTROL",
       "required": false,
       "default": false
