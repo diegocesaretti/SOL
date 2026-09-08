@@ -3,7 +3,14 @@ import { loadEnvFile } from "node:process";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
-const rootEnvPath = resolve(repoRoot, ".env");
+const configuredDataDir = process.env.SOL_DATA_DIR?.trim();
+const dataDir = configuredDataDir ? resolve(configuredDataDir) : resolve(repoRoot, ".sol");
+const configuredEnvFile = process.env.SOL_ENV_FILE?.trim();
+const rootEnvPath = configuredEnvFile
+  ? resolve(configuredEnvFile)
+  : configuredDataDir
+    ? resolve(dataDir, ".env")
+    : resolve(repoRoot, ".env");
 
 try {
   loadEnvFile(rootEnvPath);
@@ -43,12 +50,14 @@ function enumEnv<const T extends readonly string[]>(name: string, allowed: T, fa
   throw new Error(`${name} must be one of: ${allowed.join(", ")}`);
 }
 
-const codexHome = optionalEnv("SOL_CODEX_HOME") ?? resolve(repoRoot, ".sol", "codex");
+const codexHome = optionalEnv("SOL_CODEX_HOME") ?? resolve(dataDir, "codex");
 const host = process.env.SOL_HOST ?? "127.0.0.1";
 const port = integerEnv("SOL_PORT", 3000);
 
 export const config = {
   repoRoot,
+  dataDir,
+  envFilePath: rootEnvPath,
   host,
   port,
   logLevel: process.env.SOL_LOG_LEVEL ?? "info",
@@ -60,7 +69,6 @@ export const config = {
   databaseConnectionTimeoutMs: integerEnv("SOL_DB_CONNECT_TIMEOUT_MS", 15_000),
   sessionDays: integerEnv("SOL_SESSION_DAYS", 30),
   cookieSecure: booleanEnv("SOL_COOKIE_SECURE", false),
-
 
   // Optional legacy AI enrichment. Nexo leaves this dormant by default and exposes
   // context/memory through MCP instead of running a competing assistant brain.
