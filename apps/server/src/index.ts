@@ -35,6 +35,7 @@ import {
   bootstrapHousehold,
   type BootstrapInput,
 } from "./modules/onboarding/service.js";
+import { pluginManager } from "./modules/plugins/runtime.js";
 import { renderAiPage } from "./ui/ai.js";
 import { renderInputsPage } from "./ui/inputs.js";
 import { renderLifePage } from "./ui/life.js";
@@ -63,6 +64,35 @@ function redirect(response: ServerResponse, location: string): void {
   response.statusCode = 302;
   response.setHeader("location", location);
   response.end();
+}
+
+function localPanelUrl(candidate: unknown): string | undefined {
+  if (typeof candidate !== "string" || !candidate.trim()) return undefined;
+  try {
+    const url = new URL(candidate.trim());
+    if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
+    if (url.hostname === "0.0.0.0" || url.hostname === "[::]" || url.hostname === "::") {
+      url.hostname = "127.0.0.1";
+    }
+    const allowed = url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "[::1]" || url.hostname === "::1";
+    return allowed ? url.toString() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function nexoPanelUrl(): Promise<string | undefined> {
+  try {
+    const nexo = await pluginManager.get("nexo-whatsapp");
+    const details = nexo.healthDetails ?? {};
+    const reported = localPanelUrl(details.bridgeUrl) ?? localPanelUrl(details.dashboardUrl) ?? localPanelUrl(details.uiUrl);
+    if (reported) return reported;
+    const configuredPort = Number(nexo.settings.port ?? 3210);
+    const port = Number.isInteger(configuredPort) && configuredPort >= 1024 && configuredPort <= 65535 ? configuredPort : 3210;
+    return `http://127.0.0.1:${port}/`;
+  } catch {
+    return undefined;
+  }
 }
 
 function requireJson(request: IncomingMessage, response: ServerResponse): boolean {
@@ -133,6 +163,13 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
   }
   if (request.method === "GET" && path === "/ai") {
     sendHtml(response, 200, renderAiPage());
+    return;
+  }
+  if (request.method === "GET" && (path === "/whatsapp" || path === "/sol-whatsapp")) {
+    const principal = await principalFor(request, response);
+    if (!principal) return;
+    const panel = await nexoPanelUrl();
+    redirect(response, panel ?? "/v1/inputs/plugins/ui");
     return;
   }
 
