@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { readJsonBody, sendJson } from "../../http.js";
 import { handlePluginConnectionsApi } from "../connections/runtime.js";
 import { handlePluginCredentialRuntime } from "../credentials/runtime.js";
+import { linkPluginIdentityToCanonicalPerson } from "../identity/person-links.js";
 import { upsertPluginPersonIdentity } from "./identity-service.js";
 import { getPluginVisiblePerson, listPluginVisiblePeople } from "./identity-read-service.js";
 import { registerPluginMcpTools } from "./mcp-registry.js";
@@ -70,6 +71,7 @@ export async function handlePluginRuntimeApi(
   const credentialPath = path.startsWith("/v1/plugin-api/credentials");
   if (
     path !== "/v1/plugin-api/identities/person"
+    && path !== "/v1/plugin-api/identities/link"
     && path !== "/v1/plugin-api/mcp/tools/register"
     && path !== "/v1/plugin-api/mcp/tools/invoke-read"
     && !peopleMatch
@@ -120,6 +122,28 @@ export async function handlePluginRuntimeApi(
     if (!input) return true;
     try {
       sendJson(response, 200, { person: await upsertPluginPersonIdentity(principal, input) });
+    } catch (error) {
+      runtimeError(response, error);
+    }
+    return true;
+  }
+
+  if (path === "/v1/plugin-api/identities/link" && request.method === "POST") {
+    if (!requirePermission(response, principal, "identity.link")) return true;
+    const input = await jsonBody<{ identityId?: unknown; personEntityId?: unknown }>(request, response);
+    if (!input) return true;
+    if (typeof input.identityId !== "string" || typeof input.personEntityId !== "string") {
+      sendJson(response, 400, { error: "identity_id_and_person_entity_id_required" });
+      return true;
+    }
+    try {
+      sendJson(response, 200, {
+        link: await linkPluginIdentityToCanonicalPerson(
+          principal,
+          input.identityId,
+          input.personEntityId,
+        ),
+      });
     } catch (error) {
       runtimeError(response, error);
     }

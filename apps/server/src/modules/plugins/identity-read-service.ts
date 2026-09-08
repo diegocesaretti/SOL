@@ -36,6 +36,7 @@ const PERSON_SELECT = `
   FROM entities
   WHERE household_id = $1
     AND kind = 'person'
+    AND COALESCE(metadata->>'supersededBy', '') = ''
     AND (owner_member_id IS NULL OR owner_member_id = $2)
 `;
 
