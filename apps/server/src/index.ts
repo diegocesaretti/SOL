@@ -15,6 +15,7 @@ import {
 } from "./modules/auth/session.js";
 import { handleAiApi } from "./modules/ai/routes.js";
 import { codexAppServer } from "./modules/ai/codex/runtime.js";
+import { handleConnectionsApi } from "./modules/connections/routes.js";
 import {
   createMember,
   MemberValidationError,
@@ -246,6 +247,11 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     const principal = await principalFor(request, response);
     if (!principal) return;
     if (await handleMcpApi(path, request, response, principal)) return;
+  }
+  if (path === "/v1/connections") {
+    const principal = await principalFor(request, response);
+    if (!principal) return;
+    if (await handleConnectionsApi(path, request, response, principal)) return;
   }
 
   if (path === "/v1/source-accounts") {
