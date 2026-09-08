@@ -3,6 +3,7 @@ import { readJsonBody, sendJson } from "../../http.js";
 import { upsertPluginPersonIdentity } from "./identity-service.js";
 import { getPluginVisiblePerson, listPluginVisiblePeople } from "./identity-read-service.js";
 import { registerPluginMcpTools } from "./mcp-registry.js";
+import { invokePluginReadTool } from "./runtime-mcp-read.js";
 import { pluginManager } from "./runtime.js";
 import type { SolPluginRuntimePrincipal } from "./types.js";
 
@@ -65,6 +66,7 @@ export async function handlePluginRuntimeApi(
   if (
     path !== "/v1/plugin-api/identities/person"
     && path !== "/v1/plugin-api/mcp/tools/register"
+    && path !== "/v1/plugin-api/mcp/tools/invoke-read"
     && !peopleMatch
   ) {
     return false;
@@ -116,6 +118,18 @@ export async function handlePluginRuntimeApi(
     try {
       const tools = await registerPluginMcpTools(principal, input);
       sendJson(response, 200, { tools: tools.map(({ callbackUrl: _callbackUrl, ...tool }) => tool) });
+    } catch (error) {
+      runtimeError(response, error);
+    }
+    return true;
+  }
+
+  if (path === "/v1/plugin-api/mcp/tools/invoke-read" && request.method === "POST") {
+    if (!requirePermission(response, principal, "mcp.invoke.read")) return true;
+    const input = await jsonBody<{ name?: unknown; arguments?: unknown }>(request, response);
+    if (!input) return true;
+    try {
+      sendJson(response, 200, await invokePluginReadTool(principal, input));
     } catch (error) {
       runtimeError(response, error);
     }
