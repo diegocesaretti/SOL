@@ -3,7 +3,10 @@ BEGIN;
 -- Provider-neutral identities created by SOL plugins. The existing identities/entity graph
 -- remains the source of truth; this table only records plugin ownership/provenance so a
 -- runtime can upsert safely without gaining arbitrary identity write access.
-CREATE TABLE plugin_identity_bindings (
+--
+-- IMPORTANT: this migration must remain idempotent because some pre-ledger SOL installs
+-- may already contain one of these objects from a partially/manual-applied 0020 migration.
+CREATE TABLE IF NOT EXISTS plugin_identity_bindings (
   household_id uuid NOT NULL REFERENCES households(id) ON DELETE CASCADE,
   plugin_id text NOT NULL,
   external_id text NOT NULL,
@@ -13,12 +16,12 @@ CREATE TABLE plugin_identity_bindings (
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY(household_id, plugin_id, external_id)
 );
-CREATE INDEX plugin_identity_bindings_plugin_idx
+CREATE INDEX IF NOT EXISTS plugin_identity_bindings_plugin_idx
   ON plugin_identity_bindings(household_id, plugin_id);
 
 -- Dynamic MCP tools are registered by a running plugin but consumed by the separate
 -- Nexo/SOL MCP stdio process. Callback URLs are restricted in application code to loopback.
-CREATE TABLE plugin_mcp_tools (
+CREATE TABLE IF NOT EXISTS plugin_mcp_tools (
   household_id uuid NOT NULL REFERENCES households(id) ON DELETE CASCADE,
   plugin_id text NOT NULL,
   name text NOT NULL,
@@ -33,7 +36,7 @@ CREATE TABLE plugin_mcp_tools (
   PRIMARY KEY(household_id, plugin_id, name),
   UNIQUE(household_id, name)
 );
-CREATE INDEX plugin_mcp_tools_household_idx
+CREATE INDEX IF NOT EXISTS plugin_mcp_tools_household_idx
   ON plugin_mcp_tools(household_id, name);
 
 COMMIT;
