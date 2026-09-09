@@ -52,8 +52,8 @@ function semverParts(version: string): [number, number, number, string] {
 export function compareSystemVersions(a: string, b: string): number {
   const left = semverParts(a);
   const right = semverParts(b);
-  for (let index = 0; index < 3; index += 1) {
-    const delta = left[index]! - right[index]!;
+  for (const index of [0, 1, 2] as const) {
+    const delta = left[index] - right[index];
     if (delta !== 0) return delta > 0 ? 1 : -1;
   }
   if (left[3] === right[3]) return 0;
