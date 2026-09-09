@@ -71,11 +71,29 @@ jobs:
           Copy-Item packages/database/migrations/*.sql dist/windows/SOL/packages/database/migrations/ -Force
           Copy-Item .env.example dist/windows/SOL/.env.example
 
-      - name: Publish SOL.exe launcher
+      - name: Write packaged build identity
+        shell: pwsh
+        run: |
+          $version = (Get-Content -Raw package.json | ConvertFrom-Json).version
+          $identity = [ordered]@{
+            version = $version
+            commit = $env:GITHUB_SHA
+            builtAt = (Get-Date).ToUniversalTime().ToString('o')
+            channel = 'stable'
+          } | ConvertTo-Json
+          [System.IO.File]::WriteAllText(
+            (Join-Path $PWD 'dist/windows/SOL/version.json'),
+            $identity,
+            [System.Text.UTF8Encoding]::new($false)
+          )
+
+      - name: Publish SOL.exe launcher and updater
         shell: pwsh
         run: |
           dotnet publish packaging/windows/SolLauncher/SolLauncher.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o dist/windows/launcher
           Copy-Item dist/windows/launcher/SOL.exe dist/windows/SOL/SOL.exe
+          dotnet publish packaging/windows/SolUpdater/SolUpdater.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o dist/windows/updater
+          Copy-Item dist/windows/updater/SOL.Updater.exe dist/windows/SOL/SOL.Updater.exe
 
       - name: Verify portable runtime resolves SOL Core packages
         shell: pwsh
@@ -96,6 +114,8 @@ jobs:
         run: |
           $required = @(
             'dist/windows/SOL/SOL.exe',
+            'dist/windows/SOL/SOL.Updater.exe',
+            'dist/windows/SOL/version.json',
             'dist/windows/SOL/runtime/node.exe',
             'dist/windows/SOL/apps/server/dist/index.js',
             'dist/windows/SOL/apps/server/node_modules/pg/package.json',
@@ -107,20 +127,35 @@ jobs:
           foreach ($path in $required) { if (-not (Test-Path $path)) { throw "Missing package component: $path" } }
           if (Test-Path dist/windows/SOL/.env) { throw 'Real .env must never be bundled' }
           Write-Host "SOL.exe: $((Get-Item dist/windows/SOL/SOL.exe).Length) bytes"
+          Write-Host "SOL.Updater.exe: $((Get-Item dist/windows/SOL/SOL.Updater.exe).Length) bytes"
           Write-Host "node.exe: $((Get-Item dist/windows/SOL/runtime/node.exe).Length) bytes"
 
-      - name: Create SOL-Windows.zip
+      - name: Create SOL-Windows.zip and update manifest
         shell: pwsh
         run: |
           $zip = 'dist/SOL-Windows.zip'
           if (Test-Path $zip) { Remove-Item $zip -Force }
           Compress-Archive -Path dist/windows/SOL -DestinationPath $zip -CompressionLevel Optimal
           $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          $version = (Get-Content -Raw package.json | ConvertFrom-Json).version
+          $downloadUrl = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/sol-windows-latest/SOL-Windows.zip"
+          $manifest = [ordered]@{
+            schemaVersion = 1
+            channel = 'stable'
+            version = $version
+            commit = $env:GITHUB_SHA
+            downloadUrl = $downloadUrl
+            sha256 = $hash
+            publishedAt = (Get-Date).ToUniversalTime().ToString('o')
+          } | ConvertTo-Json
+          [System.IO.File]::WriteAllText(
+            (Join-Path $PWD 'dist/update-manifest.json'),
+            $manifest,
+            [System.Text.UTF8Encoding]::new($false)
+          )
           Write-Host "SHA256=$hash"
-          "sha256=$hash" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-        id: package
 
-      - name: Publish stable SOL Windows release asset
+      - name: Publish stable SOL Windows release assets
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -128,17 +163,19 @@ jobs:
           $tag = 'sol-windows-latest'
           gh release view $tag --repo $env:GITHUB_REPOSITORY 2>$null
           if ($LASTEXITCODE -ne 0) {
-            gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'SOL Windows portable' --notes 'Portable Windows build of SOL. Open SOL.exe; Node is bundled. External providers are installed as plugins and real .env credentials are never included.' --prerelease --target $env:GITHUB_SHA
+            gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'SOL Windows portable' --notes 'Portable Windows build of SOL. Open SOL.exe; Node and the rollback-capable updater are bundled. External providers are installed as plugins and real .env credentials are never included.' --prerelease --target $env:GITHUB_SHA
           } else {
             gh release edit $tag --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA
           }
-          gh release upload $tag dist/SOL-Windows.zip --repo $env:GITHUB_REPOSITORY --clobber
+          gh release upload $tag dist/SOL-Windows.zip dist/update-manifest.json --repo $env:GITHUB_REPOSITORY --clobber
 
       - name: Upload SOL Windows package artifact
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: SOL-Windows
-          path: dist/SOL-Windows.zip
+          path: |
+            dist/SOL-Windows.zip
+            dist/update-manifest.json
           if-no-files-found: error
           retention-days: 30

@@ -6,6 +6,8 @@ on:
       - 'packaging/windows/**'
       - 'apps/server/src/config.ts'
       - 'apps/server/src/modules/plugins/**'
+      - 'apps/server/src/modules/system-update/**'
+      - 'apps/server/src/ui/system.ts'
       - '.github/workflows/windows-launcher-check.yml'
   workflow_dispatch:
 
@@ -28,10 +30,18 @@ jobs:
         shell: pwsh
         run: dotnet build packaging/windows/SolLauncher/SolLauncher.csproj -c Release
 
-      - name: Verify launcher contains persistent-state contract
+      - name: Build SOL updater
+        shell: pwsh
+        run: dotnet build packaging/windows/SolUpdater/SolUpdater.csproj -c Release
+
+      - name: Verify launcher and updater contracts
         shell: pwsh
         run: |
-          $source = Get-Content -Raw packaging/windows/SolLauncher/Program.cs
-          foreach ($required in @('SOL_DATA_DIR','SOL_ENV_FILE','LocalApplicationData','.legacy-portable-migration-v1')) {
-            if (-not $source.Contains($required)) { throw "Launcher missing persistent-state contract: $required" }
+          $launcher = Get-Content -Raw packaging/windows/SolLauncher/Program.cs
+          foreach ($required in @('SOL_DATA_DIR','SOL_ENV_FILE','LocalApplicationData','.legacy-portable-migration-v1','system-update-request.json','SOL.Updater.exe','launcher-pid')) {
+            if (-not $launcher.Contains($required)) { throw "Launcher missing contract: $required" }
+          }
+          $updater = Get-Content -Raw packaging/windows/SolUpdater/Program.cs
+          foreach ($required in @('SHA256','version.json','.update-backup','WaitForHealth','Rollback completed')) {
+            if (-not $updater.Contains($required)) { throw "Updater missing safety contract: $required" }
           }

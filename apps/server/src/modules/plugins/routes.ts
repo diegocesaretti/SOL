@@ -2,11 +2,17 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { readJsonBody, sendHtml, sendJson } from "../../http.js";
 import type { AuthPrincipal } from "../auth/session.js";
 import { renderPluginsPage } from "../../ui/plugins.js";
+import { renderSystemPage } from "../../ui/system.js";
+import { prepareSystemUpdate, systemUpdateStatus } from "../system-update/service.js";
 import { downloadGithubPlugin, inspectGithubPlugin } from "./github.js";
 import { pluginManager } from "./runtime.js";
 
 function canManage(principal: AuthPrincipal): boolean {
   return principal.role === "owner" || principal.role === "adult";
+}
+
+function canManageCore(principal: AuthPrincipal): boolean {
+  return principal.role === "owner";
 }
 
 async function readBinary(request: IncomingMessage, maxBytes: number): Promise<Buffer> {
@@ -80,6 +86,23 @@ function pluginError(response: ServerResponse, error: unknown): void {
   sendJson(response, 400, { error: message });
 }
 
+function systemUpdateError(response: ServerResponse, error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message === "system_update_not_available") {
+    sendJson(response, 409, { error: message });
+    return;
+  }
+  if (message.startsWith("system_update_install_unavailable:")) {
+    sendJson(response, 409, { error: message });
+    return;
+  }
+  if (message.startsWith("system_update_check_failed:") || message.startsWith("system_update_manifest_http_")) {
+    sendJson(response, 502, { error: message });
+    return;
+  }
+  sendJson(response, 400, { error: message });
+}
+
 export async function handlePluginsApi(
   path: string,
   request: IncomingMessage,
@@ -87,7 +110,46 @@ export async function handlePluginsApi(
   principal: AuthPrincipal,
 ): Promise<boolean> {
   if (path === "/v1/plugins/ui" && request.method === "GET") {
+    sendHtml(response, 200, renderSystemPage());
+    return true;
+  }
+
+  if (path === "/v1/plugins/extensions/ui" && request.method === "GET") {
     sendHtml(response, 200, renderPluginsPage());
+    return true;
+  }
+
+  if (path === "/v1/plugins/core-update" && request.method === "GET") {
+    try {
+      const url = new URL(request.url ?? path, "http://sol.local");
+      const status = await systemUpdateStatus(url.searchParams.get("force") === "1");
+      sendJson(response, 200, { ...status, canManageCoreUpdate: canManageCore(principal) });
+    } catch (error) {
+      systemUpdateError(response, error);
+    }
+    return true;
+  }
+
+  if (path === "/v1/plugins/core-update/install" && request.method === "POST") {
+    if (!canManageCore(principal)) {
+      sendJson(response, 403, { error: "forbidden" });
+      return true;
+    }
+    try {
+      const manifest = await prepareSystemUpdate();
+      sendJson(response, 202, {
+        ok: true,
+        version: manifest.version,
+        commit: manifest.commit,
+        restarting: true,
+      });
+      const timer = setTimeout(() => {
+        process.emit("SIGTERM", "SIGTERM");
+      }, 350);
+      timer.unref();
+    } catch (error) {
+      systemUpdateError(response, error);
+    }
     return true;
   }
 
