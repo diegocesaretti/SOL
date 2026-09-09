@@ -5,7 +5,7 @@ import { renderPluginsPage } from "../../ui/plugins.js";
 import { renderSystemPage } from "../../ui/system.js";
 import { prepareSystemUpdate, systemUpdateStatus } from "../system-update/service.js";
 import { downloadGithubPlugin, inspectGithubPlugin } from "./github.js";
-import { pluginManager } from "./runtime.js";
+import { pluginManager, pluginPackageMaxBytes } from "./runtime.js";
 
 function canManage(principal: AuthPrincipal): boolean {
   return principal.role === "owner" || principal.role === "adult";
@@ -13,6 +13,14 @@ function canManage(principal: AuthPrincipal): boolean {
 
 function canManageCore(principal: AuthPrincipal): boolean {
   return principal.role === "owner";
+}
+
+function contentLengthExceeds(request: IncomingMessage, maxBytes: number): boolean {
+  const header = request.headers["content-length"];
+  const raw = Array.isArray(header) ? header[0] : header;
+  if (!raw) return false;
+  const value = Number(raw);
+  return Number.isFinite(value) && value > maxBytes;
 }
 
 async function readBinary(request: IncomingMessage, maxBytes: number): Promise<Buffer> {
@@ -67,8 +75,8 @@ function pluginError(response: ServerResponse, error: unknown): void {
     sendJson(response, 409, { error: message, rolledBack: true });
     return;
   }
-  if (message === "plugin_package_too_large") {
-    sendJson(response, 413, { error: message });
+  if (message === "plugin_package_too_large" || message === "plugin package exceeds the configured size limit") {
+    sendJson(response, 413, { error: "plugin_package_too_large", maxBytes: pluginPackageMaxBytes });
     return;
   }
   if (message === "repository_or_plugin_manifest_not_found" || message.startsWith("github_release_asset_not_found:")) {
@@ -168,8 +176,12 @@ export async function handlePluginsApi(
       sendJson(response, 415, { error: "Upload the .solplugin file as application/octet-stream or application/zip" });
       return true;
     }
+    if (contentLengthExceeds(request, pluginPackageMaxBytes)) {
+      sendJson(response, 413, { error: "plugin_package_too_large", maxBytes: pluginPackageMaxBytes });
+      return true;
+    }
     try {
-      const packageBytes = await readBinary(request, 64 * 1024 * 1024);
+      const packageBytes = await readBinary(request, pluginPackageMaxBytes);
       sendJson(response, 201, { plugin: await pluginManager.installPackage(packageBytes, { scope: { householdId: principal.householdId, memberId: principal.memberId } }) });
     } catch (error) {
       pluginError(response, error);
@@ -236,8 +248,12 @@ export async function handlePluginsApi(
       sendJson(response, 415, { error: "Upload the replacement .solplugin as application/octet-stream or application/zip" });
       return true;
     }
+    if (contentLengthExceeds(request, pluginPackageMaxBytes)) {
+      sendJson(response, 413, { error: "plugin_package_too_large", maxBytes: pluginPackageMaxBytes });
+      return true;
+    }
     try {
-      const packageBytes = await readBinary(request, 64 * 1024 * 1024);
+      const packageBytes = await readBinary(request, pluginPackageMaxBytes);
       const plugin = await pluginManager.upgradePackage(fileUpdateMatch[1]!, packageBytes, {
         approvedPermissions: approvedPermissionsFromHeader(request),
       });
