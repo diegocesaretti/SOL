@@ -25,3 +25,28 @@ export function normalizePostgresConnectionString(connectionString: string): str
   url.searchParams.set("sslmode", "verify-full");
   return url.toString();
 }
+
+/**
+ * Neon pooled endpoints use a `-pooler` hostname and transaction pooling.
+ * LISTEN/NOTIFY requires session affinity, so derive the matching direct Neon
+ * endpoint for the dedicated listener while leaving ordinary SQL on the pooler.
+ * Non-Neon/unknown URLs are returned unchanged.
+ */
+export function directPostgresConnectionString(connectionString: string): string {
+  let url: URL;
+  try {
+    url = new URL(connectionString);
+  } catch {
+    return connectionString;
+  }
+
+  if (url.protocol !== "postgres:" && url.protocol !== "postgresql:") {
+    return connectionString;
+  }
+
+  if (url.hostname.includes("-pooler.")) {
+    url.hostname = url.hostname.replace("-pooler.", ".");
+  }
+
+  return url.toString();
+}
