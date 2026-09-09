@@ -64,6 +64,7 @@ export const config = {
   databaseUrl:
     process.env.DATABASE_URL ??
     "postgresql://sol:sol_dev_only@127.0.0.1:5432/sol",
+  databaseListenUrl: optionalEnv("SOL_DB_LISTEN_URL"),
   databasePoolMax: integerEnv("SOL_DB_POOL_MAX", 4),
   databaseIdleTimeoutMs: integerEnv("SOL_DB_IDLE_TIMEOUT_MS", 15_000),
   databaseConnectionTimeoutMs: integerEnv("SOL_DB_CONNECT_TIMEOUT_MS", 15_000),
