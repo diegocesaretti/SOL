@@ -69,7 +69,7 @@ internal static class Program
         using var singleton = new Mutex(true, "Local\\SOL.Desktop.Singleton", out var firstInstance);
         if (!firstInstance)
         {
-            OpenBrowser("http://127.0.0.1:3000/inputs/plugins/ui");
+            OpenBrowser("http://127.0.0.1:3000/v1/inputs/plugins/ui");
             return;
         }
 
@@ -106,6 +106,7 @@ internal static class Program
         var logDir = Path.Combine(persistent.DataRoot, "logs");
         Directory.CreateDirectory(logDir);
         var logPath = Path.Combine(logDir, "server.log");
+        var pendingUpdate = Path.Combine(persistent.DataRoot, "system-update-request.json");
 
         using var job = new JobHandle();
         using var log = new StreamWriter(new FileStream(logPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite), Encoding.UTF8) { AutoFlush = true };
@@ -138,10 +139,21 @@ internal static class Program
             child.BeginErrorReadLine();
 
             var ready = await WaitForHealth(baseUrl, TimeSpan.FromSeconds(30));
-            if (ready) OpenBrowser(baseUrl + "/inputs/plugins/ui");
+            if (ready) OpenBrowser(baseUrl + "/v1/inputs/plugins/ui");
             else MessageBox(IntPtr.Zero, $"SOL no respondió a tiempo. Revisá el log:\n{logPath}", "SOL · error de inicio", 0x10);
 
             await child.WaitForExitAsync();
+
+            if (File.Exists(pendingUpdate))
+            {
+                if (TryLaunchUpdater(root, persistent.DataRoot, pendingUpdate, out var updateError)) return;
+                try { File.Delete(pendingUpdate); } catch { }
+                MessageBox(IntPtr.Zero,
+                    $"SOL preparó una actualización pero no pudo iniciar el updater.\n\n{updateError}\n\nLa instalación actual no fue modificada.",
+                    "SOL · actualización", 0x10);
+                return;
+            }
+
             if (child.ExitCode != 0)
             {
                 MessageBox(IntPtr.Zero, $"SOL se cerró con código {child.ExitCode}. Revisá el log:\n{logPath}", "SOL", 0x10);
@@ -151,6 +163,45 @@ internal static class Program
         {
             lock (log) log.WriteLine($"[{DateTimeOffset.Now:O}] LAUNCHER {ex}");
             MessageBox(IntPtr.Zero, $"No se pudo iniciar SOL.\n\n{ex.Message}\n\nLog: {logPath}", "SOL", 0x10);
+        }
+    }
+
+    private static bool TryLaunchUpdater(string root, string dataRoot, string requestPath, out string? error)
+    {
+        try
+        {
+            var bundledUpdater = Path.Combine(root, "SOL.Updater.exe");
+            if (!File.Exists(bundledUpdater)) throw new FileNotFoundException("SOL.Updater.exe no está incluido en este paquete.", bundledUpdater);
+
+            var temporaryDir = Path.Combine(Path.GetTempPath(), "SOL", "updater-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(temporaryDir);
+            var temporaryUpdater = Path.Combine(temporaryDir, "SOL.Updater.exe");
+            File.Copy(bundledUpdater, temporaryUpdater, overwrite: true);
+
+            var start = new ProcessStartInfo
+            {
+                FileName = temporaryUpdater,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WorkingDirectory = temporaryDir,
+            };
+            start.ArgumentList.Add("--root");
+            start.ArgumentList.Add(root);
+            start.ArgumentList.Add("--data");
+            start.ArgumentList.Add(dataRoot);
+            start.ArgumentList.Add("--request");
+            start.ArgumentList.Add(requestPath);
+            start.ArgumentList.Add("--launcher-pid");
+            start.ArgumentList.Add(Environment.ProcessId.ToString());
+
+            if (Process.Start(start) is null) throw new InvalidOperationException("Windows no pudo iniciar SOL.Updater.exe.");
+            error = null;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            return false;
         }
     }
 
