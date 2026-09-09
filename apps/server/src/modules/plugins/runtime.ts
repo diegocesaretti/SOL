@@ -4,10 +4,12 @@ import { SafePluginManager } from "./safe-manager.js";
 
 const pluginHost = config.host === "0.0.0.0" || config.host === "::" ? "127.0.0.1" : config.host;
 
+export const pluginPackageMaxBytes = 256 * 1024 * 1024;
+
 export const pluginManager = new SafePluginManager({
   rootDir: resolve(config.dataDir, "plugins"),
   coreUrl: `http://${pluginHost}:${config.port}`,
-  maxPackageBytes: 64 * 1024 * 1024,
+  maxPackageBytes: pluginPackageMaxBytes,
 });
 
 void pluginManager.startEnabled().catch((error) => {
