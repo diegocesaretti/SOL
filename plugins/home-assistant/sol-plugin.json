@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "id": "home-assistant",
   "name": "Home Assistant",
-  "version": "0.3.0",
-  "description": "Home Assistant bridge for SOL with persistent state cache, canonical Person identity sync, Life presence events, MCP tools for Codex and Android TV Satellite visual control.",
+  "version": "0.3.1",
+  "description": "Home Assistant bridge for SOL with persistent state cache, canonical Person identity sync, Life presence events, MCP tools for Codex and autonomous Android TV Satellite visual control.",
   "runtime": "node",
   "entry": "index.mjs",
   "args": [],
@@ -111,7 +111,7 @@
       "key": "allow_control",
       "label": "Permitir control desde Codex",
       "type": "boolean",
-      "description": "Habilita acciones de Home Assistant y Android TV desde Codex. Cada acción sigue requiriendo el scope correspondiente y una orden explícita del humano.",
+      "description": "Habilita acciones de Home Assistant y Android TV desde Codex. Para TV, una orden explícita de alto nivel autoriza los pasos intermedios de navegación de esa tarea sin pedir confirmación en cada tecla/click; las acciones generales de Home Assistant conservan su confirmación explícita.",
       "env": "HA_SOL_ALLOW_CONTROL",
       "required": false,
       "default": false
@@ -158,6 +158,17 @@
       "default": 8000,
       "min": 1000,
       "max": 30000
+    },
+    {
+      "key": "tv_action_settle_ms",
+      "label": "Espera visual después de cada acción (ms)",
+      "type": "number",
+      "description": "Tiempo que SOL espera tras cada tecla/click antes de capturar automáticamente la nueva pantalla y el árbol de accesibilidad.",
+      "env": "HA_SOL_TV_ACTION_SETTLE_MS",
+      "required": false,
+      "default": 450,
+      "min": 100,
+      "max": 2000
     }
   ],
   "distribution": {
