@@ -26,6 +26,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
 
+      - name: Verify synchronized SOL versions
+        run: |
+          node --input-type=module -e "const fs=await import('node:fs'); const root=JSON.parse(fs.readFileSync('package.json','utf8')).version; const server=JSON.parse(fs.readFileSync('apps/server/package.json','utf8')).version; if(root!==server) throw new Error('SOL root/server version mismatch: '+root+' != '+server); console.log('SOL version',root)"
+
       - name: Typecheck
         run: pnpm typecheck
 

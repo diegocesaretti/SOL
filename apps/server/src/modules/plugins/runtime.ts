@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import { config } from "../../config.js";
+import { initializePluginsWithBundle } from "./bundled.js";
 import { SafePluginManager } from "./safe-manager.js";
 
 const pluginHost = config.host === "0.0.0.0" || config.host === "::" ? "127.0.0.1" : config.host;
@@ -12,7 +13,7 @@ export const pluginManager = new SafePluginManager({
   maxPackageBytes: pluginPackageMaxBytes,
 });
 
-void pluginManager.startEnabled().catch((error) => {
+void initializePluginsWithBundle(pluginManager).catch((error) => {
   console.error("SOL plugin autostart failed", error);
 });
 

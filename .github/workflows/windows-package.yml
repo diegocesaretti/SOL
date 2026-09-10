@@ -3,6 +3,7 @@ name: Windows portable package
 on:
   push:
     branches: [ main, feat/windows-standalone-package, fix/windows-package-flat-node-modules, fix/first-run-database-config ]
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -39,6 +40,16 @@ jobs:
       - name: Typecheck
         shell: pwsh
         run: pnpm typecheck
+
+      - name: Verify synchronized SOL versions
+        shell: pwsh
+        run: |
+          $rootVersion = (Get-Content -Raw package.json | ConvertFrom-Json).version
+          $serverVersion = (Get-Content -Raw apps/server/package.json | ConvertFrom-Json).version
+          if ($rootVersion -ne $serverVersion) {
+            throw "SOL root/server version mismatch: $rootVersion != $serverVersion"
+          }
+          Write-Host "SOL version: $rootVersion"
 
       - name: Build SOL server
         shell: pwsh
@@ -103,13 +114,13 @@ jobs:
           try {
             & $node --input-type=module -e "await import('pg'); await import('zod'); await import('@modelcontextprotocol/server'); console.log('portable SOL Core dependencies resolve')"
             if ($LASTEXITCODE -ne 0) { throw 'Portable Node dependency resolution failed' }
-            & $node --input-type=module -e "await import('./dist/database/client.js'); console.log('database client imports successfully')"
-            if ($LASTEXITCODE -ne 0) { throw 'Portable database client import failed' }
+            & $node --input-type=module -e "await import('./dist/database/client.js'); await import('./dist/modules/plugins/bundled.js'); console.log('database and bundled-plugin runtimes import successfully')"
+            if ($LASTEXITCODE -ne 0) { throw 'Portable SOL runtime import failed' }
           } finally {
             Pop-Location
           }
 
-      - name: Verify package structure
+      - name: Verify core package structure
         shell: pwsh
         run: |
           $required = @(
@@ -117,7 +128,9 @@ jobs:
             'dist/windows/SOL/SOL.Updater.exe',
             'dist/windows/SOL/version.json',
             'dist/windows/SOL/runtime/node.exe',
+            'dist/windows/SOL/apps/server/package.json',
             'dist/windows/SOL/apps/server/dist/index.js',
+            'dist/windows/SOL/apps/server/dist/modules/plugins/bundled.js',
             'dist/windows/SOL/apps/server/node_modules/pg/package.json',
             'dist/windows/SOL/apps/server/node_modules/zod/package.json',
             'dist/windows/SOL/packages/database/migrations/0021_connections.sql',
@@ -126,11 +139,124 @@ jobs:
           )
           foreach ($path in $required) { if (-not (Test-Path $path)) { throw "Missing package component: $path" } }
           if (Test-Path dist/windows/SOL/.env) { throw 'Real .env must never be bundled' }
+          if (Test-Path dist/windows/SOL/bundled-plugins) { throw 'Core snapshot must be created before bundled plugins are added' }
           Write-Host "SOL.exe: $((Get-Item dist/windows/SOL/SOL.exe).Length) bytes"
           Write-Host "SOL.Updater.exe: $((Get-Item dist/windows/SOL/SOL.Updater.exe).Length) bytes"
           Write-Host "node.exe: $((Get-Item dist/windows/SOL/runtime/node.exe).Length) bytes"
 
-      - name: Create SOL-Windows.zip and update manifest
+      - name: Create core-only Windows ZIP
+        shell: pwsh
+        run: |
+          $zip = 'dist/SOL-Core-Windows.zip'
+          if (Test-Path $zip) { Remove-Item $zip -Force }
+          Compress-Archive -Path dist/windows/SOL -DestinationPath $zip -CompressionLevel Optimal
+          Write-Host "SOL-Core-Windows.zip SHA256=$((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant())"
+
+      - name: Download and verify latest stable official plugins
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bundleDir = Join-Path $PWD 'dist/windows/SOL/bundled-plugins'
+          New-Item -ItemType Directory -Force $bundleDir | Out-Null
+          $maxBytes = 256MB
+          $definitions = @(
+            [ordered]@{
+              id = 'nexo-whatsapp'
+              repository = 'diegocesaretti/Whatsapp-Codex-Nexo'
+              releaseTag = 'sol-plugin-latest'
+              file = 'Nexo.solplugin'
+              url = 'https://github.com/diegocesaretti/Whatsapp-Codex-Nexo/releases/download/sol-plugin-latest/Nexo.solplugin'
+            },
+            [ordered]@{
+              id = 'codex-audio-remote'
+              repository = 'diegocesaretti/Codex-audio-remote'
+              releaseTag = 'sol-plugin-latest'
+              file = 'CodexAudioRemote.solplugin'
+              url = 'https://github.com/diegocesaretti/Codex-audio-remote/releases/download/sol-plugin-latest/CodexAudioRemote.solplugin'
+            },
+            [ordered]@{
+              id = 'home-assistant'
+              repository = 'diegocesaretti/SOL'
+              releaseTag = 'home-assistant-plugin-latest'
+              file = 'HomeAssistant.solplugin'
+              url = 'https://github.com/diegocesaretti/SOL/releases/download/home-assistant-plugin-latest/HomeAssistant.solplugin'
+            }
+          )
+
+          $catalogPlugins = @()
+          foreach ($definition in $definitions) {
+            $destination = Join-Path $bundleDir $definition.file
+            Write-Host "Downloading $($definition.id) from $($definition.url)"
+            Invoke-WebRequest -Uri $definition.url -OutFile $destination -Headers @{ 'User-Agent' = 'SOL-Full-Windows-Build/0.15.0' }
+            $file = Get-Item $destination
+            if ($file.Length -le 0 -or $file.Length -gt $maxBytes) {
+              throw "Bundled plugin $($definition.id) has invalid size: $($file.Length)"
+            }
+
+            $digest = (Get-FileHash $destination -Algorithm SHA256).Hash.ToLowerInvariant()
+            $inspectRoot = Join-Path $env:RUNNER_TEMP ("sol-plugin-" + [guid]::NewGuid().ToString('N'))
+            $inspectZip = "$inspectRoot.zip"
+            New-Item -ItemType Directory -Force $inspectRoot | Out-Null
+            Copy-Item $destination $inspectZip -Force
+            try {
+              Expand-Archive -Path $inspectZip -DestinationPath $inspectRoot -Force
+              $manifestPath = Join-Path $inspectRoot 'sol-plugin.json'
+              if (-not (Test-Path $manifestPath)) { throw "Bundled plugin $($definition.id) has no root sol-plugin.json" }
+              $manifest = Get-Content -Raw $manifestPath | ConvertFrom-Json
+              if ($manifest.id -ne $definition.id) {
+                throw "Bundled plugin id mismatch: expected $($definition.id), got $($manifest.id)"
+              }
+              if (-not $manifest.version -or -not $manifest.name) {
+                throw "Bundled plugin $($definition.id) has incomplete manifest identity"
+              }
+              $catalogPlugins += [ordered]@{
+                id = [string]$manifest.id
+                name = [string]$manifest.name
+                version = [string]$manifest.version
+                file = [string]$definition.file
+                sha256 = $digest
+                repository = [string]$definition.repository
+                releaseTag = [string]$definition.releaseTag
+              }
+              Write-Host "Bundled $($manifest.id) $($manifest.version) · $($file.Length) bytes · SHA256=$digest"
+            } finally {
+              Remove-Item $inspectRoot -Recurse -Force -ErrorAction SilentlyContinue
+              Remove-Item $inspectZip -Force -ErrorAction SilentlyContinue
+            }
+          }
+
+          $catalog = [ordered]@{
+            schemaVersion = 1
+            generatedAt = (Get-Date).ToUniversalTime().ToString('o')
+            plugins = $catalogPlugins
+          } | ConvertTo-Json -Depth 6
+          [System.IO.File]::WriteAllText(
+            (Join-Path $bundleDir 'catalog.json'),
+            $catalog,
+            [System.Text.UTF8Encoding]::new($false)
+          )
+
+      - name: Verify Full bundle catalog
+        shell: pwsh
+        run: |
+          $bundleDir = 'dist/windows/SOL/bundled-plugins'
+          $catalog = Get-Content -Raw "$bundleDir/catalog.json" | ConvertFrom-Json
+          if ($catalog.schemaVersion -ne 1) { throw 'Invalid bundled plugin catalog schema' }
+          if (@($catalog.plugins).Count -ne 3) { throw "Expected 3 bundled plugins, got $(@($catalog.plugins).Count)" }
+          $expected = @('nexo-whatsapp', 'codex-audio-remote', 'home-assistant')
+          foreach ($id in $expected) {
+            $entry = @($catalog.plugins | Where-Object id -eq $id)
+            if ($entry.Count -ne 1) { throw "Missing or duplicate bundled plugin: $id" }
+            $path = Join-Path $bundleDir $entry[0].file
+            if (-not (Test-Path $path)) { throw "Bundled package missing: $path" }
+            $digest = (Get-FileHash $path -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($digest -ne [string]$entry[0].sha256) { throw "Bundled package hash mismatch: $id" }
+          }
+          if (Test-Path dist/windows/SOL/.env) { throw 'Real .env must never be bundled' }
+          Write-Host 'SOL Full bundle catalog:'
+          $catalog.plugins | ForEach-Object { Write-Host " - $($_.id) $($_.version) [$($_.sha256)]" }
+
+      - name: Create Full Windows ZIP and update manifest
         shell: pwsh
         run: |
           $zip = 'dist/SOL-Windows.zip'
@@ -153,21 +279,25 @@ jobs:
             $manifest,
             [System.Text.UTF8Encoding]::new($false)
           )
-          Write-Host "SHA256=$hash"
+          Write-Host "SOL-Windows.zip Full SHA256=$hash"
+          Write-Host "SOL-Windows.zip size=$((Get-Item $zip).Length)"
+          Write-Host "SOL-Core-Windows.zip size=$((Get-Item 'dist/SOL-Core-Windows.zip').Length)"
 
       - name: Publish stable SOL Windows release assets
+        if: github.ref == 'refs/heads/main'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           $tag = 'sol-windows-latest'
+          $notes = 'SOL Windows 0.15+ Full: SOL Core + latest stable Nexo, Codex Audio Remote and Home Assistant plugins captured and verified at build time. SOL-Core-Windows.zip is the optional core-only package. Real credentials are never included.'
           gh release view $tag --repo $env:GITHUB_REPOSITORY 2>$null
           if ($LASTEXITCODE -ne 0) {
-            gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'SOL Windows portable' --notes 'Portable Windows build of SOL. Open SOL.exe; Node and the rollback-capable updater are bundled. External providers are installed as plugins and real .env credentials are never included.' --prerelease --target $env:GITHUB_SHA
+            gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'SOL Windows Full' --notes $notes --prerelease --target $env:GITHUB_SHA
           } else {
-            gh release edit $tag --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA
+            gh release edit $tag --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title 'SOL Windows Full' --notes $notes
           }
-          gh release upload $tag dist/SOL-Windows.zip dist/update-manifest.json --repo $env:GITHUB_REPOSITORY --clobber
+          gh release upload $tag dist/SOL-Windows.zip dist/SOL-Core-Windows.zip dist/update-manifest.json --repo $env:GITHUB_REPOSITORY --clobber
 
       - name: Upload SOL Windows package artifact
         continue-on-error: true
@@ -176,6 +306,7 @@ jobs:
           name: SOL-Windows
           path: |
             dist/SOL-Windows.zip
+            dist/SOL-Core-Windows.zip
             dist/update-manifest.json
           if-no-files-found: error
           retention-days: 30

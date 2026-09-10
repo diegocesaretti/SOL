@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { config } from "./config.js";
 import "./database/auto-migrate.js";
@@ -43,6 +44,15 @@ import { renderMcpPage } from "./ui/mcp.js";
 import { renderOnboardingPage } from "./ui/onboarding.js";
 import { renderOutputsPage } from "./ui/outputs.js";
 import { startWindowsTray, stopWindowsTray } from "./windows/tray.js";
+
+const solVersion = (() => {
+  try {
+    const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version?: unknown };
+    return typeof packageJson.version === "string" && packageJson.version.trim() ? packageJson.version.trim() : "unknown";
+  } catch {
+    return "unknown";
+  }
+})();
 
 export const eventBus = new InMemoryEventBus();
 const unregisterCandidateProcessor = registerCandidateProcessor(eventBus);
@@ -188,7 +198,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     sendJson(response, 200, {
       name: "SOL",
       architecture: "family-first data/knowledge OS + MCP",
-      version: "0.11.0",
+      version: solVersion,
       database,
       reasoningInterface: "mcp",
       aiProviderMode: config.aiProvider,
