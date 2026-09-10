@@ -22,8 +22,12 @@ function zodValue(definition: unknown): any {
     if (typeof input.maxLength === "number") value = value.max(Math.max(0, Math.trunc(input.maxLength)));
   } else if (input.type === "integer") {
     value = z.number().int();
+    if (typeof input.minimum === "number") value = value.min(input.minimum);
+    if (typeof input.maximum === "number") value = value.max(input.maximum);
   } else if (input.type === "number") {
     value = z.number();
+    if (typeof input.minimum === "number") value = value.min(input.minimum);
+    if (typeof input.maximum === "number") value = value.max(input.maximum);
   } else if (input.type === "boolean") {
     value = z.boolean();
   } else if (input.type === "array") {
@@ -54,6 +58,36 @@ function text(value: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }] };
 }
 
+function pluginResult(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return text(value);
+  const envelope = value as Record<string, unknown>;
+  const raw = envelope.__sol_mcp_content;
+  if (!Array.isArray(raw) || raw.length < 1 || raw.length > 8) return text(value);
+
+  const content: Array<
+    | { type: "text"; text: string }
+    | { type: "image"; data: string; mimeType: string }
+  > = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return text(value);
+    const part = item as Record<string, unknown>;
+    if (part.type === "text" && typeof part.text === "string") {
+      if (Buffer.byteLength(part.text, "utf8") > 512 * 1024) return text(value);
+      content.push({ type: "text", text: part.text });
+      continue;
+    }
+    if (part.type === "image" && typeof part.data === "string" && typeof part.mimeType === "string") {
+      const mimeType = part.mimeType.toLowerCase();
+      if (!["image/jpeg", "image/png", "image/webp"].includes(mimeType)) return text(value);
+      if (part.data.length > 12 * 1024 * 1024 || !/^[A-Za-z0-9+/=\r\n]+$/.test(part.data)) return text(value);
+      content.push({ type: "image", data: part.data, mimeType });
+      continue;
+    }
+    return text(value);
+  }
+  return { content };
+}
+
 export async function loadPluginMcpTools(principal: AuthPrincipal, scopes: string[]): Promise<PluginMcpTool[]> {
   return await listPluginMcpTools(principal, scopes);
 }
@@ -70,7 +104,7 @@ export function registerPluginMcpToolsOnServer(
         description: `${tool.description}\n\nProvided by SOL plugin: ${tool.pluginId}.`,
         inputSchema: zodInputSchema(tool.inputSchema),
       },
-      async (args: Record<string, unknown>) => text(await invokePluginMcpTool(principal, tool, args)),
+      async (args: Record<string, unknown>) => pluginResult(await invokePluginMcpTool(principal, tool, args)),
     );
   }
 }
