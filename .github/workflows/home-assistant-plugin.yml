@@ -44,8 +44,9 @@ jobs:
           node --check plugins/home-assistant/lib/cache.mjs
           node --check plugins/home-assistant/lib/ha-client.mjs
           node --check plugins/home-assistant/lib/sol-client.mjs
+          node --check plugins/home-assistant/lib/tv-client.mjs
 
-      - name: Cache tests
+      - name: Cache and TV Satellite tests
         run: node --test plugins/home-assistant/test/*.test.mjs
 
       - name: Package .solplugin
