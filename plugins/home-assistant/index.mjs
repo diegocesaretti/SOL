@@ -4,6 +4,7 @@ import { mkdir } from "node:fs/promises";
 import { HaStateCache } from "./lib/cache.mjs";
 import { HomeAssistantClient } from "./lib/ha-client.mjs";
 import { SolPluginClient } from "./lib/sol-client.mjs";
+import { TvSatelliteClient } from "./lib/tv-client.mjs";
 
 function required(name) {
   const value = process.env[name]?.trim();
@@ -66,6 +67,11 @@ const config = {
   personSync: process.env.HA_SOL_PERSON_SYNC?.trim() || "safe-link",
   ingestPresence: boolEnv("HA_SOL_INGEST_PRESENCE", true),
   allowControl: boolEnv("HA_SOL_ALLOW_CONTROL", false),
+  tvEnabled: boolEnv("HA_SOL_TV_ENABLED", false),
+  tvUrl: process.env.HA_SOL_TV_URL?.trim() || "",
+  tvToken: process.env.HA_SOL_TV_TOKEN?.trim() || "",
+  tvRemoteEntityId: process.env.HA_SOL_TV_REMOTE_ENTITY_ID?.trim() || "",
+  tvTimeoutMs: numberEnv("HA_SOL_TV_TIMEOUT_MS", 8000, 1000, 30000),
   dataDir: process.env.SOL_PLUGIN_DATA_DIR || new URL("./.data", import.meta.url).pathname
 };
 
@@ -73,6 +79,12 @@ await mkdir(config.dataDir, { recursive: true });
 const cache = new HaStateCache(config.dataDir, config.flushMs);
 await cache.load();
 const sol = new SolPluginClient();
+const tv = new TvSatelliteClient({
+  enabled: config.tvEnabled,
+  baseUrl: config.tvUrl,
+  token: config.tvToken,
+  timeoutMs: config.tvTimeoutMs
+});
 const pluginId = process.env.SOL_PLUGIN_ID?.trim() || "home-assistant";
 const mcpPath = `/mcp/${randomBytes(24).toString("base64url")}`;
 const callbackUrl = `http://127.0.0.1:${config.apiPort}${mcpPath}`;
@@ -178,7 +190,92 @@ const ha = new HomeAssistantClient({
   onConnectionState
 });
 
-const tools = [
+function assertTvActionAllowed(args) {
+  if (!config.allowControl) throw new Error("home_assistant_control_disabled");
+  if (args.confirmedByUser !== true) throw new Error("explicit_user_confirmation_required");
+  tv.assertConfigured();
+}
+
+function tvImageResult(screenshot, observation = null) {
+  const metadata = {
+    source: "Codex TV Satellite",
+    contentType: screenshot.contentType,
+    bytes: screenshot.buffer.length,
+    ...(observation ? { observation } : {})
+  };
+  return {
+    __sol_mcp_content: [
+      {
+        type: "image",
+        mimeType: screenshot.contentType,
+        data: screenshot.buffer.toString("base64")
+      },
+      {
+        type: "text",
+        text: JSON.stringify(metadata, null, 2)
+      }
+    ]
+  };
+}
+
+const satelliteNavigationAction = {
+  home: "home",
+  back: "back",
+  up: "dpad_up",
+  down: "dpad_down",
+  left: "dpad_left",
+  right: "dpad_right",
+  center: "dpad_center"
+};
+
+const homeAssistantRemoteCommand = {
+  home: "HOME",
+  back: "BACK",
+  up: "DPAD_UP",
+  down: "DPAD_DOWN",
+  left: "DPAD_LEFT",
+  right: "DPAD_RIGHT",
+  center: "DPAD_CENTER"
+};
+
+async function navigateTv(direction) {
+  const action = satelliteNavigationAction[direction];
+  if (!action) throw new Error("tv_navigation_direction_invalid");
+  const result = await tv.action(action);
+  if (result.ok === true) return { ok: true, via: "tv_satellite", result };
+
+  const canFallback = Boolean(config.tvRemoteEntityId) &&
+    (result.fallback === "home_assistant" || direction === "home" || direction === "back");
+  if (!canFallback) {
+    return {
+      ok: false,
+      via: "tv_satellite",
+      result,
+      hint: config.tvRemoteEntityId
+        ? "The Satellite action failed and did not advertise a Home Assistant fallback."
+        : "Configure tv_remote_entity_id to enable Home Assistant remote fallback on Android 7/8."
+    };
+  }
+
+  const command = homeAssistantRemoteCommand[direction];
+  const fallbackResult = await ha.callService(
+    "remote",
+    "send_command",
+    { command: [command] },
+    { entity_id: config.tvRemoteEntityId },
+    false
+  );
+  return {
+    ok: true,
+    via: "home_assistant_remote_fallback",
+    entityId: config.tvRemoteEntityId,
+    command,
+    satelliteResult: result,
+    result: fallbackResult ?? null
+  };
+}
+
+const baseTools = [
   {
     name: "home_assistant_cache_status",
     description: "Return Home Assistant connection, local cache freshness and Person sync status. Use this before relying on cached state when freshness matters.",
@@ -251,6 +348,100 @@ const tools = [
   }
 ];
 
+const tvTools = [
+  {
+    name: "home_assistant_tv_status",
+    description: "Check the configured Codex TV Satellite on the local network, including Android API level, Accessibility connection and screenshot readiness.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    requiredScope: "read"
+  },
+  {
+    name: "home_assistant_tv_observe",
+    description: "Observe Android TV on demand. Returns the current screenshot as real MCP image content together with the Accessibility UI tree and capabilities. Prefer this after every TV action instead of polling continuously.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    requiredScope: "read"
+  },
+  {
+    name: "home_assistant_tv_screenshot",
+    description: "Capture the latest Android TV frame as real MCP image content so Codex can visually inspect the television screen.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    requiredScope: "read"
+  },
+  {
+    name: "home_assistant_tv_tap",
+    description: "Tap a visual location on Android TV using normalized coordinates from 0 to 1. Designed for Android 7+ Accessibility gesture injection after visually inspecting the screen.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        confirmedByUser: { type: "boolean", const: true },
+        x: { type: "number", minimum: 0, maximum: 1, description: "Horizontal normalized coordinate, 0=left and 1=right." },
+        y: { type: "number", minimum: 0, maximum: 1, description: "Vertical normalized coordinate, 0=top and 1=bottom." }
+      },
+      required: ["confirmedByUser", "x", "y"],
+      additionalProperties: false
+    },
+    requiredScope: "actions"
+  },
+  {
+    name: "home_assistant_tv_click_text",
+    description: "Click an Android TV Accessibility element by its visible text. Prefer this over coordinate taps when the UI tree exposes a useful label.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        confirmedByUser: { type: "boolean", const: true },
+        text: { type: "string", minLength: 1, maxLength: 240 }
+      },
+      required: ["confirmedByUser", "text"],
+      additionalProperties: false
+    },
+    requiredScope: "actions"
+  },
+  {
+    name: "home_assistant_tv_set_text",
+    description: "Replace text in the currently focused editable Android TV field, for example a Stremio or YouTube search box.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        confirmedByUser: { type: "boolean", const: true },
+        text: { type: "string", minLength: 1, maxLength: 500 }
+      },
+      required: ["confirmedByUser", "text"],
+      additionalProperties: false
+    },
+    requiredScope: "actions"
+  },
+  {
+    name: "home_assistant_tv_launch_app",
+    description: "Launch an installed Android TV app by package name or app label through Codex TV Satellite.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        confirmedByUser: { type: "boolean", const: true },
+        app: { type: "string", minLength: 1, maxLength: 240 }
+      },
+      required: ["confirmedByUser", "app"],
+      additionalProperties: false
+    },
+    requiredScope: "actions"
+  },
+  {
+    name: "home_assistant_tv_navigate",
+    description: "Navigate Android TV with Home, Back or DPAD. On Android 7/8, DPAD automatically falls back to the configured Home Assistant remote entity when the Satellite reports native DPAD unavailable.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        confirmedByUser: { type: "boolean", const: true },
+        direction: { type: "string", enum: ["home", "back", "up", "down", "left", "right", "center"] }
+      },
+      required: ["confirmedByUser", "direction"],
+      additionalProperties: false
+    },
+    requiredScope: "actions"
+  }
+];
+
+const tools = tv.configured ? [...baseTools, ...tvTools] : baseTools;
+
 let toolsRegistered = false;
 async function registerTools() {
   if (!sol.enabled) return;
@@ -272,7 +463,11 @@ const server = createServer(async (request, response) => {
         provider: "home_assistant",
         cache: cache.status(),
         personSync: personSyncStatus(),
-        controlEnabled: config.allowControl
+        controlEnabled: config.allowControl,
+        tv: {
+          ...tv.summary(),
+          remoteFallbackEntityId: config.tvRemoteEntityId || null
+        }
       });
       return;
     }
@@ -303,7 +498,8 @@ const server = createServer(async (request, response) => {
         cache: cache.status(),
         baseUrl: config.baseUrl,
         personSync: personSyncStatus(),
-        controlEnabled: config.allowControl
+        controlEnabled: config.allowControl,
+        tv: tv.summary()
       });
       return;
     }
@@ -365,14 +561,86 @@ const server = createServer(async (request, response) => {
       sendJson(response, 200, { ok: true, result: result ?? null, cache: cache.status() });
       return;
     }
+    if (tool === "home_assistant_tv_status") {
+      sendJson(response, 200, {
+        ...(await tv.health()),
+        remoteFallbackEntityId: config.tvRemoteEntityId || null,
+        controlEnabled: config.allowControl
+      });
+      return;
+    }
+    if (tool === "home_assistant_tv_observe") {
+      const [observation, screenshot] = await Promise.all([tv.observe(), tv.screenshot()]);
+      sendJson(response, 200, tvImageResult(screenshot, observation));
+      return;
+    }
+    if (tool === "home_assistant_tv_screenshot") {
+      const screenshot = await tv.screenshot();
+      sendJson(response, 200, tvImageResult(screenshot));
+      return;
+    }
+    if (tool === "home_assistant_tv_tap") {
+      assertTvActionAllowed(args);
+      const x = Number(args.x);
+      const y = Number(args.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > 1 || y < 0 || y > 1) {
+        sendJson(response, 400, { error: "tv_tap_coordinates_must_be_normalized_0_to_1" });
+        return;
+      }
+      sendJson(response, 200, await tv.action("tap", { x, y }));
+      return;
+    }
+    if (tool === "home_assistant_tv_click_text") {
+      assertTvActionAllowed(args);
+      const text = String(args.text || "").trim();
+      if (!text) {
+        sendJson(response, 400, { error: "tv_text_required" });
+        return;
+      }
+      sendJson(response, 200, await tv.action("click_text", { text }));
+      return;
+    }
+    if (tool === "home_assistant_tv_set_text") {
+      assertTvActionAllowed(args);
+      const text = String(args.text || "");
+      if (!text) {
+        sendJson(response, 400, { error: "tv_text_required" });
+        return;
+      }
+      sendJson(response, 200, await tv.action("set_text", { text }));
+      return;
+    }
+    if (tool === "home_assistant_tv_launch_app") {
+      assertTvActionAllowed(args);
+      const app = String(args.app || "").trim();
+      if (!app) {
+        sendJson(response, 400, { error: "tv_app_required" });
+        return;
+      }
+      sendJson(response, 200, await tv.action("launch_app", { app }));
+      return;
+    }
+    if (tool === "home_assistant_tv_navigate") {
+      assertTvActionAllowed(args);
+      const direction = String(args.direction || "").trim().toLowerCase();
+      sendJson(response, 200, await navigateTv(direction));
+      return;
+    }
     sendJson(response, 404, { error: "tool_not_found" });
   } catch (error) {
-    sendJson(response, 500, { error: error?.message || String(error) });
+    const message = error?.message || String(error);
+    const status = message.includes("disabled") || message.includes("confirmation") ? 403
+      : message.includes("not_found") ? 404
+        : 500;
+    sendJson(response, status, { error: message });
   }
 });
 
 server.listen(config.apiPort, "127.0.0.1", async () => {
   console.log(`Home Assistant SOL plugin API listening on loopback port ${config.apiPort}`);
+  if (config.tvEnabled && !tv.configured) {
+    console.warn("Android TV Satellite is enabled but HA_SOL_TV_URL or HA_SOL_TV_TOKEN is missing; TV tools will not be registered.");
+  }
   await registerTools();
   void ha.start();
 });
