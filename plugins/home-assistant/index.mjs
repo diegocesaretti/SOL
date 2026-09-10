@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { createServer } from "node:http";
 import { mkdir } from "node:fs/promises";
 import { HaStateCache } from "./lib/cache.mjs";
@@ -72,6 +72,7 @@ const config = {
   tvToken: process.env.HA_SOL_TV_TOKEN?.trim() || "",
   tvRemoteEntityId: process.env.HA_SOL_TV_REMOTE_ENTITY_ID?.trim() || "",
   tvTimeoutMs: numberEnv("HA_SOL_TV_TIMEOUT_MS", 8000, 1000, 30000),
+  tvActionSettleMs: numberEnv("HA_SOL_TV_ACTION_SETTLE_MS", 450, 100, 2000),
   dataDir: process.env.SOL_PLUGIN_DATA_DIR || new URL("./.data", import.meta.url).pathname
 };
 
@@ -190,18 +191,35 @@ const ha = new HomeAssistantClient({
   onConnectionState
 });
 
-function assertTvActionAllowed(args) {
+function assertTvActionAllowed() {
   if (!config.allowControl) throw new Error("home_assistant_control_disabled");
-  if (args.confirmedByUser !== true) throw new Error("explicit_user_confirmation_required");
   tv.assertConfigured();
 }
 
-function tvImageResult(screenshot, observation = null) {
+const TV_AGENT_POLICY = [
+  "A direct human TV request authorizes the intermediate TV navigation actions needed to complete that request; do not ask for repeated confirmation for DPAD, click, tap, launch or text entry within that task.",
+  "Treat the screenshot as visual ground truth. Accessibility is a useful hint, not proof that an element is absent.",
+  "Track the visible focus/highlight after every action and use it as the primary reference for DPAD navigation.",
+  "Before opening search, inspect all visible posters/results and select the requested target directly if it is already on screen.",
+  "After every action inspect the returned post-action screenshot and UI tree before deciding the next action.",
+  "If sameAsPreviousFrame is true after an action, do not blindly repeat the same action; change strategy, direction, click-by-text or visual tap.",
+  "For unrelated permission dialogs, prefer Deny/Back and continue the requested task unless that permission is actually required."
+];
+
+let lastTvFrameSha256 = null;
+function tvImageResult(screenshot, observation = null, extra = {}) {
+  const frameSha256 = createHash("sha256").update(screenshot.buffer).digest("hex");
+  const sameAsPreviousFrame = lastTvFrameSha256 !== null && lastTvFrameSha256 === frameSha256;
+  lastTvFrameSha256 = frameSha256;
   const metadata = {
     source: "Codex TV Satellite",
     contentType: screenshot.contentType,
     bytes: screenshot.buffer.length,
-    ...(observation ? { observation } : {})
+    frameSha256,
+    sameAsPreviousFrame,
+    agentPolicy: TV_AGENT_POLICY,
+    ...(observation ? { observation } : {}),
+    ...extra
   };
   return {
     __sol_mcp_content: [
@@ -216,6 +234,20 @@ function tvImageResult(screenshot, observation = null) {
       }
     ]
   };
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function observeTvAfterAction(actionResult) {
+  await sleep(config.tvActionSettleMs);
+  const [observation, screenshot] = await Promise.all([tv.observe(), tv.screenshot()]);
+  return tvImageResult(screenshot, observation, {
+    postAction: true,
+    actionResult,
+    settleMs: config.tvActionSettleMs
+  });
 }
 
 const satelliteNavigationAction = {
@@ -348,6 +380,8 @@ const baseTools = [
   }
 ];
 
+const TV_ACTION_DESCRIPTION_SUFFIX = " A direct human TV request authorizes intermediate actions for that task, so do not ask for repeated confirmation. This action automatically returns the post-action screenshot plus Accessibility tree. Inspect that result before the next action; image is ground truth and visible focus/highlight is the primary DPAD reference. If the frame does not change, switch strategy instead of blindly repeating the same action.";
+
 const tvTools = [
   {
     name: "home_assistant_tv_status",
@@ -357,83 +391,78 @@ const tvTools = [
   },
   {
     name: "home_assistant_tv_observe",
-    description: "Observe Android TV on demand. Returns the current screenshot as real MCP image content together with the Accessibility UI tree and capabilities. Prefer this after every TV action instead of polling continuously.",
+    description: "Observe Android TV on demand. Returns the current screenshot as real MCP image content together with the Accessibility UI tree and navigation policy. Treat the screenshot as ground truth: first inspect visible posters/results and current focus; Accessibility may omit visually present elements. Use one action at a time, then inspect the returned post-action image.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     requiredScope: "read"
   },
   {
     name: "home_assistant_tv_screenshot",
-    description: "Capture the latest Android TV frame as real MCP image content so Codex can visually inspect the television screen.",
+    description: "Capture the latest Android TV frame as real MCP image content. Use visual focus/highlight and visible content as authoritative evidence even when Accessibility does not expose an element.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     requiredScope: "read"
   },
   {
     name: "home_assistant_tv_tap",
-    description: "Tap a visual location on Android TV using normalized coordinates from 0 to 1. Designed for Android 7+ Accessibility gesture injection after visually inspecting the screen.",
+    description: "Tap a visual location on Android TV using normalized coordinates from 0 to 1. Use when an element is visible but not exposed by Accessibility." + TV_ACTION_DESCRIPTION_SUFFIX,
     inputSchema: {
       type: "object",
       properties: {
-        confirmedByUser: { type: "boolean", const: true },
         x: { type: "number", minimum: 0, maximum: 1, description: "Horizontal normalized coordinate, 0=left and 1=right." },
         y: { type: "number", minimum: 0, maximum: 1, description: "Vertical normalized coordinate, 0=top and 1=bottom." }
       },
-      required: ["confirmedByUser", "x", "y"],
+      required: ["x", "y"],
       additionalProperties: false
     },
     requiredScope: "actions"
   },
   {
     name: "home_assistant_tv_click_text",
-    description: "Click an Android TV Accessibility element by its visible text. Prefer this over coordinate taps when the UI tree exposes a useful label.",
+    description: "Click an Android TV Accessibility element by visible text. Prefer this when the UI tree exposes a reliable label, but never infer that a visually present element is absent just because the tree omits it." + TV_ACTION_DESCRIPTION_SUFFIX,
     inputSchema: {
       type: "object",
       properties: {
-        confirmedByUser: { type: "boolean", const: true },
         text: { type: "string", minLength: 1, maxLength: 240 }
       },
-      required: ["confirmedByUser", "text"],
+      required: ["text"],
       additionalProperties: false
     },
     requiredScope: "actions"
   },
   {
     name: "home_assistant_tv_set_text",
-    description: "Replace text in the currently focused editable Android TV field, for example a Stremio or YouTube search box.",
+    description: "Replace text in the currently focused editable Android TV field, for example a Stremio or YouTube search box. Reach and visibly focus the text field before using this tool." + TV_ACTION_DESCRIPTION_SUFFIX,
     inputSchema: {
       type: "object",
       properties: {
-        confirmedByUser: { type: "boolean", const: true },
         text: { type: "string", minLength: 1, maxLength: 500 }
       },
-      required: ["confirmedByUser", "text"],
+      required: ["text"],
       additionalProperties: false
     },
     requiredScope: "actions"
   },
   {
     name: "home_assistant_tv_launch_app",
-    description: "Launch an installed Android TV app by package name or app label through Codex TV Satellite.",
+    description: "Launch an installed Android TV app by package name or app label through Codex TV Satellite." + TV_ACTION_DESCRIPTION_SUFFIX,
     inputSchema: {
       type: "object",
       properties: {
-        confirmedByUser: { type: "boolean", const: true },
         app: { type: "string", minLength: 1, maxLength: 240 }
       },
-      required: ["confirmedByUser", "app"],
+      required: ["app"],
       additionalProperties: false
     },
     requiredScope: "actions"
   },
   {
     name: "home_assistant_tv_navigate",
-    description: "Navigate Android TV with Home, Back or DPAD. On Android 7/8, DPAD automatically falls back to the configured Home Assistant remote entity when the Satellite reports native DPAD unavailable.",
+    description: "Navigate Android TV with Home, Back or DPAD. On Android 7/8, DPAD automatically falls back to the configured Home Assistant remote. Follow the visible focus/highlight after every move. Before opening search, inspect whether the requested poster/result is already visible." + TV_ACTION_DESCRIPTION_SUFFIX,
     inputSchema: {
       type: "object",
       properties: {
-        confirmedByUser: { type: "boolean", const: true },
         direction: { type: "string", enum: ["home", "back", "up", "down", "left", "right", "center"] }
       },
-      required: ["confirmedByUser", "direction"],
+      required: ["direction"],
       additionalProperties: false
     },
     requiredScope: "actions"
@@ -466,7 +495,9 @@ const server = createServer(async (request, response) => {
         controlEnabled: config.allowControl,
         tv: {
           ...tv.summary(),
-          remoteFallbackEntityId: config.tvRemoteEntityId || null
+          remoteFallbackEntityId: config.tvRemoteEntityId || null,
+          actionAutoObserve: true,
+          actionSettleMs: config.tvActionSettleMs
         }
       });
       return;
@@ -565,13 +596,16 @@ const server = createServer(async (request, response) => {
       sendJson(response, 200, {
         ...(await tv.health()),
         remoteFallbackEntityId: config.tvRemoteEntityId || null,
-        controlEnabled: config.allowControl
+        controlEnabled: config.allowControl,
+        actionAutoObserve: true,
+        actionSettleMs: config.tvActionSettleMs,
+        agentPolicy: TV_AGENT_POLICY
       });
       return;
     }
     if (tool === "home_assistant_tv_observe") {
       const [observation, screenshot] = await Promise.all([tv.observe(), tv.screenshot()]);
-      sendJson(response, 200, tvImageResult(screenshot, observation));
+      sendJson(response, 200, tvImageResult(screenshot, observation, { postAction: false }));
       return;
     }
     if (tool === "home_assistant_tv_screenshot") {
@@ -580,56 +614,61 @@ const server = createServer(async (request, response) => {
       return;
     }
     if (tool === "home_assistant_tv_tap") {
-      assertTvActionAllowed(args);
+      assertTvActionAllowed();
       const x = Number(args.x);
       const y = Number(args.y);
       if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > 1 || y < 0 || y > 1) {
         sendJson(response, 400, { error: "tv_tap_coordinates_must_be_normalized_0_to_1" });
         return;
       }
-      sendJson(response, 200, await tv.action("tap", { x, y }));
+      const actionResult = await tv.action("tap", { x, y });
+      sendJson(response, 200, await observeTvAfterAction(actionResult));
       return;
     }
     if (tool === "home_assistant_tv_click_text") {
-      assertTvActionAllowed(args);
+      assertTvActionAllowed();
       const text = String(args.text || "").trim();
       if (!text) {
         sendJson(response, 400, { error: "tv_text_required" });
         return;
       }
-      sendJson(response, 200, await tv.action("click_text", { text }));
+      const actionResult = await tv.action("click_text", { text });
+      sendJson(response, 200, await observeTvAfterAction(actionResult));
       return;
     }
     if (tool === "home_assistant_tv_set_text") {
-      assertTvActionAllowed(args);
+      assertTvActionAllowed();
       const text = String(args.text || "");
       if (!text) {
         sendJson(response, 400, { error: "tv_text_required" });
         return;
       }
-      sendJson(response, 200, await tv.action("set_text", { text }));
+      const actionResult = await tv.action("set_text", { text });
+      sendJson(response, 200, await observeTvAfterAction(actionResult));
       return;
     }
     if (tool === "home_assistant_tv_launch_app") {
-      assertTvActionAllowed(args);
+      assertTvActionAllowed();
       const app = String(args.app || "").trim();
       if (!app) {
         sendJson(response, 400, { error: "tv_app_required" });
         return;
       }
-      sendJson(response, 200, await tv.action("launch_app", { app }));
+      const actionResult = await tv.action("launch_app", { app });
+      sendJson(response, 200, await observeTvAfterAction(actionResult));
       return;
     }
     if (tool === "home_assistant_tv_navigate") {
-      assertTvActionAllowed(args);
+      assertTvActionAllowed();
       const direction = String(args.direction || "").trim().toLowerCase();
-      sendJson(response, 200, await navigateTv(direction));
+      const actionResult = await navigateTv(direction);
+      sendJson(response, 200, await observeTvAfterAction(actionResult));
       return;
     }
     sendJson(response, 404, { error: "tool_not_found" });
   } catch (error) {
     const message = error?.message || String(error);
-    const status = message.includes("disabled") || message.includes("confirmation") ? 403
+    const status = message.includes("disabled") ? 403
       : message.includes("not_found") ? 404
         : 500;
     sendJson(response, status, { error: message });
