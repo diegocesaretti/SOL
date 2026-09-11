@@ -1,25 +1,58 @@
 # Home Assistant · SOL plugin
 
-Native SOL plugin for Home Assistant. It keeps an event-driven local mirror of Home Assistant state so Codex can read current state without polling Home Assistant on every turn. Version 0.3 also adds an optional visual-control bridge for **Codex TV Satellite** on Android TV 7.0+.
+Native SOL plugin for Home Assistant. It keeps an event-driven local mirror of Home Assistant state, adds optional computer-use control for Android TV, and from **0.3.5** adds a Stremio deep-link layer compatible with the **standard Stremio Android TV app from Google Play**.
 
-## Design
+## Stremio 0.3.5
 
-- Authenticated Home Assistant WebSocket connection.
-- `state_changed` subscription is established before the initial `get_states` snapshot; events are buffered and replayed to close the snapshot/subscription race.
-- States, entity registry, device registry, area registry and services are cached in memory and persisted atomically under `SOL_PLUGIN_DATA_DIR`.
-- Child devices introduced in Home Assistant 2026.9 inherit area context through `parent_device_id`.
-- `person.*` entities can be materialized as canonical SOL **Person** identities. A Person represents the human; it is not a SOL login/account and does not grant permissions.
-- `safe-link` links the external HA identity to an existing SOL member only when the display name matches exactly and uniquely. It never creates a SOL member, changes a role or grants access.
-- `external` keeps the HA person as a family-visible external Person without linking it to a SOL member.
-- `home_assistant_list_people` reports both the HA state and the resolved canonical SOL Person id/link method so other SOL capabilities can refer to the same human consistently.
-- Presence changes may be ingested into SOL Activity; arbitrary high-frequency sensor history is not ingested by default.
-- MCP reads use the local cache. Service calls go to Home Assistant only when control is enabled and the current human explicitly confirmed the action.
-- Android TV screenshots are requested on demand, not streamed continuously. `home_assistant_tv_observe` returns one current JPEG plus the Accessibility UI tree so Codex can use an action → observe → action loop.
-- Android 7/8 can use Accessibility taps and text actions directly. DPAD/OK can automatically fall back to a configured Home Assistant `remote.*` entity when the Satellite reports that native DPAD is unavailable.
+Stremio itself is not modified, repackaged or replaced. SOL launches documented `stremio://` deep links through Home Assistant's Android TV Remote integration:
 
-## MCP tools
+```text
+SOL / Codex
+   → HomeAssistant.solplugin
+      → remote.turn_on(activity="stremio:///...")
+         → standard Stremio app
+```
 
-Home Assistant state/control:
+Pause/play/volume/seek remain Home Assistant media/remote actions. The Stremio layer is responsible for semantic content navigation.
+
+### Stremio MCP tools
+
+- `home_assistant_stremio_status`
+- `home_assistant_stremio_search`
+- `home_assistant_stremio_resolve`
+- `home_assistant_stremio_open_page`
+- `home_assistant_stremio_open_search`
+- `home_assistant_stremio_open_detail`
+- `home_assistant_stremio_play`
+- `home_assistant_stremio_adjacent_episode`
+- `home_assistant_stremio_open_catalog`
+- `home_assistant_stremio_open_addon`
+- `home_assistant_stremio_open_deep_link`
+
+`search`, `resolve` and `play` use Cinemeta to turn natural titles into Stremio/IMDb ids. Series requests can resolve an exact season and episode and construct the corresponding `videoId`. `adjacent_episode` can resolve the next or previous Cinemeta episode.
+
+Examples:
+
+```text
+"Abrí Stremio"
+→ stremio:///board
+
+"Buscá Interstellar"
+→ stremio:///search?search=Interstellar
+
+"Poné Breaking Bad temporada 2 episodio 3"
+→ resolve title → tt0903747
+→ videoId tt0903747:2:3
+→ stremio:///detail/series/tt0903747/tt0903747:2:3?autoPlay=true
+```
+
+### Official deep-link limitation
+
+`autoPlay=true` is best-effort on Android TV. Official Stremio deep links cannot force a specific stream, addon/provider, quality or audio source. If Stremio does not already know a usable stream URL or `bingeGroup`, it may stop at the detail/stream-selection screen. The Android TV Satellite can then be used for visual fallback/verification without modifying Stremio.
+
+## Existing Home Assistant tools
+
+State/control:
 
 - `home_assistant_cache_status`
 - `home_assistant_get_state`
@@ -29,7 +62,7 @@ Home Assistant state/control:
 - `home_assistant_get_services`
 - `home_assistant_call_service`
 
-Optional Android TV Satellite tools:
+Optional Android TV Satellite:
 
 - `home_assistant_tv_status`
 - `home_assistant_tv_observe`
@@ -39,15 +72,14 @@ Optional Android TV Satellite tools:
 - `home_assistant_tv_set_text`
 - `home_assistant_tv_launch_app`
 - `home_assistant_tv_navigate`
+- `home_assistant_tv_navigate_path`
 
-Action tools require an MCP token with action scope, plugin `allow_control=true`, and `confirmedByUser=true`.
+## Stremio setup
 
-## Android TV Satellite setup
+1. Install the normal Stremio Android TV app from Google Play.
+2. In Home Assistant configure **Android TV Remote** for that TV.
+3. Put its `remote.*` entity in **Remote Android TV para Stremio**. If left blank, the plugin reuses `tv_remote_entity_id`.
+4. Enable **Permitir control desde Codex**.
+5. Keep **Control Stremio por deep links** enabled.
 
-Install the Codex TV Satellite APK on the television, enable its Accessibility service and authorize screen capture. The APK displays its local IP and token. In the Home Assistant plugin settings enable **Android TV Satellite** and configure:
-
-- URL, for example `http://192.168.1.80:8765`
-- Satellite token
-- optional Home Assistant `remote.*` entity for DPAD fallback on Android 7/8
-
-The Satellite API remains LAN-only and authenticated. SOL receives screenshots as MCP image content only when a TV observation/screenshot tool is called.
+No custom Stremio APK, pairing token or modified package name is required.
