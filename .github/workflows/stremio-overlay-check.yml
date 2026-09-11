@@ -35,17 +35,18 @@ jobs:
           path: stremio
           submodules: recursive
 
-      - name: Setup Java 21
+      - name: Set up JDK
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "21"
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
 
-      - name: Install Android 37 platform
-        run: yes | sdkmanager "platforms;android-37" "build-tools;37.0.0" >/dev/null
+      - name: Make Gradle executable
+        working-directory: stremio
+        run: chmod +x ./gradlew
 
       - name: Add non-secret Firebase config for compile-only CI
         shell: bash
@@ -86,4 +87,4 @@ jobs:
 
       - name: Compile Stremio Android Kotlin with SOL overlay
         working-directory: stremio
-        run: ./gradlew :app:compileDebugKotlin --stacktrace --no-daemon
+        run: ./gradlew :app:compileDebugKotlin --warning-mode all --stacktrace --no-daemon
