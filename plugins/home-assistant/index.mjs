@@ -69,7 +69,6 @@ const config = {
   allowControl: boolEnv("HA_SOL_ALLOW_CONTROL", false),
   tvEnabled: boolEnv("HA_SOL_TV_ENABLED", false),
   tvUrl: process.env.HA_SOL_TV_URL?.trim() || "",
-  tvToken: process.env.HA_SOL_TV_TOKEN?.trim() || "",
   tvRemoteEntityId: process.env.HA_SOL_TV_REMOTE_ENTITY_ID?.trim() || "",
   tvTimeoutMs: numberEnv("HA_SOL_TV_TIMEOUT_MS", 8000, 1000, 30000),
   tvActionSettleMs: numberEnv("HA_SOL_TV_ACTION_SETTLE_MS", 450, 100, 2000),
@@ -83,7 +82,6 @@ const sol = new SolPluginClient();
 const tv = new TvSatelliteClient({
   enabled: config.tvEnabled,
   baseUrl: config.tvUrl,
-  token: config.tvToken,
   timeoutMs: config.tvTimeoutMs
 });
 const pluginId = process.env.SOL_PLUGIN_ID?.trim() || "home-assistant";
@@ -197,13 +195,18 @@ function assertTvActionAllowed() {
 }
 
 const TV_AGENT_POLICY = [
+  "Operate the TV like a computer-use agent: observe, reason from the current visible focus/highlight, act, then verify.",
   "A direct human TV request authorizes the intermediate TV navigation actions needed to complete that request; do not ask for repeated confirmation for DPAD, click, tap, launch or text entry within that task.",
-  "Treat the screenshot as visual ground truth. Accessibility is a useful hint, not proof that an element is absent.",
-  "Track the visible focus/highlight after every action and use it as the primary reference for DPAD navigation.",
+  "Treat the screenshot as visual ground truth. Accessibility is a secondary hint and may omit elements that are clearly visible.",
+  "At each observation identify the focused/highlighted element first. Use its visible row, column and geometry as the origin for navigation.",
+  "If the target is visible and the layout is stable, calculate how many DPAD moves are needed before acting. Prefer one batched navigation path, for example right x4 then down x2 then center, and observe only after the whole deterministic path.",
+  "Use single-step navigation only when focus movement or layout is uncertain, animated, paginated, or changed unexpectedly.",
+  "On an on-screen keyboard, locate the currently highlighted key and the desired key, estimate row/column movement, send the shortest deterministic DPAD path, press center, and verify after a useful burst rather than after every arrow.",
   "Before opening search, inspect all visible posters/results and select the requested target directly if it is already on screen.",
-  "After every action inspect the returned post-action screenshot and UI tree before deciding the next action.",
+  "After a batch, compare the expected focus with the new screenshot. If wrong, re-plan from the actual highlighted element rather than undoing blindly.",
   "If sameAsPreviousFrame is true after an action, do not blindly repeat the same action; change strategy, direction, click-by-text or visual tap.",
-  "For unrelated permission dialogs, prefer Deny/Back and continue the requested task unless that permission is actually required."
+  "For unrelated permission dialogs, prefer Deny/Back and continue the requested task unless that permission is actually required.",
+  "Do not narrate every intermediate keypress to the user; complete the requested TV task and report the meaningful result."
 ];
 
 let lastTvFrameSha256 = null;
@@ -270,41 +273,105 @@ const homeAssistantRemoteCommand = {
   center: "DPAD_CENTER"
 };
 
-async function navigateTv(direction) {
-  const action = satelliteNavigationAction[direction];
-  if (!action) throw new Error("tv_navigation_direction_invalid");
-  const result = await tv.action(action);
-  if (result.ok === true) return { ok: true, via: "tv_satellite", result };
+function normalizedMoveCount(direction, count) {
+  if (["home", "back", "center"].includes(direction)) return 1;
+  const value = Number(count ?? 1);
+  if (!Number.isFinite(value)) return 1;
+  return Math.max(1, Math.min(12, Math.trunc(value)));
+}
 
-  const canFallback = Boolean(config.tvRemoteEntityId) &&
-    (result.fallback === "home_assistant" || direction === "home" || direction === "back");
-  if (!canFallback) {
-    return {
-      ok: false,
-      via: "tv_satellite",
-      result,
-      hint: config.tvRemoteEntityId
-        ? "The Satellite action failed and did not advertise a Home Assistant fallback."
-        : "Configure tv_remote_entity_id to enable Home Assistant remote fallback on Android 7/8."
-    };
-  }
-
-  const command = homeAssistantRemoteCommand[direction];
-  const fallbackResult = await ha.callService(
+async function sendHaRemoteCommands(commands) {
+  if (!config.tvRemoteEntityId) throw new Error("tv_remote_entity_id_required_for_batched_dpad");
+  const result = await ha.callService(
     "remote",
     "send_command",
-    { command: [command] },
+    { command: commands },
     { entity_id: config.tvRemoteEntityId },
     false
   );
   return {
     ok: true,
-    via: "home_assistant_remote_fallback",
+    via: "home_assistant_remote",
     entityId: config.tvRemoteEntityId,
-    command,
-    satelliteResult: result,
-    result: fallbackResult ?? null
+    commands,
+    result: result ?? null
   };
+}
+
+async function navigateTv(direction, count = 1) {
+  const action = satelliteNavigationAction[direction];
+  if (!action) throw new Error("tv_navigation_direction_invalid");
+  const moveCount = normalizedMoveCount(direction, count);
+
+  if (moveCount > 1 && config.tvRemoteEntityId) {
+    const command = homeAssistantRemoteCommand[direction];
+    return sendHaRemoteCommands(Array.from({ length: moveCount }, () => command));
+  }
+
+  const steps = [];
+  for (let i = 0; i < moveCount; i += 1) {
+    const result = await tv.action(action);
+    if (result.ok === true) {
+      steps.push({ ok: true, via: "tv_satellite", result });
+      continue;
+    }
+
+    const canFallback = Boolean(config.tvRemoteEntityId) &&
+      (result.fallback === "home_assistant" || direction === "home" || direction === "back");
+    if (!canFallback) {
+      return {
+        ok: false,
+        via: "tv_satellite",
+        completed: steps.length,
+        requested: moveCount,
+        result,
+        hint: config.tvRemoteEntityId
+          ? "The Satellite action failed and did not advertise a Home Assistant fallback."
+          : "Configure tv_remote_entity_id to enable Home Assistant remote fallback on Android 7/8."
+      };
+    }
+
+    const command = homeAssistantRemoteCommand[direction];
+    const fallback = await sendHaRemoteCommands([command]);
+    steps.push({ ...fallback, satelliteResult: result });
+  }
+
+  return { ok: true, requested: moveCount, completed: steps.length, steps };
+}
+
+async function navigateTvPath(moves) {
+  if (!Array.isArray(moves) || moves.length < 1 || moves.length > 10) {
+    throw new Error("tv_navigation_path_requires_1_to_10_moves");
+  }
+
+  const normalized = [];
+  const commands = [];
+  let total = 0;
+  for (const move of moves) {
+    const direction = String(move?.direction || "").trim().toLowerCase();
+    if (!satelliteNavigationAction[direction]) throw new Error("tv_navigation_direction_invalid");
+    const count = normalizedMoveCount(direction, move?.count);
+    total += count;
+    if (total > 40) throw new Error("tv_navigation_path_too_long");
+    normalized.push({ direction, count });
+    for (let i = 0; i < count; i += 1) commands.push(homeAssistantRemoteCommand[direction]);
+  }
+
+  if (config.tvRemoteEntityId) {
+    return {
+      ...(await sendHaRemoteCommands(commands)),
+      path: normalized,
+      totalKeypresses: commands.length
+    };
+  }
+
+  const results = [];
+  for (const move of normalized) {
+    const result = await navigateTv(move.direction, move.count);
+    results.push(result);
+    if (!result.ok) return { ok: false, path: normalized, results };
+  }
+  return { ok: true, via: "tv_satellite", path: normalized, totalKeypresses: total, results };
 }
 
 const baseTools = [
@@ -380,24 +447,24 @@ const baseTools = [
   }
 ];
 
-const TV_ACTION_DESCRIPTION_SUFFIX = " A direct human TV request authorizes intermediate actions for that task, so do not ask for repeated confirmation. This action automatically returns the post-action screenshot plus Accessibility tree. Inspect that result before the next action; image is ground truth and visible focus/highlight is the primary DPAD reference. If the frame does not change, switch strategy instead of blindly repeating the same action.";
+const TV_ACTION_DESCRIPTION_SUFFIX = " A direct human TV request authorizes intermediate actions for that task, so do not ask for repeated confirmation. Atomic actions return one post-action screenshot. For deterministic DPAD movement, prefer home_assistant_tv_navigate with count or home_assistant_tv_navigate_path so several keypresses happen before the next screenshot. Image is ground truth and the visible focus/highlight is the primary navigation reference.";
 
 const tvTools = [
   {
     name: "home_assistant_tv_status",
-    description: "Check the configured Codex TV Satellite on the local network, including Android API level, Accessibility connection and screenshot readiness.",
+    description: "Check the configured Codex TV Satellite on the local network, including Android API level, Accessibility connection and on-demand screenshot readiness.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     requiredScope: "read"
   },
   {
     name: "home_assistant_tv_observe",
-    description: "Observe Android TV on demand. Returns the current screenshot as real MCP image content together with the Accessibility UI tree and navigation policy. Treat the screenshot as ground truth: first inspect visible posters/results and current focus; Accessibility may omit visually present elements. Use one action at a time, then inspect the returned post-action image.",
+    description: "Computer-use observation for Android TV. Captures one screenshot on demand and returns it with the Accessibility UI tree and TV navigation policy. First identify the visible focused/highlighted element, then reason about the shortest path to the target. If the layout is stable, batch deterministic DPAD moves before observing again; Accessibility may omit visually present elements.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     requiredScope: "read"
   },
   {
     name: "home_assistant_tv_screenshot",
-    description: "Capture the latest Android TV frame as real MCP image content. Use visual focus/highlight and visible content as authoritative evidence even when Accessibility does not expose an element.",
+    description: "Capture exactly one Android TV screenshot on demand. The Satellite does not continuously stream or encode the screen between requests.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     requiredScope: "read"
   },
@@ -456,13 +523,40 @@ const tvTools = [
   },
   {
     name: "home_assistant_tv_navigate",
-    description: "Navigate Android TV with Home, Back or DPAD. On Android 7/8, DPAD automatically falls back to the configured Home Assistant remote. Follow the visible focus/highlight after every move. Before opening search, inspect whether the requested poster/result is already visible." + TV_ACTION_DESCRIPTION_SUFFIX,
+    description: "Navigate Android TV with Home, Back or DPAD. For up/down/left/right, count sends 1-12 identical keypresses before taking a single verification screenshot. Use this when the current highlight and target are in a stable row/column and you can calculate the move count confidently. On Android 7/8 it uses the configured Home Assistant remote when needed." + TV_ACTION_DESCRIPTION_SUFFIX,
     inputSchema: {
       type: "object",
       properties: {
-        direction: { type: "string", enum: ["home", "back", "up", "down", "left", "right", "center"] }
+        direction: { type: "string", enum: ["home", "back", "up", "down", "left", "right", "center"] },
+        count: { type: "integer", minimum: 1, maximum: 12, default: 1, description: "Number of repeated directional keypresses before one verification screenshot. Home/Back/Center are always one press." }
       },
       required: ["direction"],
+      additionalProperties: false
+    },
+    requiredScope: "actions"
+  },
+  {
+    name: "home_assistant_tv_navigate_path",
+    description: "Execute a deterministic DPAD path and only then capture one verification screenshot. Use after observing the current highlighted element and calculating a stable shortest path, including on-screen keyboards. Example moves: right x4, down x2, center. If focus/layout is uncertain, use shorter paths or single-step navigate instead.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        moves: {
+          type: "array",
+          minItems: 1,
+          maxItems: 10,
+          items: {
+            type: "object",
+            properties: {
+              direction: { type: "string", enum: ["home", "back", "up", "down", "left", "right", "center"] },
+              count: { type: "integer", minimum: 1, maximum: 12, default: 1 }
+            },
+            required: ["direction"],
+            additionalProperties: false
+          }
+        }
+      },
+      required: ["moves"],
       additionalProperties: false
     },
     requiredScope: "actions"
@@ -496,6 +590,8 @@ const server = createServer(async (request, response) => {
         tv: {
           ...tv.summary(),
           remoteFallbackEntityId: config.tvRemoteEntityId || null,
+          screenshotMode: "on_demand",
+          batchedNavigation: true,
           actionAutoObserve: true,
           actionSettleMs: config.tvActionSettleMs
         }
@@ -597,6 +693,8 @@ const server = createServer(async (request, response) => {
         ...(await tv.health()),
         remoteFallbackEntityId: config.tvRemoteEntityId || null,
         controlEnabled: config.allowControl,
+        screenshotMode: "on_demand",
+        batchedNavigation: true,
         actionAutoObserve: true,
         actionSettleMs: config.tvActionSettleMs,
         agentPolicy: TV_AGENT_POLICY
@@ -605,12 +703,12 @@ const server = createServer(async (request, response) => {
     }
     if (tool === "home_assistant_tv_observe") {
       const [observation, screenshot] = await Promise.all([tv.observe(), tv.screenshot()]);
-      sendJson(response, 200, tvImageResult(screenshot, observation, { postAction: false }));
+      sendJson(response, 200, tvImageResult(screenshot, observation, { postAction: false, screenshotMode: "on_demand" }));
       return;
     }
     if (tool === "home_assistant_tv_screenshot") {
       const screenshot = await tv.screenshot();
-      sendJson(response, 200, tvImageResult(screenshot));
+      sendJson(response, 200, tvImageResult(screenshot, null, { screenshotMode: "on_demand" }));
       return;
     }
     if (tool === "home_assistant_tv_tap") {
@@ -661,7 +759,14 @@ const server = createServer(async (request, response) => {
     if (tool === "home_assistant_tv_navigate") {
       assertTvActionAllowed();
       const direction = String(args.direction || "").trim().toLowerCase();
-      const actionResult = await navigateTv(direction);
+      const count = Number(args.count ?? 1);
+      const actionResult = await navigateTv(direction, count);
+      sendJson(response, 200, await observeTvAfterAction(actionResult));
+      return;
+    }
+    if (tool === "home_assistant_tv_navigate_path") {
+      assertTvActionAllowed();
+      const actionResult = await navigateTvPath(args.moves);
       sendJson(response, 200, await observeTvAfterAction(actionResult));
       return;
     }
@@ -678,7 +783,7 @@ const server = createServer(async (request, response) => {
 server.listen(config.apiPort, "127.0.0.1", async () => {
   console.log(`Home Assistant SOL plugin API listening on loopback port ${config.apiPort}`);
   if (config.tvEnabled && !tv.configured) {
-    console.warn("Android TV Satellite is enabled but HA_SOL_TV_URL or HA_SOL_TV_TOKEN is missing; TV tools will not be registered.");
+    console.warn("Android TV Satellite is enabled but HA_SOL_TV_URL is missing; TV tools will not be registered.");
   }
   await registerTools();
   void ha.start();
