@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "id": "home-assistant",
   "name": "Home Assistant",
-  "version": "0.3.3",
-  "description": "Home Assistant bridge for SOL with persistent state cache, canonical Person identity sync, Life presence events, MCP tools for Codex and computer-use style Android TV control with on-demand screenshots and batched DPAD navigation.",
+  "version": "0.3.4",
+  "description": "Home Assistant bridge for SOL with persistent state cache and optimized Android TV computer-use control: on-demand progressive screenshots, event-driven settling, perceptual frame comparison, learned navigation memory, control sessions and recovery.",
   "runtime": "node",
   "entry": "index.mjs",
   "args": [],
@@ -120,7 +120,7 @@
       "key": "tv_satellite_enabled",
       "label": "Android TV Satellite",
       "type": "boolean",
-      "description": "Habilita el control visual del TV Satellite. La pantalla se captura sólo a pedido y no se transmite continuamente.",
+      "description": "Habilita el control visual del TV Satellite. Sólo captura frames a pedido; no hace streaming continuo.",
       "env": "HA_SOL_TV_ENABLED",
       "required": false,
       "default": false
@@ -137,7 +137,7 @@
       "key": "tv_remote_entity_id",
       "label": "Remote de Home Assistant para fallback",
       "type": "text",
-      "description": "Opcional. Entidad remote.* de Android TV usada para DPAD/OK y rutas DPAD agrupadas, especialmente en Android 7/8.",
+      "description": "Opcional. Entidad remote.* de Android TV usada para DPAD/OK y rutas agrupadas, especialmente en Android 7/8.",
       "env": "HA_SOL_TV_REMOTE_ENTITY_ID",
       "required": false
     },
@@ -153,12 +153,12 @@
     },
     {
       "key": "tv_action_settle_ms",
-      "label": "Espera antes de verificar visualmente (ms)",
+      "label": "Pausa mínima tras acción (ms)",
       "type": "number",
-      "description": "Tiempo que SOL espera después de una acción atómica o de una ruta DPAD completa antes de solicitar un único screenshot de verificación.",
+      "description": "Pausa mínima de compatibilidad. La espera real usa eventos de Accessibility y finaliza cuando la UI queda estable; 100 ms evita latencia fija innecesaria.",
       "env": "HA_SOL_TV_ACTION_SETTLE_MS",
       "required": false,
-      "default": 450,
+      "default": 100,
       "min": 100,
       "max": 2000
     }
