@@ -17,7 +17,6 @@
   "requires": [
     "plugin-api.v1",
     "mcp.register",
-    "network.local",
     "filesystem.plugin-data"
   ],
   "permissions": [
