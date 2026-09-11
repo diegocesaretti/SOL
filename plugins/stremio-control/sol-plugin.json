@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 2,
+  "id": "stremio-control",
+  "name": "Stremio Control",
+  "version": "0.1.0",
+  "description": "Semantic LAN control for a SOL-enabled Stremio Android build: search, playback state, play/pause/seek, audio and subtitle selection without computer-use navigation.",
+  "runtime": "node",
+  "entry": "index.mjs",
+  "args": [],
+  "autoStart": true,
+  "restartPolicy": "on-failure",
+  "capabilities": [
+    "mcp.stremio",
+    "tool.stremio",
+    "control.stremio"
+  ],
+  "requires": [
+    "plugin-api.v1",
+    "mcp.register",
+    "filesystem.plugin-data"
+  ],
+  "permissions": [
+    "mcp.register",
+    "network.local",
+    "filesystem.plugin-data"
+  ],
+  "settings": [
+    {
+      "key": "baseUrl",
+      "label": "URL de Stremio SOL",
+      "type": "text",
+      "description": "URL LAN del Stremio modificado, por ejemplo http://192.168.1.50:8768. No expongas este puerto a Internet.",
+      "env": "STREMIO_SOL_URL",
+      "required": true
+    },
+    {
+      "key": "token",
+      "label": "Token de control",
+      "type": "secret",
+      "description": "Opcional. Si queda vacío, usá la herramienta de pairing una vez y el plugin guardará el token dentro de su directorio privado.",
+      "env": "STREMIO_SOL_TOKEN",
+      "required": false
+    },
+    {
+      "key": "allowControl",
+      "label": "Permitir control",
+      "type": "boolean",
+      "description": "Permite reproducción, pausa, seek y cambios de audio/subtítulos. Las consultas de estado y búsqueda siguen siendo de solo lectura.",
+      "env": "STREMIO_SOL_ALLOW_CONTROL",
+      "required": false,
+      "default": false
+    },
+    {
+      "key": "timeoutMs",
+      "label": "Timeout LAN (ms)",
+      "type": "number",
+      "env": "STREMIO_SOL_TIMEOUT_MS",
+      "required": false,
+      "default": 8000,
+      "min": 1000,
+      "max": 30000
+    },
+    {
+      "key": "pluginPort",
+      "label": "Puerto interno del plugin",
+      "type": "number",
+      "description": "Puerto loopback usado solamente entre SOL Core y este plugin.",
+      "env": "STREMIO_SOL_PLUGIN_PORT",
+      "required": false,
+      "default": 8770,
+      "min": 1024,
+      "max": 65535
+    }
+  ]
+}
