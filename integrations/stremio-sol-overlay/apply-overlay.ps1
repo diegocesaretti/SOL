@@ -17,7 +17,7 @@ $TargetJava = Join-Path $TargetPath 'app/src/main/java'
 function Replace-Exact([string]$Path, [string]$Needle, [string]$Replacement, [string]$Label) {
     $content = [System.IO.File]::ReadAllText($Path)
     if (-not $content.Contains($Needle)) {
-        throw "Could not apply $Label: expected upstream text was not found in $Path"
+        throw "Could not apply ${Label}: expected upstream text was not found in $Path"
     }
     $updated = $content.Replace($Needle, $Replacement)
     [System.IO.File]::WriteAllText($Path, $updated, [System.Text.UTF8Encoding]::new($false))
@@ -54,7 +54,7 @@ Replace-Exact $mainApplication `
 
 Replace-Exact $mainApplication `
 '        container = AppContainer(this)' `
-"        container = AppContainer(this)`n        solRemoteServer = SolRemoteServer(this, container)`n        runCatching { solRemoteServer.start() }`n            .onFailure { Timber.e(it, \"SOL remote control server could not start\") }" `
+"        container = AppContainer(this)`n        solRemoteServer = SolRemoteServer(this, container)`n        runCatching { solRemoteServer.start() }`n            .onFailure { Timber.e(it, `"SOL remote control server could not start`") }" `
 'MainApplication server startup'
 
 $mainViewModel = Join-Path $TargetJava 'com/stremio/mobile/presentation/viewmodel/MainViewModel.kt'
@@ -70,8 +70,8 @@ Replace-Exact $mainViewModel `
 
 $androidSettings = Join-Path $TargetJava 'com/stremio/mobile/presentation/screens/AndroidSettingsScreen.kt'
 Replace-Exact $androidSettings `
-"        Text(`n            text = \"NETWORK & DATA USAGE\"," `
-"        SolRemoteSettingsCard()`n`n        Text(`n            text = \"NETWORK & DATA USAGE\"," `
+"        Text(`n            text = `"NETWORK & DATA USAGE`"," `
+"        SolRemoteSettingsCard()`n`n        Text(`n            text = `"NETWORK & DATA USAGE`"," `
 'Android Settings pairing card'
 
 Write-Host "Stremio SOL overlay applied to $TargetPath"
