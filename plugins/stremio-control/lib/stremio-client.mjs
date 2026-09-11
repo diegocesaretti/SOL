@@ -73,6 +73,13 @@ export class StremioControlClient {
     });
   }
 
+  async details(type, id) {
+    return await this.request("/api/v1/details", {
+      method: "POST",
+      body: { type, id }
+    });
+  }
+
   async play(input) {
     return await this.request("/api/v1/play", { method: "POST", body: input });
   }
