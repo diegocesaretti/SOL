@@ -15,11 +15,13 @@ $SourceJava = Join-Path $OverlayRoot 'app/src/main/java'
 $TargetJava = Join-Path $TargetPath 'app/src/main/java'
 
 function Replace-Exact([string]$Path, [string]$Needle, [string]$Replacement, [string]$Label) {
-    $content = [System.IO.File]::ReadAllText($Path)
-    if (-not $content.Contains($Needle)) {
+    $content = [System.IO.File]::ReadAllText($Path).Replace("`r`n", "`n")
+    $normalizedNeedle = $Needle.Replace("`r`n", "`n")
+    $normalizedReplacement = $Replacement.Replace("`r`n", "`n")
+    if (-not $content.Contains($normalizedNeedle)) {
         throw "Could not apply ${Label}: expected upstream text was not found in $Path"
     }
-    $updated = $content.Replace($Needle, $Replacement)
+    $updated = $content.Replace($normalizedNeedle, $normalizedReplacement)
     [System.IO.File]::WriteAllText($Path, $updated, [System.Text.UTF8Encoding]::new($false))
 }
 
