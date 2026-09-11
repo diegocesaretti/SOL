@@ -13,24 +13,29 @@ class SolRemoteAuth(context: Context) {
 
     @Volatile private var pairingCode: String? = null
     @Volatile private var pairingExpiresAtMs: Long = 0L
+    @Volatile private var failedPairAttempts: Int = 0
 
     val paired: Boolean
         get() = !prefs.getString("control_token", null).isNullOrBlank()
 
     fun pairingOpen(nowMs: Long = System.currentTimeMillis()): Boolean =
-        pairingCode != null && pairingExpiresAtMs > nowMs
+        pairingCode != null && pairingExpiresAtMs > nowMs && failedPairAttempts < 10
 
+    @Synchronized
     fun openPairingWindow(durationMs: Long = 5 * 60_000L): PairingWindow {
         val code = random.nextInt(1_000_000).toString().padStart(6, '0')
         val expiresAt = System.currentTimeMillis() + durationMs.coerceIn(30_000L, 15 * 60_000L)
         pairingCode = code
         pairingExpiresAtMs = expiresAt
+        failedPairAttempts = 0
         return PairingWindow(code, expiresAt)
     }
 
+    @Synchronized
     fun closePairingWindow() {
         pairingCode = null
         pairingExpiresAtMs = 0L
+        failedPairAttempts = 0
     }
 
     @Synchronized
@@ -44,7 +49,11 @@ class SolRemoteAuth(context: Context) {
             expected.toByteArray(Charsets.UTF_8),
             code.trim().toByteArray(Charsets.UTF_8),
         )
-        if (!matches) return null
+        if (!matches) {
+            failedPairAttempts += 1
+            if (failedPairAttempts >= 10) closePairingWindow()
+            return null
+        }
 
         val bytes = ByteArray(32).also(random::nextBytes)
         val token = Base64.encodeToString(bytes, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
