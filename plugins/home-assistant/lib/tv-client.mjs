@@ -15,29 +15,28 @@ async function payloadOrText(response) {
 }
 
 export class TvSatelliteClient {
-  constructor({ enabled = false, baseUrl = "", token = "", timeoutMs = 8000 } = {}) {
+  constructor({ enabled = false, baseUrl = "", timeoutMs = 8000 } = {}) {
     this.enabled = Boolean(enabled);
     this.baseUrl = normalizeBaseUrl(baseUrl);
-    this.token = String(token || "").trim();
     this.timeoutMs = Math.max(1000, Math.min(30000, Number(timeoutMs) || 8000));
   }
 
   get configured() {
-    return this.enabled && Boolean(this.baseUrl && this.token);
+    return this.enabled && Boolean(this.baseUrl);
   }
 
   summary() {
     return {
       enabled: this.enabled,
       configured: this.configured,
-      baseUrl: this.baseUrl || null
+      baseUrl: this.baseUrl || null,
+      authentication: "none"
     };
   }
 
   assertConfigured() {
     if (!this.enabled) throw new Error("tv_satellite_disabled");
     if (!this.baseUrl) throw new Error("tv_satellite_url_required");
-    if (!this.token) throw new Error("tv_satellite_token_required");
   }
 
   async health() {
@@ -67,7 +66,6 @@ export class TvSatelliteClient {
     this.assertConfigured();
     const response = await fetch(`${this.baseUrl}/observe`, {
       method: "GET",
-      headers: { "X-Codex-Token": this.token },
       signal: AbortSignal.timeout(this.timeoutMs)
     });
     const payload = await payloadOrText(response);
@@ -79,7 +77,6 @@ export class TvSatelliteClient {
     this.assertConfigured();
     const response = await fetch(`${this.baseUrl}/screenshot`, {
       method: "GET",
-      headers: { "X-Codex-Token": this.token },
       signal: AbortSignal.timeout(this.timeoutMs)
     });
     if (!response.ok) {
@@ -98,10 +95,7 @@ export class TvSatelliteClient {
     this.assertConfigured();
     const response = await fetch(`${this.baseUrl}/action`, {
       method: "POST",
-      headers: {
-        "X-Codex-Token": this.token,
-        "content-type": "application/json"
-      },
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({ action, ...data }),
       signal: AbortSignal.timeout(this.timeoutMs)
     });
