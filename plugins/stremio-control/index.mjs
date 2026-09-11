@@ -80,7 +80,7 @@ const tools = [
   },
   {
     name: "stremio_search",
-    description: "Search the user's installed Stremio catalogs semantically. Returns real Stremio type/id pairs suitable for stremio_play.",
+    description: "Search the user's installed Stremio catalogs semantically. Returns real Stremio type/id pairs suitable for stremio_details or stremio_play.",
     inputSchema: {
       type: "object",
       properties: {
@@ -88,6 +88,20 @@ const tools = [
         limit: { type: "integer", minimum: 1, maximum: 40, default: 12 }
       },
       required: ["query"],
+      additionalProperties: false
+    },
+    requiredScope: "read"
+  },
+  {
+    name: "stremio_details",
+    description: "Read real Stremio metadata for a search result. For a series this returns the available videos with season, episode and videoId; use that videoId with stremio_play instead of guessing episode identifiers.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        type: { type: "string", minLength: 1, maxLength: 40 },
+        id: { type: "string", minLength: 1, maxLength: 240 }
+      },
+      required: ["type", "id"],
       additionalProperties: false
     },
     requiredScope: "read"
@@ -108,7 +122,7 @@ const tools = [
   },
   {
     name: "stremio_play",
-    description: "Resolve and play a real Stremio catalog item by type/id. For series, provide videoId when known; otherwise the API may choose the appropriate/default video. streamIndex optionally selects a returned stream candidate.",
+    description: "Resolve and play a real Stremio catalog item by type/id. Series require a videoId obtained from stremio_details. streamIndex optionally selects a returned stream candidate.",
     inputSchema: {
       type: "object",
       properties: {
@@ -198,6 +212,12 @@ async function invoke(tool, args) {
     if (!query) throw new Error("stremio_search_query_required");
     return await stremio.search(query, Math.max(1, Math.min(40, Number(args.limit || 12))));
   }
+  if (tool === "stremio_details") {
+    const type = String(args.type || "").trim();
+    const id = String(args.id || "").trim();
+    if (!type || !id) throw new Error("stremio_type_and_id_required");
+    return await stremio.details(type, id);
+  }
 
   requireControl();
   if (tool === "stremio_play") {
@@ -215,8 +235,8 @@ async function invoke(tool, args) {
   if (tool === "stremio_pause") return await stremio.pause();
   if (tool === "stremio_resume") return await stremio.resume();
   if (tool === "stremio_seek") {
-    const hasPosition = Number.isFinite(Number(args.positionMs));
-    const hasOffset = Number.isFinite(Number(args.offsetMs));
+    const hasPosition = args.positionMs !== undefined && Number.isFinite(Number(args.positionMs));
+    const hasOffset = args.offsetMs !== undefined && Number.isFinite(Number(args.offsetMs));
     if (hasPosition === hasOffset) throw new Error("provide_exactly_one_of_positionMs_or_offsetMs");
     return await stremio.seek(hasPosition ? { positionMs: Number(args.positionMs) } : { offsetMs: Number(args.offsetMs) });
   }
