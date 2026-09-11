@@ -108,6 +108,7 @@ class SolRemoteController(private val container: AppContainer) {
     }
 
     suspend fun details(type: String, id: String): JSONObject {
+        require(type.isNotBlank() && id.isNotBlank()) { "type_and_id_required" }
         val details = withTimeoutOrNull(8_000L) {
             container.catalogRepository
                 .getMetaDetailsFlow(type, id, videoId = null, guessStreamPath = false)
@@ -159,6 +160,7 @@ class SolRemoteController(private val container: AppContainer) {
             displayTitle = option.name,
         )
         if (!loaded) throw IllegalStateException("stream_not_playable")
+        SolRemoteUiBridge.openPlayer()
         return JSONObject()
             .put("ok", true)
             .put("type", type)
