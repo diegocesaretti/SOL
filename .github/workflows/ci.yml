@@ -42,6 +42,17 @@ jobs:
       - name: Build
         run: pnpm build
 
+      - name: Validate Stremio Control manifest with SOL host
+        run: |
+          node --input-type=module - <<'NODE'
+          import fs from 'node:fs';
+          import { validatePluginManifest } from './apps/server/dist/modules/plugins/types.js';
+          const raw = JSON.parse(fs.readFileSync('plugins/stremio-control/sol-plugin.json', 'utf8'));
+          const manifest = validatePluginManifest(raw);
+          if (manifest.id !== 'stremio-control' || manifest.version !== '0.1.0') throw new Error('unexpected Stremio Control manifest identity');
+          console.log('Stremio Control manifest accepted by SOL host');
+          NODE
+
       - name: Package Hello SOL sample plugin
         run: pnpm plugin:pack:hello
 
