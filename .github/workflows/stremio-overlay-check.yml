@@ -1,0 +1,89 @@
+name: Stremio SOL overlay check
+
+on:
+  pull_request:
+    paths:
+      - "plugins/stremio-control/**"
+      - "integrations/stremio-sol-overlay/**"
+      - ".github/workflows/stremio-overlay-check.yml"
+  push:
+    branches: [main]
+    paths:
+      - "plugins/stremio-control/**"
+      - "integrations/stremio-sol-overlay/**"
+      - ".github/workflows/stremio-overlay-check.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compile-overlay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout SOL overlay
+        uses: actions/checkout@v4
+        with:
+          path: sol
+
+      - name: Checkout pinned Stremio upstream
+        uses: actions/checkout@v4
+        with:
+          repository: stremio-native/stremio-android
+          ref: 4bdef3b6be1186d9aa22acd8b3ec391c22f0e083
+          path: stremio
+          submodules: recursive
+
+      - name: Setup Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android 37 platform
+        run: yes | sdkmanager "platforms;android-37" "build-tools;37.0.0" >/dev/null
+
+      - name: Add non-secret Firebase config for compile-only CI
+        shell: bash
+        run: |
+          cat > stremio/app/google-services.json <<'JSON'
+          {
+            "project_info": {
+              "project_number": "100000000000",
+              "project_id": "stremio-sol-ci",
+              "storage_bucket": "stremio-sol-ci.appspot.com"
+            },
+            "client": [{
+              "client_info": {
+                "mobilesdk_app_id": "1:100000000000:android:0000000000000000",
+                "android_client_info": { "package_name": "com.stremio.mobile" }
+              },
+              "api_key": [{ "current_key": "compile-only-placeholder" }]
+            }],
+            "configuration_version": "1"
+          }
+          JSON
+
+      - name: Apply SOL overlay
+        shell: pwsh
+        run: ./sol/integrations/stremio-sol-overlay/apply-overlay.ps1 -TargetPath ./stremio -SkipBuild
+
+      - name: Verify overlay only touched expected Stremio files
+        shell: bash
+        run: |
+          cd stremio
+          git status --short
+          test -f app/src/main/java/com/stremio/mobile/remote/SolRemoteServer.kt
+          test -f app/src/main/java/com/stremio/mobile/remote/SolRemoteController.kt
+          test -f app/src/main/java/com/stremio/mobile/presentation/screens/SolRemoteSettingsCard.kt
+          grep -q "SolRemoteServer" app/src/main/java/com/stremio/mobile/MainApplication.kt
+          grep -q "SolRemoteUiBridge" app/src/main/java/com/stremio/mobile/presentation/viewmodel/MainViewModel.kt
+          grep -q "SolRemoteSettingsCard" app/src/main/java/com/stremio/mobile/presentation/screens/AndroidSettingsScreen.kt
+
+      - name: Compile Stremio Android Kotlin with SOL overlay
+        working-directory: stremio
+        run: ./gradlew :app:compileDebugKotlin --stacktrace --no-daemon
