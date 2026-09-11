@@ -45,6 +45,10 @@ function normalizeDirection(direction) {
   return ["up", "down", "left", "right", "center", "home", "back"].includes(d) ? d : null;
 }
 
+function nodeLabel(node) {
+  return String(node?.text || node?.description || node?.class || "").trim();
+}
+
 export class TvNavigationMemory {
   constructor(filePath) {
     this.filePath = filePath;
@@ -60,6 +64,30 @@ export class TvNavigationMemory {
     } catch {}
   }
 
+  routesFrom(screen, start, maxDepth = 12, maxRoutes = 24) {
+    if (!screen || !start) return [];
+    const queue = [{ node: start, path: [], confidence: 1 }];
+    const seen = new Set([start]);
+    const routes = [];
+    while (queue.length && routes.length < maxRoutes) {
+      const current = queue.shift();
+      if (current.path.length >= maxDepth) continue;
+      const edges = Object.values(screen.edges[current.node] || {}).sort((a, b) => (b.successes || 0) - (a.successes || 0));
+      for (const edge of edges) {
+        if (!edge?.to || seen.has(edge.to)) continue;
+        const nextPath = [...current.path, edge.direction];
+        const node = screen.nodes[edge.to] || edge.toFocus;
+        const confidence = Math.min(current.confidence, Math.min(0.98, 0.55 + 0.04 * (edge.successes || 1)));
+        const label = nodeLabel(node);
+        if (label) routes.push({ target: label, targetFocus: node, route: nextPath, confidence });
+        seen.add(edge.to);
+        queue.push({ node: edge.to, path: nextPath, confidence });
+        if (routes.length >= maxRoutes) break;
+      }
+    }
+    return routes.sort((a, b) => b.confidence - a.confidence || a.route.length - b.route.length);
+  }
+
   current(observation) {
     const key = screenKey(observation);
     const focus = focusSummary(observation);
@@ -70,7 +98,8 @@ export class TvNavigationMemory {
       focus,
       learnedTransitions: outgoing
         .sort((a, b) => (b.successes || 0) - (a.successes || 0))
-        .slice(0, 16)
+        .slice(0, 16),
+      knownRoutes: this.routesFrom(screen, focus?.key)
     };
   }
 
@@ -102,35 +131,17 @@ export class TvNavigationMemory {
     const screen = this.data.screens[key];
     const start = focusSummary(observation)?.key;
     if (!screen || !start || !target) return null;
-    const matches = (node) => {
-      const hay = `${node?.text || ""} ${node?.description || ""} ${node?.class || ""}`.toLowerCase();
-      return hay.includes(target);
-    };
-    if (matches(screen.nodes[start])) return { screenKey: key, route: [], target: screen.nodes[start] };
-
-    const queue = [{ node: start, path: [] }];
-    const seen = new Set([start]);
-    while (queue.length) {
-      const current = queue.shift();
-      if (current.path.length >= maxDepth) continue;
-      const edges = Object.values(screen.edges[current.node] || {}).sort((a, b) => (b.successes || 0) - (a.successes || 0));
-      for (const edge of edges) {
-        if (!edge?.to || seen.has(edge.to)) continue;
-        const nextPath = [...current.path, edge.direction];
-        if (matches(screen.nodes[edge.to] || edge.toFocus)) {
-          return { screenKey: key, route: nextPath, target: screen.nodes[edge.to] || edge.toFocus, confidence: Math.min(0.98, 0.55 + 0.04 * (edge.successes || 1)) };
-        }
-        seen.add(edge.to);
-        queue.push({ node: edge.to, path: nextPath });
-      }
-    }
+    const exact = this.routesFrom(screen, start, maxDepth, 100).find((candidate) => candidate.target.toLowerCase().includes(target));
+    if (exact) return { screenKey: key, route: exact.route, target: exact.targetFocus, confidence: exact.confidence };
+    const current = screen.nodes[start];
+    if (nodeLabel(current).toLowerCase().includes(target)) return { screenKey: key, route: [], target: current, confidence: 0.99 };
     return null;
   }
 
   scheduleFlush() {
     this.dirty = true;
     clearTimeout(this.flushTimer);
-    this.flushTimer = setTimeout(() => void this.flush(), 500);
+    this.flushTimer = setTimeout(() => void this.flush().catch(() => undefined), 500);
     this.flushTimer.unref?.();
   }
 
