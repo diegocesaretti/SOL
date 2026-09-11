@@ -88,3 +88,23 @@ jobs:
       - name: Compile Stremio Android Kotlin with SOL overlay
         working-directory: stremio
         run: ./gradlew :app:compileDebugKotlin --warning-mode all --stacktrace --no-daemon
+
+      - name: Build installable debug APK
+        working-directory: stremio
+        run: ./gradlew :app:assembleDebug --warning-mode all --stacktrace --no-daemon
+
+      - name: Collect APKs
+        shell: bash
+        run: |
+          mkdir -p dist/stremio-sol-apk
+          find stremio/app/build/outputs/apk -type f -name '*.apk' -print -exec cp {} dist/stremio-sol-apk/ \;
+          test -n "$(find dist/stremio-sol-apk -type f -name '*.apk' -print -quit)"
+          sha256sum dist/stremio-sol-apk/*.apk | tee dist/stremio-sol-apk/SHA256SUMS.txt
+
+      - name: Upload Stremio SOL APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Stremio-SOL-Android-debug
+          path: dist/stremio-sol-apk/*
+          if-no-files-found: error
+          retention-days: 30
