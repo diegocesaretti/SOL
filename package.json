@@ -1,6 +1,6 @@
 {
   "name": "sol",
-  "version": "0.15.0",
+  "version": "0.15.1",
   "private": true,
   "description": "SOL local host for memory, context, services and pluggable assistants",
   "packageManager": "pnpm@10.15.0",

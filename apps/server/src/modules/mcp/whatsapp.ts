@@ -30,6 +30,11 @@ function searchPatterns(query: string): string[] {
     .map((term) => `%${term.replace(/[\\%_]/g, "\\$&")}%`);
 }
 
+function metadataText(metadata: Record<string, unknown>, key: string): string | undefined {
+  const value = metadata?.[key];
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
 export async function searchMcpWhatsapp(
   principal: AuthPrincipal,
   query: string,
@@ -43,6 +48,7 @@ export async function searchMcpWhatsapp(
   const result = await db.query<{
     id: string;
     occurred_at: Date;
+    title: string | null;
     body_text: string | null;
     visibility: string;
     source_label: string;
@@ -52,7 +58,7 @@ export async function searchMcpWhatsapp(
     is_from_owner: boolean | null;
     raw_metadata: Record<string, unknown>;
   }>(
-    `SELECT si.id, si.occurred_at, left(si.body_text, 4000) AS body_text,
+    `SELECT si.id, si.occurred_at, si.title, left(si.body_text, 4000) AS body_text,
             si.visibility::text AS visibility, sa.label AS source_label,
             c.title AS conversation_title, sender.label AS sender_label,
             sender.external_value AS sender_value, m.is_from_owner, si.raw_metadata
@@ -70,9 +76,17 @@ export async function searchMcpWhatsapp(
          FROM unnest($4::text[]) AS query_term(pattern)
          WHERE NOT (
            COALESCE(si.body_text, '') ILIKE query_term.pattern ESCAPE '\\'
+           OR COALESCE(si.title, '') ILIKE query_term.pattern ESCAPE '\\'
            OR COALESCE(c.title, '') ILIKE query_term.pattern ESCAPE '\\'
            OR COALESCE(sender.label, '') ILIKE query_term.pattern ESCAPE '\\'
            OR COALESCE(sender.external_value, '') ILIKE query_term.pattern ESCAPE '\\'
+           OR COALESCE(si.raw_metadata->>'chatName', '') ILIKE query_term.pattern ESCAPE '\\'
+           OR COALESCE(si.raw_metadata->>'chatJid', '') ILIKE query_term.pattern ESCAPE '\\'
+           OR COALESCE(si.raw_metadata->>'chatAltJid', '') ILIKE query_term.pattern ESCAPE '\\'
+           OR COALESCE(si.raw_metadata->>'senderName', '') ILIKE query_term.pattern ESCAPE '\\'
+           OR COALESCE(si.raw_metadata->>'senderJid', '') ILIKE query_term.pattern ESCAPE '\\'
+           OR COALESCE(si.raw_metadata->>'senderAltJid', '') ILIKE query_term.pattern ESCAPE '\\'
+           OR COALESCE(si.raw_metadata->>'accountLabel', '') ILIKE query_term.pattern ESCAPE '\\'
          )
        )
        AND ${visibleSql("si")}
@@ -86,10 +100,19 @@ export async function searchMcpWhatsapp(
     occurredAt: row.occurred_at.toISOString(),
     text: row.body_text ?? "",
     sourceLabel: row.source_label,
-    conversation: row.conversation_title ?? undefined,
+    conversation:
+      row.conversation_title
+      ?? metadataText(row.raw_metadata, "chatName")
+      ?? row.title
+      ?? undefined,
     sender: row.is_from_owner
       ? principal.displayName
-      : row.sender_label ?? row.sender_value ?? undefined,
+      : row.sender_label
+        ?? row.sender_value
+        ?? metadataText(row.raw_metadata, "senderName")
+        ?? metadataText(row.raw_metadata, "senderJid")
+        ?? metadataText(row.raw_metadata, "senderAltJid")
+        ?? undefined,
     fromMember: Boolean(row.is_from_owner),
     visibility: row.visibility,
     intelligenceScore:
@@ -116,6 +139,7 @@ export async function listMcpAttentionQueue(
   const result = await db.query<{
     id: string;
     occurred_at: Date;
+    title: string | null;
     body_text: string | null;
     source_label: string;
     conversation_title: string | null;
@@ -124,7 +148,7 @@ export async function listMcpAttentionQueue(
     is_from_owner: boolean | null;
     raw_metadata: Record<string, unknown>;
   }>(
-    `SELECT si.id, si.occurred_at, left(si.body_text, 3000) AS body_text,
+    `SELECT si.id, si.occurred_at, si.title, left(si.body_text, 3000) AS body_text,
             sa.label AS source_label, c.title AS conversation_title,
             sender.label AS sender_label, sender.external_value AS sender_value,
             m.is_from_owner, si.raw_metadata
@@ -160,10 +184,19 @@ export async function listMcpAttentionQueue(
     occurredAt: row.occurred_at.toISOString(),
     text: row.body_text ?? "",
     sourceLabel: row.source_label,
-    conversation: row.conversation_title ?? undefined,
+    conversation:
+      row.conversation_title
+      ?? metadataText(row.raw_metadata, "chatName")
+      ?? row.title
+      ?? undefined,
     sender: row.is_from_owner
       ? principal.displayName
-      : row.sender_label ?? row.sender_value ?? undefined,
+      : row.sender_label
+        ?? row.sender_value
+        ?? metadataText(row.raw_metadata, "senderName")
+        ?? metadataText(row.raw_metadata, "senderJid")
+        ?? metadataText(row.raw_metadata, "senderAltJid")
+        ?? undefined,
     fromMember: Boolean(row.is_from_owner),
     score: Number(row.raw_metadata?.intelligenceScore ?? 0),
     priority: row.raw_metadata?.intelligencePriority ?? "normal",

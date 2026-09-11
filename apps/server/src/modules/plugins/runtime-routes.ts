@@ -6,6 +6,7 @@ import { linkPluginIdentityToCanonicalPerson } from "../identity/person-links.js
 import { upsertPluginPersonIdentity } from "./identity-service.js";
 import { getPluginVisiblePerson, listPluginVisiblePeople } from "./identity-read-service.js";
 import { registerPluginMcpTools } from "./mcp-registry.js";
+import { searchPluginRuntimeWhatsapp } from "./runtime-core-read.js";
 import { invokePluginRuntimeTool, listPluginRuntimeTools, type RuntimeMcpScope } from "./runtime-mcp-tools.js";
 import { pluginManager } from "./runtime.js";
 import type { SolPluginRuntimePrincipal } from "./types.js";
@@ -72,6 +73,7 @@ export async function handlePluginRuntimeApi(path: string, request: IncomingMess
     && path !== "/v1/plugin-api/mcp/tools/available"
     && path !== "/v1/plugin-api/mcp/tools/invoke-read"
     && path !== "/v1/plugin-api/mcp/tools/invoke-action"
+    && path !== "/v1/plugin-api/mcp/core/search-whatsapp"
     && !peopleMatch
     && !connectionPath
     && !credentialPath
@@ -142,6 +144,15 @@ export async function handlePluginRuntimeApi(path: string, request: IncomingMess
       return true;
     }
     try { sendJson(response, 200, { tools: await listPluginRuntimeTools(principal, scopes) }); }
+    catch (error) { runtimeError(response, error); }
+    return true;
+  }
+
+  if (path === "/v1/plugin-api/mcp/core/search-whatsapp" && request.method === "POST") {
+    if (!requirePermission(response, principal, "mcp.invoke.read")) return true;
+    const input = await jsonBody<{ query?: unknown; limit?: unknown }>(request, response);
+    if (!input) return true;
+    try { sendJson(response, 200, { results: await searchPluginRuntimeWhatsapp(principal, input) }); }
     catch (error) { runtimeError(response, error); }
     return true;
   }
