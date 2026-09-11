@@ -36,6 +36,9 @@ jobs:
       - name: Test
         run: pnpm test
 
+      - name: Test Stremio Control protocol
+        run: node --test plugins/stremio-control/*.test.mjs
+
       - name: Build
         run: pnpm build
 
