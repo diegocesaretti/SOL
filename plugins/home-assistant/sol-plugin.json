@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "id": "home-assistant",
   "name": "Home Assistant",
-  "version": "0.3.1",
-  "description": "Home Assistant bridge for SOL with persistent state cache, canonical Person identity sync, Life presence events, MCP tools for Codex and autonomous Android TV Satellite visual control.",
+  "version": "0.3.2",
+  "description": "Home Assistant bridge for SOL with persistent state cache, canonical Person identity sync, Life presence events, MCP tools for Codex and autonomous Android TV Satellite visual control without extra TV authentication.",
   "runtime": "node",
   "entry": "index.mjs",
   "args": [],
@@ -120,7 +120,7 @@
       "key": "tv_satellite_enabled",
       "label": "Android TV Satellite",
       "type": "boolean",
-      "description": "Habilita las herramientas visuales del Codex TV Satellite instalado en Android TV.",
+      "description": "Habilita las herramientas visuales del Codex TV Satellite instalado en Android TV. La conexión usa sólo la URL local; no requiere token adicional.",
       "env": "HA_SOL_TV_ENABLED",
       "required": false,
       "default": false
@@ -129,16 +129,8 @@
       "key": "tv_satellite_url",
       "label": "URL del TV Satellite",
       "type": "text",
-      "description": "URL local de la APK, por ejemplo http://192.168.1.80:8765.",
+      "description": "URL local de la APK, por ejemplo http://192.168.1.80:8765. No requiere token.",
       "env": "HA_SOL_TV_URL",
-      "required": false
-    },
-    {
-      "key": "tv_satellite_token",
-      "label": "Token del TV Satellite",
-      "type": "secret",
-      "description": "Token que muestra la APK Codex TV Satellite. Sólo se entrega al proceso del plugin.",
-      "env": "HA_SOL_TV_TOKEN",
       "required": false
     },
     {

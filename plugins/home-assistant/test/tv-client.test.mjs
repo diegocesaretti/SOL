@@ -14,18 +14,13 @@ async function withSatellite(handler) {
   }
 }
 
-test("TV client observes, captures and sends actions with token", async () => {
+test("TV client observes, captures and sends actions without authentication", async () => {
   const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
   const handler = (request, response) => {
+    assert.equal(request.headers["x-codex-token"], undefined);
     if (request.url === "/health") {
       response.setHeader("content-type", "application/json");
-      response.end(JSON.stringify({ ok: true, android_api: 26 }));
-      return;
-    }
-    if (request.headers["x-codex-token"] !== "secret") {
-      response.statusCode = 401;
-      response.setHeader("content-type", "application/json");
-      response.end(JSON.stringify({ error: "unauthorized" }));
+      response.end(JSON.stringify({ ok: true, android_api: 26, authentication: "none" }));
       return;
     }
     if (request.url === "/observe") {
@@ -52,7 +47,9 @@ test("TV client observes, captures and sends actions with token", async () => {
     response.end();
   };
   handler.run = async (baseUrl) => {
-    const client = new TvSatelliteClient({ enabled: true, baseUrl, token: "secret" });
+    const client = new TvSatelliteClient({ enabled: true, baseUrl });
+    assert.equal(client.configured, true);
+    assert.equal(client.summary().authentication, "none");
     const health = await client.health();
     assert.equal(health.reachable, true);
     assert.equal(health.satellite.android_api, 26);
@@ -84,7 +81,7 @@ test("TV client treats Android 7/8 DPAD 409 as a structured fallback result", as
     response.end();
   };
   handler.run = async (baseUrl) => {
-    const client = new TvSatelliteClient({ enabled: true, baseUrl, token: "secret" });
+    const client = new TvSatelliteClient({ enabled: true, baseUrl });
     const result = await client.action("dpad_left");
     assert.equal(result.httpStatus, 409);
     assert.equal(result.fallback, "home_assistant");
