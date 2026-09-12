@@ -50,6 +50,7 @@ jobs:
           node --check plugins/home-assistant/lib/stremio-addons.mjs
           node --check plugins/home-assistant/lib/stremio-addon-compat.mjs
           node --check plugins/home-assistant/lib/stremio-launch-guard.mjs
+          node --check plugins/home-assistant/lib/stremio-debug.mjs
           node --check plugins/home-assistant/lib/stremio-proxy.mjs
 
       - name: Cache, TV Satellite and Stremio tests
