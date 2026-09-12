@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "id": "home-assistant",
   "name": "Home Assistant",
-  "version": "0.3.17",
-  "description": "Home Assistant bridge for SOL with exact configured-addon Stremio URLs, guarded Android TV playback, Satellite-first stream selection and sanitized selector diagnostics.",
+  "version": "0.3.18",
+  "description": "Home Assistant bridge for SOL with native Stremio playback, account-aware next episodes, isolated family/sports provider profiles and Android TV Satellite control.",
   "runtime": "node",
   "entry": "entry.mjs",
   "args": [],
@@ -223,11 +223,125 @@
       "default": true
     },
     {
+      "key": "stremio_account_enabled",
+      "label": "Vincular cuenta de Stremio",
+      "type": "boolean",
+      "description": "Permite leer biblioteca, Continue Watching, episodios vistos y addons instalados desde la cuenta de Stremio. Todo corre dentro de este plugin.",
+      "env": "HA_SOL_STREMIO_ACCOUNT_ENABLED",
+      "required": false,
+      "default": false
+    },
+    {
+      "key": "stremio_account_auth_key",
+      "label": "Stremio authKey",
+      "type": "secret",
+      "description": "Método recomendado. Token de cuenta usado sólo por el proceso del plugin; nunca se devuelve en herramientas, estado o logs.",
+      "env": "HA_SOL_STREMIO_ACCOUNT_AUTH_KEY",
+      "required": false
+    },
+    {
+      "key": "stremio_account_email",
+      "label": "Email de Stremio",
+      "type": "text",
+      "description": "Alternativa al authKey: si se completa junto con la contraseña, el plugin inicia sesión contra api.strem.io y conserva el authKey sólo en memoria durante esa ejecución.",
+      "env": "HA_SOL_STREMIO_ACCOUNT_EMAIL",
+      "required": false
+    },
+    {
+      "key": "stremio_account_password",
+      "label": "Contraseña de Stremio",
+      "type": "secret",
+      "description": "Opcional para login email/contraseña cuando no se configura authKey. Se trata como secreto y nunca se incluye en diagnósticos.",
+      "env": "HA_SOL_STREMIO_ACCOUNT_PASSWORD",
+      "required": false
+    },
+    {
+      "key": "stremio_account_include_addons",
+      "label": "Usar addons de la cuenta en perfil normal",
+      "type": "boolean",
+      "description": "Agrega los addons de stream instalados en tu cuenta al perfil normal, sin exponer sus URLs privadas. Está desactivado por defecto para no alterar el orden de tu manifest filtrado actual.",
+      "env": "HA_SOL_STREMIO_ACCOUNT_INCLUDE_ADDONS",
+      "required": false,
+      "default": false
+    },
+    {
+      "key": "stremio_account_refresh_ms",
+      "label": "Caché de biblioteca Stremio (ms)",
+      "type": "number",
+      "description": "Intervalo mínimo entre sincronizaciones de biblioteca, progreso y addons de cuenta.",
+      "env": "HA_SOL_STREMIO_ACCOUNT_REFRESH_MS",
+      "required": false,
+      "default": 60000,
+      "min": 5000,
+      "max": 3600000
+    },
+    {
+      "key": "stremio_account_timeout_ms",
+      "label": "Timeout cuenta Stremio (ms)",
+      "type": "number",
+      "env": "HA_SOL_STREMIO_ACCOUNT_TIMEOUT_MS",
+      "required": false,
+      "default": 12000,
+      "min": 1000,
+      "max": 30000
+    },
+    {
       "key": "stremio_addon_manifests",
       "label": "Addon Stremio filtrado/ordenado",
       "type": "secret",
-      "description": "Manifest URL completa del addon configurado. También admite varias URLs separadas por punto y coma/salto de línea o un array JSON. SOL conserva literalmente el path configurado (incluidos perfiles D-/U-), escapes y query strings al derivar /stream/{type}/{id}.json.",
+      "description": "Manifest URL completa del addon configurado para el perfil normal. También admite varias URLs separadas por punto y coma/salto de línea o un array JSON. SOL conserva literalmente el path configurado, escapes y query strings al derivar /stream/{type}/{id}.json.",
       "env": "HA_SOL_STREMIO_ADDONS",
+      "required": false
+    },
+    {
+      "key": "stremio_family_enabled",
+      "label": "Perfil infantil/familiar automático",
+      "type": "boolean",
+      "description": "Cuando está activo, títulos forzados o metadata Family/Kids/Children usan exclusivamente el proveedor familiar configurado.",
+      "env": "HA_SOL_STREMIO_FAMILY_ENABLED",
+      "required": false,
+      "default": false
+    },
+    {
+      "key": "stremio_family_addon_manifests",
+      "label": "Proveedor Stremio infantil/familiar",
+      "type": "secret",
+      "description": "Manifest(s) exclusivo(s) para películas/series infantiles o familiares. El perfil family nunca consulta los manifests normales ni los addons generales de la cuenta.",
+      "env": "HA_SOL_STREMIO_FAMILY_ADDONS",
+      "required": false
+    },
+    {
+      "key": "stremio_family_require_spanish",
+      "label": "Family: exigir fuente en español/latino",
+      "type": "boolean",
+      "description": "Filtro obligatorio sobre name/title/description/filename del stream. Si no aparece español o latino, family falla sin caer al proveedor general.",
+      "env": "HA_SOL_STREMIO_FAMILY_REQUIRE_SPANISH",
+      "required": false,
+      "default": true
+    },
+    {
+      "key": "stremio_family_titles",
+      "label": "Títulos forzados al perfil familiar",
+      "type": "text",
+      "description": "Lista opcional separada por punto y coma o saltos de línea. Coincidencia normalizada por título; útil cuando Cinemeta no marca correctamente el género Family.",
+      "env": "HA_SOL_STREMIO_FAMILY_TITLES",
+      "required": false
+    },
+    {
+      "key": "stremio_family_genres",
+      "label": "Géneros que activan Family",
+      "type": "text",
+      "description": "Géneros de Cinemeta que activan automáticamente el perfil family. No incluye Animation por defecto porque puede contener contenido adulto.",
+      "env": "HA_SOL_STREMIO_FAMILY_GENRES",
+      "required": false,
+      "default": "Family;Kids;Children"
+    },
+    {
+      "key": "stremio_sports_addon_manifests",
+      "label": "Proveedor Stremio deportes",
+      "type": "secret",
+      "description": "Manifest(s) opcional(es) para el perfil sports. Sólo se usa cuando SOL llama explícitamente profile=sports.",
+      "env": "HA_SOL_STREMIO_SPORTS_ADDONS",
       "required": false
     },
     {
@@ -316,7 +430,7 @@
       "key": "stremio_autoplay_first_stream",
       "label": "Reproducir el primer stream automáticamente",
       "type": "boolean",
-      "description": "Después de confirmar que la lista nativa de streams está estable, envía un único centro. En modo Auto usa primero el TV Satellite y Home Assistant queda como fallback.",
+      "description": "Después de confirmar que la lista nativa de streams está estable, envía un único centro. En profile=family este OK genérico se desactiva: sólo se permite la selección visual del stream familiar prevalidado.",
       "env": "HA_SOL_STREMIO_AUTOPLAY_FIRST_STREAM",
       "required": false,
       "default": true
@@ -383,7 +497,7 @@
       "key": "stremio_auto_select_stream",
       "label": "Matcher visual de stream preferido",
       "type": "boolean",
-      "description": "Si SOL obtiene un stream preferido y Android TV Satellite puede identificarlo por texto en la lista nativa de Stremio, intenta seleccionarlo visualmente. Si no, usa el primer stream nativo.",
+      "description": "Intenta seleccionar visualmente el stream preferido en la lista nativa. En family es obligatorio para mantener el aislamiento: si no identifica el stream familiar, no hace fallback al primer stream genérico.",
       "env": "HA_SOL_STREMIO_AUTOSELECT_STREAM",
       "required": false,
       "default": true
