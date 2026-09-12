@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { SolPluginClient } from "../lib/sol-client.mjs";
+import { SolPluginClient, STREMIO_MCP_TOOLS } from "../lib/sol-client.mjs";
 
 test("playback verification confirms player controls without screenshots", async () => {
   const originalFetch = globalThis.fetch;
@@ -65,7 +65,17 @@ test("black or unavailable screenshot is never treated as playback failure", asy
   }
 });
 
-test("requested exact selector falls back to native Stremio when public HTTPS URL is missing", async () => {
+test("selector proxy tools and override are no longer exposed", () => {
+  const names = STREMIO_MCP_TOOLS.map((tool) => tool.name);
+  assert.equal(names.includes("home_assistant_stremio_proxy_status"), false);
+  assert.equal(names.includes("home_assistant_stremio_proxy_install"), false);
+  const playBest = STREMIO_MCP_TOOLS.find((tool) => tool.name === "home_assistant_stremio_play_best");
+  assert.ok(playBest);
+  assert.equal(Object.hasOwn(playBest.inputSchema.properties, "useSelectorProxy"), false);
+  assert.match(playBest.description, /No public HTTPS selector proxy/i);
+});
+
+test("legacy selector settings cannot reactivate proxy and playback stays native", async () => {
   const originalFetch = globalThis.fetch;
   const calls = [];
   globalThis.fetch = async (url, options = {}) => {
@@ -87,6 +97,7 @@ test("requested exact selector falls back to native Stremio when public HTTPS UR
       HA_SOL_STREMIO_ADDONS: "https://addon.example/manifest.json",
       HA_SOL_STREMIO_PROXY_ENABLED: "true",
       HA_SOL_STREMIO_PROXY_USE_FOR_PLAY: "true",
+      HA_SOL_STREMIO_PROXY_PUBLIC_URL: "https://selector.example.com",
       HA_SOL_STREMIO_PROXY_TOKEN: "abcdefghijklmnop",
       HA_SOL_STREMIO_FIRST_STREAM_DELAY_MS: "500"
     });
@@ -109,17 +120,26 @@ test("requested exact selector falls back to native Stremio when public HTTPS UR
 
     const result = await client.handleStremioTool("home_assistant_stremio_play_best", {
       id: "tt0121766",
-      mediaType: "movie"
+      mediaType: "movie",
+      useSelectorProxy: true
     });
 
-    assert.equal(result.selectorFallbackReason, "stremio_proxy_public_url_required");
+    assert.equal(result.selectorFallbackReason, "stremio_selector_proxy_disabled");
     assert.equal(result.nativeFallback.used, true);
     assert.equal(result.playbackRequested, true);
-    assert.equal(result.playbackConfirmed, null);
     const launch = calls.find((entry) => entry.href.endsWith("/api/services/remote/turn_on"));
     assert.ok(launch.body.activity.includes("tt0121766"));
     assert.equal(launch.body.activity.includes("sol:"), false);
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("status reports native-only playback and no selector proxy", () => {
+  const client = new SolPluginClient({});
+  const status = client.stremioStatus();
+  assert.equal(status.playbackMode, "native_stremio_only");
+  assert.equal(Object.hasOwn(status, "selectorProxy"), false);
+  assert.equal(status.capabilities.publicHttpsSelectorRequired, false);
+  assert.equal(status.capabilities.nativeInstalledAddonPlayback, true);
 });
