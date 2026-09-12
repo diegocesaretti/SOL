@@ -5,6 +5,13 @@ import { installStremioSmartPlayback } from "./lib/stremio-smart-playback.mjs";
 import { installStremioSmartCompatibility } from "./lib/stremio-smart-compat.mjs";
 import { installStremioDebugging } from "./lib/stremio-debug.mjs";
 
+// HA-only TV control policy (0.3.19 experiment): never contact Android TV Satellite.
+// Keep all remote key transport inside Home Assistant so a dead Satellite cannot
+// stall DPAD/OK commands or queue retries before Home Assistant receives them.
+process.env.HA_SOL_TV_ENABLED = "false";
+process.env.HA_SOL_STREMIO_CENTER_TRANSPORT = "home_assistant";
+process.env.HA_SOL_STREMIO_AUTOSELECT_STREAM = "false";
+
 installStremioStableClick(SolPluginClient);
 installStremioLaunchGuard(SolPluginClient);
 installStremioSmartPlayback(SolPluginClient, STREMIO_MCP_TOOLS);
