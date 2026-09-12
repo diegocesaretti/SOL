@@ -60,6 +60,8 @@ async function responsePayload(response) {
 export class SolPluginClient extends CoreSolPluginClient {
   constructor(env = process.env) {
     super(env);
+    this.stremioAutoPlayFirstStream = boolEnv(env, "HA_SOL_STREMIO_AUTOPLAY_FIRST_STREAM", true);
+    this.stremioFirstStreamDelayMs = numberEnv(env, "HA_SOL_STREMIO_FIRST_STREAM_DELAY_MS", 1800, 250, 10000);
     this.stremioAutoSelectStream = boolEnv(env, "HA_SOL_STREMIO_AUTOSELECT_STREAM", true);
     this.stremioTvEnabled = boolEnv(env, "HA_SOL_TV_ENABLED", false);
     this.stremioTvUrl = normalizeTvUrl(env.HA_SOL_TV_URL || "");
@@ -70,13 +72,48 @@ export class SolPluginClient extends CoreSolPluginClient {
   stremioStatus() {
     return {
       ...super.stremioStatus(),
+      firstStreamAutoPlay: {
+        enabled: this.stremioAutoPlayFirstStream,
+        configured: Boolean(this.stremioRemoteEntityId),
+        delayMs: this.stremioFirstStreamDelayMs,
+        transport: "Home Assistant remote.send_command DPAD_CENTER"
+      },
       visualAutoSelect: {
         enabled: this.stremioAutoSelectStream,
         configured: this.stremioTvEnabled && Boolean(this.stremioTvUrl),
         attempts: this.stremioAutoSelectAttempts,
-        transport: "Android TV Satellite click_text"
+        transport: "Android TV Satellite click_text",
+        role: "fallback_only"
       }
     };
+  }
+
+  async clickFirstStream() {
+    if (!this.stremioAutoPlayFirstStream) return { ok: false, reason: "stremio_first_stream_autoplay_disabled" };
+    if (!this.stremioRemoteEntityId) return { ok: false, reason: "stremio_remote_entity_id_required" };
+
+    await sleep(this.stremioFirstStreamDelayMs);
+    try {
+      const result = await this.haService("remote", "send_command", {
+        entity_id: this.stremioRemoteEntityId,
+        command: "DPAD_CENTER"
+      });
+      return {
+        ok: true,
+        via: "home_assistant_remote",
+        service: "remote.send_command",
+        remoteEntityId: this.stremioRemoteEntityId,
+        command: "DPAD_CENTER",
+        delayMs: this.stremioFirstStreamDelayMs,
+        result
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        reason: error?.message || String(error),
+        delayMs: this.stremioFirstStreamDelayMs
+      };
+    }
   }
 
   async tvClickText(text) {
@@ -172,14 +209,26 @@ export class SolPluginClient extends CoreSolPluginClient {
     if (tool !== "home_assistant_stremio_play_best") return result;
     if (result?.deliveryMode !== "visual_selection_required") return result;
 
+    const firstStreamClick = await this.clickFirstStream();
+    if (firstStreamClick.ok) {
+      const { visualSelectionHint, ...rest } = result;
+      return {
+        ...rest,
+        deliveryMode: "first_stream_center_click",
+        firstStreamClick,
+        playbackRequested: true
+      };
+    }
+
     const autoSelection = await this.autoSelectVisualStream(result.selected);
     if (!autoSelection.ok) {
       return {
         ...result,
+        firstStreamClick,
         autoSelection,
         visualSelectionHint: {
           ...(result.visualSelectionHint || {}),
-          instruction: "Automatic selection was attempted but the ranked stream was not found as a clickable Accessibility label. Use home_assistant_tv_observe and select the stream matching addon/title/quality."
+          instruction: "The automatic DPAD_CENTER attempt failed and the ranked stream could not be matched by Accessibility. Use home_assistant_tv_observe and select the first visible stream manually."
         }
       };
     }
@@ -187,7 +236,8 @@ export class SolPluginClient extends CoreSolPluginClient {
     const { visualSelectionHint, ...rest } = result;
     return {
       ...rest,
-      deliveryMode: "visual_selection_automatic",
+      deliveryMode: "visual_selection_automatic_fallback",
+      firstStreamClick,
       autoSelection,
       playbackRequested: true
     };

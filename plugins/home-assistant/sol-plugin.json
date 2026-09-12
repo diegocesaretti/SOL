@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "id": "home-assistant",
   "name": "Home Assistant",
-  "version": "0.3.7",
-  "description": "Home Assistant bridge for SOL with persistent state cache, optimized Android TV computer-use control, standard Play Store Stremio deep links, addon stream aggregation/ranking, automatic TV Satellite stream selection and an optional HTTPS SOL Stream Selector proxy for exact stream delivery.",
+  "version": "0.3.8",
+  "description": "Home Assistant bridge for SOL with persistent state cache, Android TV control, standard Play Store Stremio deep links, addon stream aggregation/ranking, first-stream autoplay through Home Assistant Remote and optional visual/HTTPS selector fallbacks.",
   "runtime": "node",
   "entry": "index.mjs",
   "args": [],
@@ -176,7 +176,7 @@
       "key": "stremio_remote_entity_id",
       "label": "Remote Android TV para Stremio",
       "type": "text",
-      "description": "Entidad remote.* de la integración Android TV Remote que recibirá remote.turn_on con activity=stremio://. Si queda vacío se usa tv_remote_entity_id.",
+      "description": "Entidad remote.* de Android TV Remote usada para abrir deep links y enviar el OK final. Si queda vacío se usa tv_remote_entity_id.",
       "env": "HA_SOL_STREMIO_REMOTE_ENTITY_ID",
       "required": false
     },
@@ -280,10 +280,30 @@
       "default": false
     },
     {
-      "key": "stremio_auto_select_stream",
-      "label": "Reproducir automáticamente el stream elegido",
+      "key": "stremio_autoplay_first_stream",
+      "label": "Reproducir el primer stream automáticamente",
       "type": "boolean",
-      "description": "Cuando no se usa el selector HTTPS exacto, usa Android TV Satellite para buscar y pulsar automáticamente el stream que SOL rankeó como mejor. Si no logra identificarlo de forma segura, deja la pantalla abierta para selección visual.",
+      "description": "Después de abrir la lista de streams espera a que cargue y envía un único DPAD_CENTER mediante Home Assistant Remote. No requiere TV Satellite.",
+      "env": "HA_SOL_STREMIO_AUTOPLAY_FIRST_STREAM",
+      "required": false,
+      "default": true
+    },
+    {
+      "key": "stremio_first_stream_delay_ms",
+      "label": "Espera antes del OK al primer stream (ms)",
+      "type": "number",
+      "description": "Tiempo para que los addons carguen la lista antes de enviar DPAD_CENTER. Si el OK llega demasiado pronto, aumentá este valor.",
+      "env": "HA_SOL_STREMIO_FIRST_STREAM_DELAY_MS",
+      "required": false,
+      "default": 1800,
+      "min": 250,
+      "max": 10000
+    },
+    {
+      "key": "stremio_auto_select_stream",
+      "label": "Matcher visual de stream (fallback)",
+      "type": "boolean",
+      "description": "Sólo si falla el OK vía Home Assistant, usa Android TV Satellite para intentar localizar el stream rankeado por texto.",
       "env": "HA_SOL_STREMIO_AUTOSELECT_STREAM",
       "required": false,
       "default": true
