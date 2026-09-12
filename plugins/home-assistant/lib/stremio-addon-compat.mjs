@@ -1,6 +1,7 @@
 import { addonSupportsStream } from "./stremio-addons.mjs";
 
 const TRANSIENT_HTTP = new Set([408, 425, 429, 500, 502, 503, 504]);
+const SIZE_RE = /(?<!\d)(\d+(?:[.,]\d+)?)\s*(TiB|TB|GiB|GB|MiB|MB)\b/i;
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -28,6 +29,23 @@ function streamKey(stream) {
   if (typeof stream?.externalUrl === "string" && stream.externalUrl) return `external:${stream.externalUrl}`;
   if (typeof stream?.ytId === "string" && stream.ytId) return `youtube:${stream.ytId}`;
   return `text:${[stream?.name, stream?.title, stream?.description].map((value) => String(value || "")).join("|")}`;
+}
+
+function streamSizeGb(stream) {
+  const videoSize = stream?.behaviorHints?.videoSize;
+  if (typeof videoSize === "number" && Number.isFinite(videoSize) && videoSize > 0) {
+    return videoSize / (1024 ** 3);
+  }
+  const text = [stream?.name, stream?.title, stream?.description, stream?.behaviorHints?.filename]
+    .filter(Boolean).join("\n");
+  const match = text.match(SIZE_RE);
+  if (!match) return null;
+  const value = Number(match[1].replace(",", "."));
+  if (!Number.isFinite(value)) return null;
+  const unit = match[2].toLowerCase();
+  if (unit === "tib" || unit === "tb") return value * 1024;
+  if (unit === "mib" || unit === "mb") return value / 1024;
+  return value;
 }
 
 function profileMode(manifestUrl) {
@@ -178,6 +196,8 @@ export function installStremioAddonCompatibilityPatch(aggregator, { retries = 1 
   aggregator.addonRetries = Math.max(0, Math.min(3, Number(retries) || 0));
 
   const originalStatus = aggregator.status.bind(aggregator);
+  const originalRankStreams = aggregator.rankStreams.bind(aggregator);
+
   aggregator.status = async function statusCompat(options = {}) {
     const status = await originalStatus(options);
     return {
@@ -262,6 +282,19 @@ export function installStremioAddonCompatibilityPatch(aggregator, { retries = 1 
     return { streams: merged, errors, providers };
   };
 
+  aggregator.rankStreams = async function rankStreamsCompat(mediaType, mediaId, preferences = {}) {
+    const result = await originalRankStreams(mediaType, mediaId, preferences);
+    const maxSizeGb = Number(preferences.maxSizeGb || 0);
+    const ranked = result.ranked
+      .map((entry) => {
+        const sizeGb = streamSizeGb(entry.stream);
+        return sizeGb === null ? entry : { ...entry, details: { ...entry.details, sizeGb } };
+      })
+      .filter((entry) => !(Number.isFinite(maxSizeGb) && maxSizeGb > 0 && entry.details.sizeGb !== null && entry.details.sizeGb > maxSizeGb))
+      .sort((a, b) => b.score - a.score || (b.details.seeders || 0) - (a.details.seeders || 0) || ((a.details.sizeGb ?? Infinity) - (b.details.sizeGb ?? Infinity)));
+    return { ...result, ranked };
+  };
+
   return aggregator;
 }
 
@@ -271,5 +304,6 @@ export const __test = {
   declaresStream,
   profileMode,
   fetchStreamsOnce,
-  streamKey
+  streamKey,
+  streamSizeGb
 };
