@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "id": "home-assistant",
   "name": "Home Assistant",
-  "version": "0.3.10",
-  "description": "Home Assistant bridge for SOL with persistent state cache, Android TV control, standard Play Store Stremio deep links, tolerant addon stream aggregation/ranking, UI-aware first-stream autoplay and optional visual/HTTPS selector fallbacks.",
+  "version": "0.3.11",
+  "description": "Home Assistant bridge for SOL with Stream Bridge-compatible Stremio addon transport, resilient native playback fallback, Android TV control, addon ranking and UI-aware first-stream autoplay.",
   "runtime": "node",
   "entry": "index.mjs",
   "args": [],
@@ -182,14 +182,36 @@
     },
     {
       "key": "stremio_request_timeout_ms",
-      "label": "Timeout de resolución Stremio (ms)",
+      "label": "Timeout de Cinemeta/Home Assistant (ms)",
       "type": "number",
-      "description": "Timeout para Cinemeta, addons Stremio y lanzamiento vía Home Assistant.",
+      "description": "Timeout corto para resolución de metadatos y llamadas de control. Los addons de streams usan un timeout separado.",
       "env": "HA_SOL_STREMIO_TIMEOUT_MS",
       "required": false,
       "default": 8000,
       "min": 1000,
       "max": 30000
+    },
+    {
+      "key": "stremio_addon_timeout_ms",
+      "label": "Timeout por addon Stremio (ms)",
+      "type": "number",
+      "description": "Tiempo máximo por consulta de streams. 20000 ms replica el margen del Stream Bridge y evita falsos ceros con proveedores lentos como MediaFusion.",
+      "env": "HA_SOL_STREMIO_ADDON_TIMEOUT_MS",
+      "required": false,
+      "default": 20000,
+      "min": 1000,
+      "max": 120000
+    },
+    {
+      "key": "stremio_addon_retries",
+      "label": "Reintentos transitorios por addon",
+      "type": "number",
+      "description": "Reintenta sólo timeouts, 429 y errores 5xx. Una respuesta válida con streams vacíos no se repite.",
+      "env": "HA_SOL_STREMIO_ADDON_RETRIES",
+      "required": false,
+      "default": 1,
+      "min": 0,
+      "max": 3
     },
     {
       "key": "stremio_autoplay_default",
@@ -204,7 +226,7 @@
       "key": "stremio_addon_manifests",
       "label": "Addons Stremio para streams",
       "type": "secret",
-      "description": "Manifest URLs de addons a consultar. Separar con punto y coma o saltos de línea; también acepta un array JSON. Las consultas toleran filtros de manifest inconsistentes, preservan query/tokens y prueban IDs de episodio codificados y con dos puntos. Se guarda como secreto porque algunos addons incluyen credenciales/configuración en la URL.",
+      "description": "Manifest URLs completas de addons configurados. Separar con punto y coma o saltos de línea; también acepta un array JSON. SOL conserva exactamente el path configurado (incluidos perfiles D-/U-), consulta todos los proveedores en paralelo y no bloquea el playback nativo si una consulta directa devuelve cero.",
       "env": "HA_SOL_STREMIO_ADDONS",
       "required": false
     },
@@ -254,9 +276,9 @@
     },
     {
       "key": "stremio_max_size_gb",
-      "label": "Tamaño máximo preferido (GiB)",
+      "label": "Tamaño máximo (GiB)",
       "type": "number",
-      "description": "Límite blando para ranking; 0 significa sin límite.",
+      "description": "Límite obligatorio cuando el addon informa el tamaño; 0 significa sin límite. También lee behaviorHints.videoSize y unidades GiB/MiB como el Stream Bridge.",
       "env": "HA_SOL_STREMIO_MAX_SIZE_GB",
       "required": false,
       "default": 0,
@@ -283,7 +305,7 @@
       "key": "stremio_autoplay_first_stream",
       "label": "Reproducir el primer stream automáticamente",
       "type": "boolean",
-      "description": "Después de abrir el contenido, solicita autoplay nativo y, si la lista de streams queda visible, envía un único DPAD_CENTER mediante Home Assistant Remote. Con TV Satellite espera a detectar que la lista cargó antes del OK.",
+      "description": "Después de abrir el contenido, solicita autoplay nativo y, si la lista de streams queda visible, envía un único DPAD_CENTER mediante Home Assistant Remote. Este flujo continúa aunque la consulta directa del manifest devuelva cero.",
       "env": "HA_SOL_STREMIO_AUTOPLAY_FIRST_STREAM",
       "required": false,
       "default": true
@@ -303,7 +325,7 @@
       "key": "stremio_auto_select_stream",
       "label": "Matcher visual de stream (fallback)",
       "type": "boolean",
-      "description": "Sólo si falla el OK vía Home Assistant, usa Android TV Satellite para intentar localizar el stream rankeado por texto.",
+      "description": "Sólo si falla el OK vía Home Assistant y existe una selección directa, usa Android TV Satellite para intentar localizar ese stream por texto.",
       "env": "HA_SOL_STREMIO_AUTOSELECT_STREAM",
       "required": false,
       "default": true
@@ -347,7 +369,7 @@
       "key": "stremio_proxy_use_for_play",
       "label": "Usar selector exacto al reproducir",
       "type": "boolean",
-      "description": "Activalo después de instalar SOL Stream Selector en Stremio. Hace que play_best use IDs sol: y entregue únicamente el stream rankeado.",
+      "description": "Activalo después de instalar SOL Stream Selector en Stremio. Si no hay selección directa disponible, play_best cae al flujo nativo de Stremio en vez de abortar.",
       "env": "HA_SOL_STREMIO_PROXY_USE_FOR_PLAY",
       "required": false,
       "default": false
