@@ -40,6 +40,7 @@ jobs:
 
       - name: Syntax check runtime
         run: |
+          node --check plugins/home-assistant/entry.mjs
           node --check plugins/home-assistant/index.mjs
           node --check plugins/home-assistant/lib/cache.mjs
           node --check plugins/home-assistant/lib/ha-client.mjs
@@ -47,6 +48,8 @@ jobs:
           node --check plugins/home-assistant/lib/tv-client.mjs
           node --check plugins/home-assistant/lib/stremio.mjs
           node --check plugins/home-assistant/lib/stremio-addons.mjs
+          node --check plugins/home-assistant/lib/stremio-addon-compat.mjs
+          node --check plugins/home-assistant/lib/stremio-launch-guard.mjs
           node --check plugins/home-assistant/lib/stremio-proxy.mjs
 
       - name: Cache, TV Satellite and Stremio tests
