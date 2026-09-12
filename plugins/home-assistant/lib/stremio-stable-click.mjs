@@ -8,6 +8,11 @@ function numberEnv(env, name, fallback, min, max) {
   return Math.max(min, Math.min(max, Math.trunc(value)));
 }
 
+function centerTransport(env) {
+  const value = String(env?.HA_SOL_STREMIO_CENTER_TRANSPORT || "auto").trim().toLowerCase();
+  return ["auto", "satellite", "home_assistant"].includes(value) ? value : "auto";
+}
+
 function collectUiText(node, out = [], depth = 0) {
   if (!node || typeof node !== "object" || depth > 9 || out.length > 500) return out;
   for (const key of ["text", "description", "class", "view_id", "resource_id"]) {
@@ -42,8 +47,131 @@ function settings(client) {
   return {
     centerDelayMs: numberEnv(env, "HA_SOL_STREMIO_CENTER_DELAY_MS", 900, 0, 5000),
     readyTimeoutMs: numberEnv(env, "HA_SOL_STREMIO_STREAM_READY_TIMEOUT_MS", 12000, 250, 30000),
+    centerTransport: centerTransport(env),
     confirmations: 2
   };
+}
+
+async function responsePayload(response) {
+  const contentType = response.headers.get("content-type") || "";
+  if (contentType.includes("application/json")) return await response.json().catch(() => ({}));
+  return { error: (await response.text().catch(() => "")).slice(0, 500) || `HTTP ${response.status}` };
+}
+
+async function sendCenterViaSatellite(client) {
+  if (!client?.stremioTvEnabled || !client?.stremioTvUrl) {
+    return { ok: false, via: "tv_satellite", reason: "tv_satellite_not_configured", fallback: "home_assistant" };
+  }
+
+  const executeResponse = await fetch(`${client.stremioTvUrl}/execute`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      actions: [{ action: "dpad_center" }],
+      session_id: "stremio-center",
+      screenshot: false,
+      quiet_ms: 180,
+      wait_timeout_ms: 1800,
+      gap_ms: 60
+    }),
+    signal: AbortSignal.timeout(Math.max(client.stremioTvTimeoutMs || 8000, 5500))
+  }).catch((error) => ({ transportError: error?.message || String(error) }));
+
+  if (executeResponse?.transportError) {
+    return { ok: false, via: "tv_satellite_execute", reason: executeResponse.transportError, fallback: "home_assistant" };
+  }
+
+  const executePayload = await responsePayload(executeResponse);
+  const first = Array.isArray(executePayload?.actions) ? executePayload.actions[0] : null;
+  if (executeResponse.ok && (first?.ok === true || (executePayload?.ok === true && first?.ok !== false))) {
+    return {
+      ok: true,
+      via: "tv_satellite_execute",
+      action: "dpad_center",
+      httpStatus: executeResponse.status,
+      actionResult: first ? { ok: first.ok, fallback: first.fallback || null } : { ok: true }
+    };
+  }
+
+  if (![404, 405].includes(executeResponse.status)) {
+    return {
+      ok: false,
+      via: "tv_satellite_execute",
+      action: "dpad_center",
+      httpStatus: executeResponse.status,
+      reason: first?.error || executePayload?.error || "tv_satellite_center_not_injected",
+      fallback: first?.fallback || "home_assistant"
+    };
+  }
+
+  const legacyResponse = await fetch(`${client.stremioTvUrl}/action`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ action: "dpad_center" }),
+    signal: AbortSignal.timeout(client.stremioTvTimeoutMs || 8000)
+  }).catch((error) => ({ transportError: error?.message || String(error) }));
+
+  if (legacyResponse?.transportError) {
+    return { ok: false, via: "tv_satellite_legacy", reason: legacyResponse.transportError, fallback: "home_assistant" };
+  }
+
+  const legacyPayload = await responsePayload(legacyResponse);
+  if (legacyResponse.ok && legacyPayload?.ok !== false) {
+    return {
+      ok: true,
+      via: "tv_satellite_legacy",
+      action: "dpad_center",
+      httpStatus: legacyResponse.status
+    };
+  }
+
+  return {
+    ok: false,
+    via: "tv_satellite_legacy",
+    action: "dpad_center",
+    httpStatus: legacyResponse.status,
+    reason: legacyPayload?.error || "tv_satellite_center_not_injected",
+    fallback: legacyPayload?.fallback || "home_assistant"
+  };
+}
+
+async function sendCenterViaHomeAssistant(client, satelliteResult = null) {
+  if (!client?.stremioRemoteEntityId) {
+    return { ok: false, via: "home_assistant_remote", reason: "stremio_remote_entity_id_required", satelliteResult };
+  }
+  try {
+    const result = await client.haService("remote", "send_command", {
+      entity_id: client.stremioRemoteEntityId,
+      command: ["DPAD_CENTER"]
+    });
+    return {
+      ok: true,
+      via: satelliteResult ? "home_assistant_remote_fallback" : "home_assistant_remote",
+      service: "remote.send_command",
+      remoteEntityId: client.stremioRemoteEntityId,
+      command: "DPAD_CENTER",
+      commandPayload: ["DPAD_CENTER"],
+      satelliteResult,
+      result
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      via: satelliteResult ? "home_assistant_remote_fallback" : "home_assistant_remote",
+      command: "DPAD_CENTER",
+      reason: error?.message || String(error),
+      satelliteResult
+    };
+  }
+}
+
+async function sendCenter(client, transport) {
+  if (transport === "home_assistant") return sendCenterViaHomeAssistant(client);
+
+  const satelliteResult = await sendCenterViaSatellite(client);
+  if (satelliteResult.ok || transport === "satellite") return satelliteResult;
+
+  return sendCenterViaHomeAssistant(client, satelliteResult);
 }
 
 export function installStremioStableClick(SolPluginClient) {
@@ -66,6 +194,8 @@ export function installStremioStableClick(SolPluginClient) {
         centerDelayMs: cfg.centerDelayMs,
         readyTimeoutMs: cfg.readyTimeoutMs,
         stableConfirmations: cfg.confirmations,
+        centerTransport: cfg.centerTransport,
+        centerTransportPolicy: "auto uses TV Satellite dpad_center first and falls back to Home Assistant only when Satellite reports failure",
         blindTimeoutClick: false
       }
     };
@@ -149,7 +279,6 @@ export function installStremioStableClick(SolPluginClient) {
 
   proto.clickFirstStream = async function clickFirstStableStream() {
     if (!this.stremioAutoPlayFirstStream) return { ok: false, reason: "stremio_first_stream_autoplay_disabled" };
-    if (!this.stremioRemoteEntityId) return { ok: false, reason: "stremio_remote_entity_id_required" };
 
     const readiness = await this.waitForStreamUi();
     if (readiness.alreadyPlaying) {
@@ -178,31 +307,32 @@ export function installStremioStableClick(SolPluginClient) {
       };
     }
 
-    try {
-      const result = await this.haService("remote", "send_command", {
-        entity_id: this.stremioRemoteEntityId,
-        command: "DPAD_CENTER"
-      });
-      const playbackVerification = await this.verifyPlayback();
-      return {
-        ok: true,
-        commandSent: true,
-        via: "home_assistant_remote",
-        service: "remote.send_command",
-        remoteEntityId: this.stremioRemoteEntityId,
-        command: "DPAD_CENTER",
-        readiness,
-        playbackVerification,
-        result
-      };
-    } catch (error) {
+    const cfg = settings(this);
+    const center = await sendCenter(this, cfg.centerTransport);
+    if (!center.ok) {
       return {
         ok: false,
         commandSent: false,
-        reason: error?.message || String(error),
-        readiness
+        reason: center.reason || "stremio_center_command_failed",
+        readiness,
+        centerTransport: cfg.centerTransport,
+        center
       };
     }
+
+    const playbackVerification = await this.verifyPlayback();
+    return {
+      ok: true,
+      commandSent: true,
+      via: center.via,
+      service: center.service || null,
+      remoteEntityId: center.remoteEntityId || null,
+      command: "DPAD_CENTER",
+      readiness,
+      centerTransport: cfg.centerTransport,
+      center,
+      playbackVerification
+    };
   };
 
   return SolPluginClient;
