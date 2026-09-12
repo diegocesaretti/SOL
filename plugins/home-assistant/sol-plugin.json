@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "id": "home-assistant",
   "name": "Home Assistant",
-  "version": "0.3.18",
-  "description": "Home Assistant bridge for SOL with native Stremio playback, account-aware next episodes, isolated family/sports provider profiles and Android TV Satellite control.",
+  "version": "0.3.19",
+  "description": "Home Assistant bridge for SOL with HA-only Android TV remote control, native Stremio playback, account-aware next episodes and isolated family/sports provider profiles.",
   "runtime": "node",
   "entry": "entry.mjs",
   "args": [],
@@ -118,50 +118,12 @@
       "default": false
     },
     {
-      "key": "tv_satellite_enabled",
-      "label": "Android TV Satellite",
-      "type": "boolean",
-      "description": "Habilita el control visual del TV Satellite. Sólo captura frames a pedido; no hace streaming continuo.",
-      "env": "HA_SOL_TV_ENABLED",
-      "required": false,
-      "default": false
-    },
-    {
-      "key": "tv_satellite_url",
-      "label": "URL del TV Satellite",
-      "type": "text",
-      "description": "URL local de la APK, por ejemplo http://192.168.1.80:8765. No requiere token.",
-      "env": "HA_SOL_TV_URL",
-      "required": false
-    },
-    {
       "key": "tv_remote_entity_id",
-      "label": "Remote de Home Assistant para fallback",
+      "label": "Remote de Home Assistant para TV",
       "type": "text",
-      "description": "Entidad remote.* de Android TV usada para DPAD/OK, rutas agrupadas y, si no se configura otro remote, también para lanzar deep links de Stremio.",
+      "description": "Entidad remote.* de Android TV usada directamente para Home, Back, DPAD y OK. Esta versión no usa Android TV Satellite.",
       "env": "HA_SOL_TV_REMOTE_ENTITY_ID",
       "required": false
-    },
-    {
-      "key": "tv_request_timeout_ms",
-      "label": "Timeout del TV Satellite (ms)",
-      "type": "number",
-      "env": "HA_SOL_TV_TIMEOUT_MS",
-      "required": false,
-      "default": 8000,
-      "min": 1000,
-      "max": 30000
-    },
-    {
-      "key": "tv_action_settle_ms",
-      "label": "Pausa mínima tras acción (ms)",
-      "type": "number",
-      "description": "Pausa mínima de compatibilidad. La espera real usa eventos de Accessibility y finaliza cuando la UI queda estable; 100 ms evita latencia fija innecesaria.",
-      "env": "HA_SOL_TV_ACTION_SETTLE_MS",
-      "required": false,
-      "default": 100,
-      "min": 100,
-      "max": 2000
     },
     {
       "key": "stremio_deeplinks_enabled",
@@ -176,7 +138,7 @@
       "key": "stremio_remote_entity_id",
       "label": "Remote Android TV para Stremio",
       "type": "text",
-      "description": "Entidad remote.* de Android TV Remote usada para despertar con tecla 0, abrir deep links y como fallback de teclas si el TV Satellite no puede inyectarlas. Si queda vacío se usa tv_remote_entity_id.",
+      "description": "Entidad remote.* de Android TV Remote usada para despertar con tecla 0, abrir deep links y enviar OK. Si queda vacío se usa tv_remote_entity_id.",
       "env": "HA_SOL_STREMIO_REMOTE_ENTITY_ID",
       "required": false
     },
@@ -217,7 +179,7 @@
       "key": "stremio_autoplay_default",
       "label": "Solicitar autoPlay por defecto",
       "type": "boolean",
-      "description": "Solicita autoPlay=true en Android TV cuando existe un videoId. Si Stremio no puede reutilizar un stream conocido, el plugin espera la lista y hace el OK final.",
+      "description": "Solicita autoPlay=true en Android TV cuando existe un videoId. Si Stremio necesita una selección adicional, el plugin usa la espera fija configurada y luego Home Assistant Remote.",
       "env": "HA_SOL_STREMIO_AUTOPLAY",
       "required": false,
       "default": true
@@ -297,7 +259,7 @@
       "key": "stremio_family_enabled",
       "label": "Perfil infantil/familiar automático",
       "type": "boolean",
-      "description": "Cuando está activo, títulos forzados o metadata Family/Kids/Children usan exclusivamente el proveedor familiar configurado.",
+      "description": "Cuando está activo, títulos forzados o metadata Family/Kids/Children usan exclusivamente el proveedor familiar configurado. Sin Satellite, la selección exacta visual no está disponible y el modo family permanece conservador.",
       "env": "HA_SOL_STREMIO_FAMILY_ENABLED",
       "required": false,
       "default": false
@@ -430,77 +392,21 @@
       "key": "stremio_autoplay_first_stream",
       "label": "Reproducir el primer stream automáticamente",
       "type": "boolean",
-      "description": "Después de confirmar que la lista nativa de streams está estable, envía un único centro. En profile=family este OK genérico se desactiva: sólo se permite la selección visual del stream familiar prevalidado.",
+      "description": "Después de la espera fija configurada, envía un único DPAD_CENTER directamente mediante Home Assistant Remote. En profile=family el OK genérico permanece desactivado para evitar elegir un proveedor no validado.",
       "env": "HA_SOL_STREMIO_AUTOPLAY_FIRST_STREAM",
       "required": false,
       "default": true
     },
     {
-      "key": "stremio_center_transport",
-      "label": "Transporte de tecla OK de Stremio",
-      "type": "select",
-      "description": "Auto intenta dpad_center directamente por Android TV Satellite y usa Home Assistant sólo si el Satellite declara fallo. Los otros modos permiten aislar problemas de transporte.",
-      "env": "HA_SOL_STREMIO_CENTER_TRANSPORT",
-      "required": false,
-      "default": "auto",
-      "options": [
-        { "value": "auto", "label": "Auto · Satellite primero" },
-        { "value": "satellite", "label": "Sólo Android TV Satellite" },
-        { "value": "home_assistant", "label": "Sólo Home Assistant Remote" }
-      ]
-    },
-    {
-      "key": "stremio_center_delay_ms",
-      "label": "Estabilidad antes de OK (ms)",
-      "type": "number",
-      "description": "Tiempo mínimo que la lista de streams debe permanecer visible antes de enviar el centro. Requiere dos observaciones válidas además de esta espera.",
-      "env": "HA_SOL_STREMIO_CENTER_DELAY_MS",
-      "required": false,
-      "default": 900,
-      "min": 0,
-      "max": 5000
-    },
-    {
-      "key": "stremio_stream_ready_timeout_ms",
-      "label": "Timeout esperando lista de streams (ms)",
-      "type": "number",
-      "description": "Tiempo máximo esperando que Stremio muestre una lista de streams estable. Al vencer no se envía OK a ciegas.",
-      "env": "HA_SOL_STREMIO_STREAM_READY_TIMEOUT_MS",
-      "required": false,
-      "default": 12000,
-      "min": 250,
-      "max": 30000
-    },
-    {
       "key": "stremio_first_stream_delay_ms",
-      "label": "Espera fija sin TV Satellite (ms)",
+      "label": "Espera antes de OK de Stremio (ms)",
       "type": "number",
-      "description": "Se usa sólo como fallback cuando Android TV Satellite no está disponible.",
+      "description": "Espera fija entre abrir el detalle de Stremio y enviar DPAD_CENTER por Home Assistant. No se consulta Android TV Satellite.",
       "env": "HA_SOL_STREMIO_FIRST_STREAM_DELAY_MS",
       "required": false,
       "default": 3500,
       "min": 500,
       "max": 15000
-    },
-    {
-      "key": "stremio_playback_verify_ms",
-      "label": "Ventana de verificación de reproducción (ms)",
-      "type": "number",
-      "description": "Después del autoplay/OK, observa Accessibility del TV Satellite para detectar controles del reproductor. Una captura negra no se considera fallo porque el video puede renderizarse en una Surface protegida.",
-      "env": "HA_SOL_STREMIO_PLAYBACK_VERIFY_MS",
-      "required": false,
-      "default": 4000,
-      "min": 500,
-      "max": 15000
-    },
-    {
-      "key": "stremio_auto_select_stream",
-      "label": "Matcher visual de stream preferido",
-      "type": "boolean",
-      "description": "Intenta seleccionar visualmente el stream preferido en la lista nativa. En family es obligatorio para mantener el aislamiento: si no identifica el stream familiar, no hace fallback al primer stream genérico.",
-      "env": "HA_SOL_STREMIO_AUTOSELECT_STREAM",
-      "required": false,
-      "default": true
     }
   ],
   "distribution": {
