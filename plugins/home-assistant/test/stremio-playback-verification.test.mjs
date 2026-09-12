@@ -84,6 +84,7 @@ test("requested exact selector falls back to native Stremio when public HTTPS UR
       HA_SOL_ALLOW_CONTROL: "true",
       HA_SOL_STREMIO_ENABLED: "true",
       HA_SOL_STREMIO_REMOTE_ENTITY_ID: "remote.android_tv",
+      HA_SOL_STREMIO_ADDONS: "https://addon.example/manifest.json",
       HA_SOL_STREMIO_PROXY_ENABLED: "true",
       HA_SOL_STREMIO_PROXY_USE_FOR_PLAY: "true",
       HA_SOL_STREMIO_PROXY_TOKEN: "abcdefghijklmnop",
