@@ -111,32 +111,35 @@ function frameChanged(before, after) {
   return before.signature !== after.signature;
 }
 
-export async function wakeForStremio(client, { command = "0", delayMs = 450 } = {}) {
+async function remoteCommand(client, command, delayMs = 0) {
   if (!client?.stremioRemoteEntityId) {
-    return { ok: false, skipped: true, reason: "stremio_remote_entity_id_required" };
+    return { ok: false, skipped: true, command, reason: "stremio_remote_entity_id_required" };
   }
   try {
     const result = await client.haService("remote", "send_command", {
       entity_id: client.stremioRemoteEntityId,
       command
     });
-    await sleep(delayMs);
-    return {
-      ok: true,
-      command,
-      delayMs,
-      via: "home_assistant_remote",
-      result
-    };
+    if (delayMs > 0) await sleep(delayMs);
+    return { ok: true, command, delayMs, via: "home_assistant_remote", result };
   } catch (error) {
     return { ok: false, command, delayMs, reason: error?.message || String(error) };
   }
 }
 
+export async function wakeForStremio(client, { command = "0", delayMs = 450 } = {}) {
+  return remoteCommand(client, command, delayMs);
+}
+
+export async function recoverForegroundApp(client, { delayMs = 700 } = {}) {
+  return remoteCommand(client, "HOME", delayMs);
+}
+
 export async function inspectStremioLaunch(client, {
   beforeFrame = null,
   expectedTitle = "",
-  timeoutMs = 4500
+  timeoutMs = 6000,
+  wrongAppGraceMs = 2500
 } = {}) {
   if (!client?.stremioTvEnabled || !client?.stremioTvUrl) {
     return {
@@ -168,11 +171,12 @@ export async function inspectStremioLaunch(client, {
     if (state?.wrongApp) wrongAppHits += 1;
     else wrongAppHits = 0;
 
+    const waitedMs = Date.now() - started;
     last = {
       state,
       frame: frame?.ok ? { profile: frame.profile, bytes: frame.bytes, dHash: frame.dHash, signature: frame.signature } : frame,
       frameChanged: changed,
-      waitedMs: Date.now() - started
+      waitedMs
     };
 
     if (state?.stremio && state.playerLike) {
@@ -190,8 +194,15 @@ export async function inspectStremioLaunch(client, {
     if (homeHits >= 2) {
       return { status: "home_screen", allowStreamInput: false, screenshotChecked: true, ...last };
     }
-    if (wrongAppHits >= 2) {
-      return { status: "wrong_app", allowStreamInput: false, screenshotChecked: true, ...last };
+    if (wrongAppHits >= 2 && waitedMs >= wrongAppGraceMs) {
+      return {
+        status: "wrong_app",
+        allowStreamInput: false,
+        screenshotChecked: true,
+        graceMs: wrongAppGraceMs,
+        ...last,
+        note: "Another foreground app remained active after the Stremio deep link grace window. The launch guard should recover through HOME and retry instead of sending stream-selection keys to that app."
+      };
     }
     await sleep(250);
   }
@@ -200,6 +211,25 @@ export async function inspectStremioLaunch(client, {
     return {
       status: "stremio_visible",
       allowStreamInput: true,
+      screenshotChecked: true,
+      visualTransition: sawVisualChange,
+      ...last
+    };
+  }
+  if (last?.state?.wrongApp) {
+    return {
+      status: "wrong_app",
+      allowStreamInput: false,
+      screenshotChecked: true,
+      visualTransition: sawVisualChange,
+      graceMs: wrongAppGraceMs,
+      ...last
+    };
+  }
+  if (last?.state?.homeScreen) {
+    return {
+      status: "home_screen",
+      allowStreamInput: false,
       screenshotChecked: true,
       visualTransition: sawVisualChange,
       ...last
@@ -233,8 +263,10 @@ function isDetailDeepLink(uri) {
 export function installStremioLaunchGuard(SolPluginClient, {
   wakeCommand = "0",
   wakeDelayMs = 450,
-  watchdogMs = 4500,
-  retryCount = 1
+  recoveryDelayMs = 700,
+  watchdogMs = 6000,
+  wrongAppGraceMs = 2500,
+  retryCount = 2
 } = {}) {
   const proto = SolPluginClient?.prototype;
   if (!proto || proto.__stremioLaunchGuardInstalled) return SolPluginClient;
@@ -253,11 +285,15 @@ export function installStremioLaunchGuard(SolPluginClient, {
         enabled: true,
         wakeCommand,
         wakeDelayMs,
+        recoveryDelayMs,
         watchdogMs,
+        wrongAppGraceMs,
         retryCount,
+        totalAttempts: retryCount + 1,
         screenshotCheck: true,
         homeScreenRecovery: true,
-        note: "Before play_best, SOL sends Android TV key 0, then verifies the Stremio launch with Satellite screenshots plus Accessibility and relaunches the deep link when the launcher/home screen remains visible."
+        wrongAppRecovery: true,
+        note: "Before play_best, SOL sends Android TV key 0, verifies the Stremio launch with screenshots plus Accessibility, and recovers foreground apps through HOME before retrying the same deep link."
       }
     };
   };
@@ -289,26 +325,39 @@ export function installStremioLaunchGuard(SolPluginClient, {
     let launch = null;
     let inspection = null;
     let retries = 0;
+    let pendingRecovery = null;
 
     while (retries <= retryCount) {
+      let recovery = null;
+      if (pendingRecovery === "wrong_app" || pendingRecovery === "stalled") {
+        recovery = await recoverForegroundApp(this, { delayMs: recoveryDelayMs });
+      }
+
       const wake = await wakeForStremio(this, { command: wakeCommand, delayMs: wakeDelayMs });
       const beforeFrame = await screenshotProbe(this);
       launch = await originalLaunch.call(this, uri);
       inspection = await inspectStremioLaunch(this, {
         beforeFrame,
         expectedTitle: context.expectedTitle,
-        timeoutMs: watchdogMs
+        timeoutMs: watchdogMs,
+        wrongAppGraceMs
       });
       attempts.push({
         attempt: retries + 1,
+        recovery: recovery ? {
+          ok: recovery.ok,
+          command: recovery.command,
+          reason: recovery.reason || null
+        } : null,
         wake: { ok: wake.ok, skipped: Boolean(wake.skipped), command: wake.command || wakeCommand, reason: wake.reason || null },
         beforeFrame: beforeFrame?.ok ? { profile: beforeFrame.profile, bytes: beforeFrame.bytes, dHash: beforeFrame.dHash, signature: beforeFrame.signature } : beforeFrame,
         inspection
       });
 
       if (inspection.allowStreamInput) break;
-      if (!['home_screen', 'wrong_app', 'stalled'].includes(inspection.status)) break;
+      if (!["home_screen", "wrong_app", "stalled"].includes(inspection.status)) break;
       if (retries >= retryCount) break;
+      pendingRecovery = inspection.status;
       retries += 1;
     }
 
@@ -316,7 +365,9 @@ export function installStremioLaunchGuard(SolPluginClient, {
       ok: Boolean(inspection?.allowStreamInput),
       wakeCommand,
       retries,
+      totalAttempts: attempts.length,
       finalStatus: inspection?.status || "unverified",
+      finalPackage: inspection?.state?.packageName || null,
       allowStreamInput: inspection?.allowStreamInput !== false,
       screenshotChecked: Boolean(inspection?.screenshotChecked),
       attempts
