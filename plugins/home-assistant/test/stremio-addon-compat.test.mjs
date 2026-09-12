@@ -2,6 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { installStremioAddonCompatibilityPatch, __test } from "../lib/stremio-addon-compat.mjs";
 
+function completeAggregator(aggregator) {
+  return {
+    ...aggregator,
+    async status() { return { addons: this.addons.map((addon) => ({ id: addon.id, name: addon.name, version: addon.version || "1" })) }; },
+    async rankStreams() { return { ranked: [], errors: [], providers: [] }; }
+  };
+}
+
 test("resource URL preserves manifest query and percent-encodes series episode colons", () => {
   const url = __test.resourceUrl(
     "https://addon.example/config/manifest.json?token=secret",
@@ -22,11 +30,12 @@ test("compat layer queries configured stream addon even when manifest prefix fil
   };
 
   try {
-    const aggregator = {
+    const aggregator = completeAggregator({
       timeoutMs: 2000,
       addons: [{
         id: "odd-addon",
         name: "Odd Addon",
+        version: "1",
         manifestUrl: "https://addon.example/manifest.json",
         manifest: {
           resources: [{ name: "stream", types: ["movie"], idPrefixes: ["kitsu:"] }],
@@ -34,8 +43,8 @@ test("compat layer queries configured stream addon even when manifest prefix fil
         }
       }],
       async refresh() { return this.addons; }
-    };
-    installStremioAddonCompatibilityPatch(aggregator);
+    });
+    installStremioAddonCompatibilityPatch(aggregator, { retries: 0 });
     const result = await aggregator.getStreams("movie", "tt0120915");
     assert.equal(result.streams.length, 1);
     assert.equal(result.providers.length, 1);
@@ -64,11 +73,12 @@ test("compat layer falls back from encoded episode id to raw colons when needed"
   };
 
   try {
-    const aggregator = {
+    const aggregator = completeAggregator({
       timeoutMs: 2000,
       addons: [{
         id: "series-addon",
         name: "Series Addon",
+        version: "1",
         manifestUrl: "https://addon.example/config/manifest.json",
         manifest: {
           resources: [{ name: "stream", types: ["series"], idPrefixes: ["tt"] }],
@@ -76,8 +86,8 @@ test("compat layer falls back from encoded episode id to raw colons when needed"
         }
       }],
       async refresh() { return this.addons; }
-    };
-    installStremioAddonCompatibilityPatch(aggregator);
+    });
+    installStremioAddonCompatibilityPatch(aggregator, { retries: 0 });
     const result = await aggregator.getStreams("series", "tt0903747:2:3");
     assert.equal(result.streams.length, 1);
     assert.equal(calls.length, 2);
@@ -96,22 +106,24 @@ test("zero stream responses now return provider diagnostics instead of silent ze
   });
 
   try {
-    const aggregator = {
+    const aggregator = completeAggregator({
       timeoutMs: 2000,
       addons: [{
         id: "empty-addon",
         name: "Empty Addon",
+        version: "1",
         manifestUrl: "https://addon.example/manifest.json",
         manifest: { resources: ["stream"], types: ["movie", "series"] }
       }],
       async refresh() { return this.addons; }
-    };
-    installStremioAddonCompatibilityPatch(aggregator);
+    });
+    installStremioAddonCompatibilityPatch(aggregator, { retries: 0 });
     const result = await aggregator.getStreams("movie", "tt0120915");
     assert.equal(result.streams.length, 0);
     assert.equal(result.errors[0].error, "stremio_addon_zero_streams");
     assert.equal(result.providers[0].streamCount, 0);
     assert.equal(result.providers[0].attempts[0].count, 0);
+    assert.equal(result.providers[0].attempts[0].status, 200);
   } finally {
     globalThis.fetch = originalFetch;
   }

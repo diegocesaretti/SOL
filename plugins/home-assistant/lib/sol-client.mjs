@@ -3,6 +3,7 @@ import {
   SolPluginClient as CoreSolPluginClient
 } from "./sol-client-core.mjs";
 import { detailDeepLink } from "./stremio.mjs";
+import { summarizeRankedStream } from "./stremio-addons.mjs";
 import { installStremioAddonCompatibilityPatch } from "./stremio-addon-compat.mjs";
 
 export { STREMIO_MCP_TOOLS };
@@ -79,7 +80,7 @@ function classifyStremioObservation(observation) {
   const text = values.join(" ").toLowerCase();
   const pkg = String(observation?.package || observation?.package_name || "").toLowerCase();
   const loading = /\b(loading|cargando|please wait|espere|progressbar|progress bar)\b/i.test(text);
-  const streamLike = /\b(2160p?|1080p?|720p?|576p?|480p?|4k|uhd|remux|blu[ -]?ray|web[ ._-]?dl|webrip|torrent|seed(?:er)?s?|debrid|cached|\d+(?:[.,]\d+)?\s*(?:gb|mb))\b/i.test(text);
+  const streamLike = /\b(2160p?|1080p?|720p?|576p?|480p?|4k|uhd|remux|blu[ -]?ray|web[ ._-]?dl|webrip|torrent|seed(?:er)?s?|debrid|cached|\d+(?:[.,]\d+)?\s*(?:gib|gb|mib|mb))\b/i.test(text);
   const playerLike = /\b(pause|pausa|subtitles?|subt[ií]tulos|audio track|pista de audio|playback speed|velocidad de reproducci[oó]n)\b/i.test(text);
   const stremio = pkg.includes("stremio") || text.includes("stremio");
   return {
@@ -92,10 +93,23 @@ function classifyStremioObservation(observation) {
   };
 }
 
+function safeSelection(selection) {
+  return {
+    selected: selection?.selected ? summarizeRankedStream(selection.selected, 0) : null,
+    providerCount: Array.isArray(selection?.providers) ? selection.providers.length : 0,
+    streamCount: Array.isArray(selection?.ranked) ? selection.ranked.length : 0,
+    providers: Array.isArray(selection?.providers) ? selection.providers : [],
+    errors: Array.isArray(selection?.errors) ? selection.errors : []
+  };
+}
+
 export class SolPluginClient extends CoreSolPluginClient {
   constructor(env = process.env) {
     super(env);
-    installStremioAddonCompatibilityPatch(this.addonAggregator);
+    this.stremioAddonTimeoutMs = numberEnv(env, "HA_SOL_STREMIO_ADDON_TIMEOUT_MS", 20000, 1000, 120000);
+    this.stremioAddonRetries = numberEnv(env, "HA_SOL_STREMIO_ADDON_RETRIES", 1, 0, 3);
+    this.addonAggregator.timeoutMs = this.stremioAddonTimeoutMs;
+    installStremioAddonCompatibilityPatch(this.addonAggregator, { retries: this.stremioAddonRetries });
     this.stremioAutoPlayFirstStream = boolEnv(env, "HA_SOL_STREMIO_AUTOPLAY_FIRST_STREAM", true);
     this.stremioFirstStreamDelayMs = numberEnv(env, "HA_SOL_STREMIO_FIRST_STREAM_DELAY_MS", 3500, 500, 15000);
     this.stremioAutoSelectStream = boolEnv(env, "HA_SOL_STREMIO_AUTOSELECT_STREAM", true);
@@ -109,10 +123,15 @@ export class SolPluginClient extends CoreSolPluginClient {
     return {
       ...super.stremioStatus(),
       addonCompatibility: {
+        protocolMode: "stream_bridge_compatible",
+        requestTimeoutMs: this.stremioAddonTimeoutMs,
+        retryCount: this.stremioAddonRetries,
         tolerantManifestFiltering: true,
         encodedEpisodeIds: true,
         rawColonFallback: true,
-        preservesManifestQuery: true
+        preservesConfiguredManifestPath: true,
+        preservesManifestQuery: true,
+        directLookupGatesNativePlayback: false
       },
       firstStreamAutoPlay: {
         enabled: this.stremioAutoPlayFirstStream,
@@ -309,26 +328,83 @@ export class SolPluginClient extends CoreSolPluginClient {
   }
 
   async handleStremioTool(tool, args = {}) {
-    const result = await super.handleStremioTool(tool, args);
-    if (tool !== "home_assistant_stremio_play_best") return result;
-    if (result?.deliveryMode !== "visual_selection_required") return result;
+    if (tool !== "home_assistant_stremio_play_best") return super.handleStremioTool(tool, args);
+    if (!this.stremioEnabled) throw new Error("stremio_deep_links_disabled");
 
-    const content = result.content || {};
-    const autoPlayLink = detailDeepLink({
+    const autoPlay = args.autoPlay === undefined ? this.stremioAutoPlayDefault : Boolean(args.autoPlay);
+    const { resolved, streamId } = await this.resolveForStream(args);
+    const preferences = this.streamPreferences(args);
+
+    let selection = { selected: null, ranked: [], errors: [], providers: [] };
+    let directLookupError = null;
+    if (this.stremioAddonConfigError) {
+      directLookupError = this.stremioAddonConfigError;
+    } else if (this.addonAggregator.configured) {
+      try {
+        selection = await this.addonAggregator.selectStream(resolved.type, streamId, preferences);
+      } catch (error) {
+        directLookupError = error?.message || String(error);
+      }
+    } else {
+      directLookupError = "stremio_addon_manifests_not_configured";
+    }
+
+    const summary = safeSelection(selection);
+    const content = {
+      type: resolved.type,
+      id: resolved.id,
+      videoId: resolved.videoId,
+      selected: resolved.selected
+    };
+    const useProxy = args.useSelectorProxy === undefined ? this.stremioProxyUseForPlay : Boolean(args.useSelectorProxy);
+
+    if (useProxy && selection.selected) {
+      if (this.stremioProxyConfigError) throw new Error(this.stremioProxyConfigError);
+      await this.selectorProxy.ensureStarted();
+      const proxySelection = this.selectorProxy.buildSelectionDeepLink({
+        type: resolved.type,
+        id: resolved.id,
+        season: resolved.season,
+        episode: resolved.episode,
+        preferences,
+        autoPlay
+      });
+      return {
+        content,
+        preferences,
+        ...summary,
+        deliveryMode: "selector_proxy_exact",
+        proxy: { manifestUrl: this.selectorProxy.manifestUrl(), sessionId: proxySelection.sessionId },
+        launch: await this.launchStremio(proxySelection.deepLink)
+      };
+    }
+
+    const nativeLink = detailDeepLink({
       type: content.type,
       id: content.id,
       videoId: content.videoId || content.id,
       autoPlay: true
     });
-    const launch = result?.launch?.deepLink === autoPlayLink
-      ? result.launch
-      : await this.launchStremio(autoPlayLink);
-
+    const launch = await this.launchStremio(nativeLink);
     const firstStreamClick = await this.clickFirstStream();
+    const nativeFallback = {
+      used: !selection.selected,
+      reason: !selection.selected
+        ? (directLookupError || (summary.errors[0]?.error ?? "stremio_direct_addon_lookup_empty"))
+        : null,
+      note: !selection.selected
+        ? "Direct SOL addon lookup returned no selectable stream, so playback continued through Stremio's own installed-addon stream list."
+        : null
+    };
+
     if (firstStreamClick.ok) {
-      const { visualSelectionHint, ...rest } = result;
       return {
-        ...rest,
+        content,
+        preferences,
+        ...summary,
+        directLookupError,
+        nativeFallback,
+        selectorFallbackReason: useProxy && !selection.selected ? "stremio_no_direct_stream_for_selector" : null,
         launch,
         deliveryMode: firstStreamClick.skipped ? "stremio_autoplay_started" : "first_stream_center_click",
         firstStreamClick,
@@ -336,28 +412,46 @@ export class SolPluginClient extends CoreSolPluginClient {
       };
     }
 
-    const autoSelection = await this.autoSelectVisualStream(result.selected);
-    if (!autoSelection.ok) {
+    const autoSelection = selection.selected
+      ? await this.autoSelectVisualStream(summary.selected)
+      : { ok: false, reason: "no_direct_stream_label_for_visual_match" };
+
+    if (autoSelection.ok) {
       return {
-        ...result,
+        content,
+        preferences,
+        ...summary,
+        directLookupError,
+        nativeFallback,
         launch,
+        deliveryMode: "visual_selection_automatic_fallback",
         firstStreamClick,
         autoSelection,
-        visualSelectionHint: {
-          ...(result.visualSelectionHint || {}),
-          instruction: "Stremio was relaunched with autoPlay=true. The plugin then waited for the stream UI and attempted one DPAD_CENTER, but playback was not confirmed. Use home_assistant_tv_observe to inspect the current focus before another keypress."
-        }
+        playbackRequested: true
       };
     }
 
-    const { visualSelectionHint, ...rest } = result;
     return {
-      ...rest,
+      content,
+      preferences,
+      ...summary,
+      directLookupError,
+      nativeFallback,
       launch,
-      deliveryMode: "visual_selection_automatic_fallback",
+      deliveryMode: "stremio_native_stream_list_unconfirmed",
       firstStreamClick,
       autoSelection,
-      playbackRequested: true
+      playbackRequested: true,
+      visualSelectionHint: {
+        addonName: summary.selected?.addonName || null,
+        name: summary.selected?.name || null,
+        title: summary.selected?.title || null,
+        quality: summary.selected?.quality || null,
+        languages: summary.selected?.languages || [],
+        instruction: selection.selected
+          ? "Stremio is open with its native stream list. The automatic OK was not confirmed; inspect the current focus before another keypress."
+          : "The direct addon query returned no streams, but Stremio was opened anyway so its installed addons can load normally. Inspect the native stream list before another keypress."
+      }
     };
   }
 }
