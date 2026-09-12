@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "id": "home-assistant",
   "name": "Home Assistant",
-  "version": "0.3.12",
-  "description": "Home Assistant bridge for SOL with Stream Bridge-compatible Stremio transport, graceful exact-selector fallback and screenshot-independent playback verification.",
+  "version": "0.3.13",
+  "description": "Home Assistant bridge for SOL with Stream Bridge-compatible Stremio transport, native Play Store playback, Android TV Satellite assistance and screenshot-independent playback verification.",
   "runtime": "node",
   "entry": "index.mjs",
   "args": [],
@@ -334,56 +334,12 @@
     },
     {
       "key": "stremio_auto_select_stream",
-      "label": "Matcher visual de stream (fallback)",
+      "label": "Matcher visual de stream preferido",
       "type": "boolean",
-      "description": "Sólo si falla el OK vía Home Assistant y existe una selección directa, usa Android TV Satellite para intentar localizar ese stream por texto.",
+      "description": "Si SOL obtiene un stream rankeado y Android TV Satellite puede identificarlo por texto en la lista nativa de Stremio, intenta seleccionarlo visualmente. Si no, usa el primer stream nativo.",
       "env": "HA_SOL_STREMIO_AUTOSELECT_STREAM",
       "required": false,
       "default": true
-    },
-    {
-      "key": "stremio_proxy_enabled",
-      "label": "SOL Stream Selector proxy",
-      "type": "boolean",
-      "description": "Sirve un addon selector local. Para instalarlo en el Stremio del TV debe publicarse mediante HTTPS confiable con un reverse proxy/túnel.",
-      "env": "HA_SOL_STREMIO_PROXY_ENABLED",
-      "required": false,
-      "default": false
-    },
-    {
-      "key": "stremio_proxy_port",
-      "label": "Puerto local Stream Selector",
-      "type": "number",
-      "env": "HA_SOL_STREMIO_PROXY_PORT",
-      "required": false,
-      "default": 8770,
-      "min": 1024,
-      "max": 65535
-    },
-    {
-      "key": "stremio_proxy_public_url",
-      "label": "Origen HTTPS público del selector",
-      "type": "text",
-      "description": "Origen HTTPS que reverse-proxea al puerto local, por ejemplo https://stremio-sol.example.com. Debe ser sólo origen, sin path.",
-      "env": "HA_SOL_STREMIO_PROXY_PUBLIC_URL",
-      "required": false
-    },
-    {
-      "key": "stremio_proxy_token",
-      "label": "Token secreto Stream Selector",
-      "type": "secret",
-      "description": "Token estable de 12+ caracteres usado en la ruta del addon selector; evita exponer un endpoint público predecible.",
-      "env": "HA_SOL_STREMIO_PROXY_TOKEN",
-      "required": false
-    },
-    {
-      "key": "stremio_proxy_use_for_play",
-      "label": "Usar selector exacto al reproducir",
-      "type": "boolean",
-      "description": "Si el selector no está realmente listo (por ejemplo falta URL HTTPS pública/token), play_best cae automáticamente al flujo nativo en vez de abortar la reproducción.",
-      "env": "HA_SOL_STREMIO_PROXY_USE_FOR_PLAY",
-      "required": false,
-      "default": false
     }
   ],
   "distribution": {
