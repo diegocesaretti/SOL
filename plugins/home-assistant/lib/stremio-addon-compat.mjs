@@ -1,7 +1,13 @@
 import { addonSupportsStream } from "./stremio-addons.mjs";
 
+const TRANSIENT_HTTP = new Set([408, 425, 429, 500, 502, 503, 504]);
+
 function clean(value) {
   return String(value ?? "").trim();
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function declaredResources(manifest) {
@@ -15,11 +21,26 @@ function declaresStream(manifest) {
 }
 
 function streamKey(stream) {
+  if (typeof stream?.infoHash === "string" && stream.infoHash) {
+    return `torrent:${stream.infoHash.toLowerCase()}:${Number(stream.fileIdx ?? -1)}`;
+  }
   if (typeof stream?.url === "string" && stream.url) return `url:${stream.url}`;
-  if (typeof stream?.infoHash === "string" && stream.infoHash) return `torrent:${stream.infoHash.toLowerCase()}:${Number(stream.fileIdx ?? -1)}`;
   if (typeof stream?.externalUrl === "string" && stream.externalUrl) return `external:${stream.externalUrl}`;
   if (typeof stream?.ytId === "string" && stream.ytId) return `youtube:${stream.ytId}`;
-  return `json:${JSON.stringify(stream)}`;
+  return `text:${[stream?.name, stream?.title, stream?.description].map((value) => String(value || "")).join("|")}`;
+}
+
+function profileMode(manifestUrl) {
+  try {
+    const url = new URL(manifestUrl);
+    const parts = url.pathname.split("/").filter(Boolean);
+    const marker = parts.at(-1) === "manifest.json" ? parts.at(-2) || "" : "";
+    if (marker.startsWith("D-")) return "anonymous_config";
+    if (marker.startsWith("U-")) return "user_profile";
+    return "public_or_path_config";
+  } catch {
+    return "unknown";
+  }
 }
 
 function resourceUrl(manifestUrl, mediaType, mediaId, { rawColons = false } = {}) {
@@ -35,20 +56,91 @@ function resourceUrl(manifestUrl, mediaType, mediaId, { rawColons = false } = {}
   return url.toString();
 }
 
-async function fetchStreams(url, timeoutMs) {
-  const response = await fetch(url, {
-    headers: { accept: "application/json" },
-    redirect: "follow",
-    signal: AbortSignal.timeout(timeoutMs)
-  });
-  if (!response.ok) throw new Error(`stremio_addon_http_${response.status}`);
-  const payload = await response.json();
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error("stremio_addon_invalid_json");
-  if (!Array.isArray(payload.streams)) throw new Error("stremio_addon_streams_invalid");
-  return payload.streams.filter((stream) => stream && typeof stream === "object" && !Array.isArray(stream));
+function requestError(error) {
+  if (error?.name === "TimeoutError" || error?.name === "AbortError") return "stremio_addon_timeout";
+  return error?.message || String(error);
 }
 
-async function requestProvider(addon, mediaType, mediaId, timeoutMs) {
+async function fetchStreamsOnce(url, timeoutMs) {
+  const started = Date.now();
+  let response;
+  try {
+    response = await fetch(url, {
+      headers: {
+        accept: "application/json, text/plain;q=0.9, */*;q=0.1",
+        "user-agent": "SOL-Stremio-Bridge/1"
+      },
+      redirect: "follow",
+      signal: AbortSignal.timeout(timeoutMs)
+    });
+  } catch (error) {
+    return {
+      ok: false,
+      transient: true,
+      elapsedMs: Date.now() - started,
+      error: requestError(error)
+    };
+  }
+
+  const status = response.status;
+  const elapsedMs = Date.now() - started;
+  const text = await response.text().catch(() => "");
+  if (!response.ok) {
+    return {
+      ok: false,
+      transient: TRANSIENT_HTTP.has(status),
+      status,
+      elapsedMs,
+      error: `stremio_addon_http_${status}`
+    };
+  }
+
+  let payload;
+  try {
+    payload = text ? JSON.parse(text) : null;
+  } catch {
+    return { ok: false, transient: false, status, elapsedMs, error: "stremio_addon_invalid_json" };
+  }
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return { ok: false, transient: false, status, elapsedMs, error: "stremio_addon_invalid_json" };
+  }
+  if (!Array.isArray(payload.streams)) {
+    return { ok: false, transient: false, status, elapsedMs, error: "stremio_addon_streams_invalid" };
+  }
+
+  return {
+    ok: true,
+    transient: false,
+    status,
+    elapsedMs,
+    streams: payload.streams.filter((stream) => stream && typeof stream === "object" && !Array.isArray(stream))
+  };
+}
+
+async function fetchStreams(url, timeoutMs, retries = 1) {
+  const attempts = [];
+  for (let retry = 0; retry <= retries; retry += 1) {
+    const result = await fetchStreamsOnce(url, timeoutMs);
+    attempts.push(result);
+    if (result.ok || !result.transient || retry >= retries) return { ...result, networkAttempts: attempts.length };
+    await sleep(Math.min(800, 200 * (retry + 1)));
+  }
+  return { ok: false, error: "stremio_addon_request_failed", networkAttempts: attempts.length };
+}
+
+function safeAttempt(variant, result) {
+  return {
+    variant,
+    ok: Boolean(result.ok),
+    status: result.status ?? null,
+    elapsedMs: result.elapsedMs ?? null,
+    networkAttempts: result.networkAttempts || 1,
+    count: result.ok ? result.streams.length : 0,
+    error: result.ok ? null : result.error || "stremio_addon_request_failed"
+  };
+}
+
+async function requestProvider(addon, mediaType, mediaId, timeoutMs, retries = 1) {
   const manifestCompatible = addonSupportsStream(addon.manifest, mediaType, mediaId);
   const attempts = [];
   const variants = [{ rawColons: false, label: "encoded_id" }];
@@ -57,30 +149,48 @@ async function requestProvider(addon, mediaType, mediaId, timeoutMs) {
   let firstError = null;
   for (const variant of variants) {
     const url = resourceUrl(addon.manifestUrl, mediaType, mediaId, variant);
-    try {
-      const streams = await fetchStreams(url, timeoutMs);
-      attempts.push({ variant: variant.label, ok: true, count: streams.length });
-      if (streams.length > 0) {
-        return { streams, manifestCompatible, attempts, error: null };
-      }
-    } catch (error) {
-      const message = error?.message || String(error);
-      attempts.push({ variant: variant.label, ok: false, error: message });
-      firstError ||= message;
+    const result = await fetchStreams(url, timeoutMs, retries);
+    attempts.push(safeAttempt(variant.label, result));
+    if (result.ok && result.streams.length > 0) {
+      return {
+        streams: result.streams,
+        manifestCompatible,
+        profileMode: profileMode(addon.manifestUrl),
+        attempts,
+        error: null
+      };
     }
+    if (!result.ok) firstError ||= result.error;
   }
 
   return {
     streams: [],
     manifestCompatible,
+    profileMode: profileMode(addon.manifestUrl),
     attempts,
     error: firstError
   };
 }
 
-export function installStremioAddonCompatibilityPatch(aggregator) {
+export function installStremioAddonCompatibilityPatch(aggregator, { retries = 1 } = {}) {
   if (!aggregator || aggregator.__solCompatPatched) return aggregator;
   aggregator.__solCompatPatched = true;
+  aggregator.addonRetries = Math.max(0, Math.min(3, Number(retries) || 0));
+
+  const originalStatus = aggregator.status.bind(aggregator);
+  aggregator.status = async function statusCompat(options = {}) {
+    const status = await originalStatus(options);
+    return {
+      ...status,
+      requestTimeoutMs: this.timeoutMs,
+      retryCount: this.addonRetries,
+      protocolMode: "stream_bridge_compatible",
+      addons: (status.addons || []).map((item, index) => ({
+        ...item,
+        profileMode: this.addons[index] ? profileMode(this.addons[index].manifestUrl) : "unknown"
+      }))
+    };
+  };
 
   aggregator.getStreams = async function getStreamsCompat(mediaType, mediaId, { provider = null } = {}) {
     await this.refresh();
@@ -94,7 +204,8 @@ export function installStremioAddonCompatibilityPatch(aggregator) {
       addon,
       mediaType,
       mediaId,
-      this.timeoutMs
+      this.timeoutMs,
+      this.addonRetries
     )));
 
     const merged = [];
@@ -105,9 +216,17 @@ export function installStremioAddonCompatibilityPatch(aggregator) {
     results.forEach((result, addonIndex) => {
       const addon = candidates[addonIndex];
       if (result.status === "rejected") {
-        const message = result.reason?.message || String(result.reason);
+        const message = requestError(result.reason);
         errors.push({ addonName: addon.name, error: message });
-        providers.push({ id: addon.id, name: addon.name, manifestCompatible: null, streamCount: 0, attempts: [] });
+        providers.push({
+          id: addon.id,
+          name: addon.name,
+          version: addon.version,
+          profileMode: profileMode(addon.manifestUrl),
+          manifestCompatible: null,
+          streamCount: 0,
+          attempts: []
+        });
         return;
       }
 
@@ -115,6 +234,8 @@ export function installStremioAddonCompatibilityPatch(aggregator) {
       providers.push({
         id: addon.id,
         name: addon.name,
+        version: addon.version,
+        profileMode: diagnostic.profileMode,
         manifestCompatible: diagnostic.manifestCompatible,
         streamCount: diagnostic.streams.length,
         attempts: diagnostic.attempts
@@ -124,6 +245,7 @@ export function installStremioAddonCompatibilityPatch(aggregator) {
         errors.push({
           addonName: addon.name,
           error: diagnostic.error || "stremio_addon_zero_streams",
+          profileMode: diagnostic.profileMode,
           manifestCompatible: diagnostic.manifestCompatible,
           attempts: diagnostic.attempts
         });
@@ -143,4 +265,11 @@ export function installStremioAddonCompatibilityPatch(aggregator) {
   return aggregator;
 }
 
-export const __test = { resourceUrl, requestProvider, declaresStream };
+export const __test = {
+  resourceUrl,
+  requestProvider,
+  declaresStream,
+  profileMode,
+  fetchStreamsOnce,
+  streamKey
+};
