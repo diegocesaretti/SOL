@@ -1,4 +1,5 @@
 import { SolPluginClient, STREMIO_MCP_TOOLS } from "./lib/sol-client.mjs";
+import { installHomeAssistantOnlyTvControl } from "./lib/ha-only-tv.mjs";
 import { installStremioStableClick } from "./lib/stremio-stable-click.mjs";
 import { installStremioLaunchGuard } from "./lib/stremio-launch-guard.mjs";
 import { installStremioSmartPlayback } from "./lib/stremio-smart-playback.mjs";
@@ -12,6 +13,7 @@ process.env.HA_SOL_TV_ENABLED = "false";
 process.env.HA_SOL_STREMIO_CENTER_TRANSPORT = "home_assistant";
 process.env.HA_SOL_STREMIO_AUTOSELECT_STREAM = "false";
 
+installHomeAssistantOnlyTvControl(SolPluginClient);
 installStremioStableClick(SolPluginClient);
 installStremioLaunchGuard(SolPluginClient);
 installStremioSmartPlayback(SolPluginClient, STREMIO_MCP_TOOLS);
