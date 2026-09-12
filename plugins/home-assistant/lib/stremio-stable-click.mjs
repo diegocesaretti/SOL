@@ -309,6 +309,15 @@ export function installStremioStableClick(SolPluginClient) {
 
     const cfg = settings(this);
     const center = await sendCenter(this, cfg.centerTransport);
+    this.__stremioDebugEvent?.("center_transport", {
+      requested: cfg.centerTransport,
+      ok: center?.ok === true,
+      via: center?.via || null,
+      reason: center?.reason || null,
+      fallback: center?.fallback || center?.satelliteResult?.fallback || null,
+      satelliteVia: center?.satelliteResult?.via || null
+    });
+
     if (!center.ok) {
       return {
         ok: false,
