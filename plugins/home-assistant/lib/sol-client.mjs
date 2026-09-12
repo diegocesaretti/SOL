@@ -3,6 +3,7 @@ import {
   SolPluginClient as CoreSolPluginClient
 } from "./sol-client-core.mjs";
 import { detailDeepLink } from "./stremio.mjs";
+import { installStremioAddonCompatibilityPatch } from "./stremio-addon-compat.mjs";
 
 export { STREMIO_MCP_TOOLS };
 
@@ -94,6 +95,7 @@ function classifyStremioObservation(observation) {
 export class SolPluginClient extends CoreSolPluginClient {
   constructor(env = process.env) {
     super(env);
+    installStremioAddonCompatibilityPatch(this.addonAggregator);
     this.stremioAutoPlayFirstStream = boolEnv(env, "HA_SOL_STREMIO_AUTOPLAY_FIRST_STREAM", true);
     this.stremioFirstStreamDelayMs = numberEnv(env, "HA_SOL_STREMIO_FIRST_STREAM_DELAY_MS", 3500, 500, 15000);
     this.stremioAutoSelectStream = boolEnv(env, "HA_SOL_STREMIO_AUTOSELECT_STREAM", true);
@@ -106,6 +108,12 @@ export class SolPluginClient extends CoreSolPluginClient {
   stremioStatus() {
     return {
       ...super.stremioStatus(),
+      addonCompatibility: {
+        tolerantManifestFiltering: true,
+        encodedEpisodeIds: true,
+        rawColonFallback: true,
+        preservesManifestQuery: true
+      },
       firstStreamAutoPlay: {
         enabled: this.stremioAutoPlayFirstStream,
         configured: Boolean(this.stremioRemoteEntityId),
