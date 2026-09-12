@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "id": "home-assistant",
   "name": "Home Assistant",
-  "version": "0.3.5",
-  "description": "Home Assistant bridge for SOL with persistent state cache, optimized Android TV computer-use control and standard Play Store Stremio deep-link control with Cinemeta title/episode resolution.",
+  "version": "0.3.6",
+  "description": "Home Assistant bridge for SOL with persistent state cache, optimized Android TV computer-use control, standard Play Store Stremio deep links, addon stream aggregation/ranking and an optional HTTPS SOL Stream Selector proxy for exact stream delivery.",
   "runtime": "node",
   "entry": "index.mjs",
   "args": [],
@@ -167,7 +167,7 @@
       "key": "stremio_deeplinks_enabled",
       "label": "Control Stremio por deep links",
       "type": "boolean",
-      "description": "Agrega herramientas Stremio al mismo plugin usando únicamente el protocolo stremio:// del Stremio estándar del Play Store.",
+      "description": "Agrega herramientas Stremio al mismo plugin usando el protocolo stremio:// del Stremio estándar del Play Store.",
       "env": "HA_SOL_STREMIO_ENABLED",
       "required": false,
       "default": true
@@ -184,7 +184,7 @@
       "key": "stremio_request_timeout_ms",
       "label": "Timeout de resolución Stremio (ms)",
       "type": "number",
-      "description": "Timeout para búsquedas y metadata en Cinemeta y para el lanzamiento vía Home Assistant.",
+      "description": "Timeout para Cinemeta, addons Stremio y lanzamiento vía Home Assistant.",
       "env": "HA_SOL_STREMIO_TIMEOUT_MS",
       "required": false,
       "default": 8000,
@@ -195,10 +195,133 @@
       "key": "stremio_autoplay_default",
       "label": "Solicitar autoPlay por defecto",
       "type": "boolean",
-      "description": "Agrega autoPlay=true al deep link cuando existe un videoId. En Android TV es best-effort y no permite elegir un stream exacto.",
+      "description": "Agrega autoPlay=true cuando existe un videoId. En el modo selector proxy, Stremio recibe un solo stream seleccionado.",
       "env": "HA_SOL_STREMIO_AUTOPLAY",
       "required": false,
       "default": true
+    },
+    {
+      "key": "stremio_addon_manifests",
+      "label": "Addons Stremio para streams",
+      "type": "secret",
+      "description": "Manifest URLs de addons a consultar. Separar con punto y coma o saltos de línea; también acepta un array JSON. Se guarda como secreto porque algunos addons incluyen credenciales/configuración en la URL.",
+      "env": "HA_SOL_STREMIO_ADDONS",
+      "required": false
+    },
+    {
+      "key": "stremio_default_quality",
+      "label": "Calidad Stremio preferida",
+      "type": "select",
+      "env": "HA_SOL_STREMIO_DEFAULT_QUALITY",
+      "required": false,
+      "default": "1080p",
+      "options": [
+        { "value": "auto", "label": "Automática" },
+        { "value": "4k", "label": "4K / 2160p" },
+        { "value": "1080p", "label": "1080p" },
+        { "value": "720p", "label": "720p" },
+        { "value": "480p", "label": "480p" }
+      ]
+    },
+    {
+      "key": "stremio_default_language",
+      "label": "Idioma Stremio preferido",
+      "type": "select",
+      "description": "Preferencia inferida desde nombres/descripciones de streams; no modifica pistas de audio dentro del archivo.",
+      "env": "HA_SOL_STREMIO_DEFAULT_LANGUAGE",
+      "required": false,
+      "default": "any",
+      "options": [
+        { "value": "any", "label": "Cualquiera" },
+        { "value": "latin", "label": "Latino" },
+        { "value": "spanish", "label": "Español" },
+        { "value": "english", "label": "Inglés" }
+      ]
+    },
+    {
+      "key": "stremio_default_codec",
+      "label": "Codec Stremio preferido",
+      "type": "select",
+      "env": "HA_SOL_STREMIO_DEFAULT_CODEC",
+      "required": false,
+      "default": "any",
+      "options": [
+        { "value": "any", "label": "Cualquiera" },
+        { "value": "h264", "label": "H.264 / AVC" },
+        { "value": "h265", "label": "H.265 / HEVC" },
+        { "value": "av1", "label": "AV1" }
+      ]
+    },
+    {
+      "key": "stremio_max_size_gb",
+      "label": "Tamaño máximo preferido (GiB)",
+      "type": "number",
+      "description": "Límite blando para ranking; 0 significa sin límite.",
+      "env": "HA_SOL_STREMIO_MAX_SIZE_GB",
+      "required": false,
+      "default": 0,
+      "min": 0,
+      "max": 500
+    },
+    {
+      "key": "stremio_prefer_hdr",
+      "label": "Preferir HDR",
+      "type": "boolean",
+      "env": "HA_SOL_STREMIO_PREFER_HDR",
+      "required": false,
+      "default": false
+    },
+    {
+      "key": "stremio_prefer_dv",
+      "label": "Preferir Dolby Vision",
+      "type": "boolean",
+      "env": "HA_SOL_STREMIO_PREFER_DV",
+      "required": false,
+      "default": false
+    },
+    {
+      "key": "stremio_proxy_enabled",
+      "label": "SOL Stream Selector proxy",
+      "type": "boolean",
+      "description": "Sirve un addon selector local. Para instalarlo en el Stremio del TV debe publicarse mediante HTTPS confiable con un reverse proxy/túnel.",
+      "env": "HA_SOL_STREMIO_PROXY_ENABLED",
+      "required": false,
+      "default": false
+    },
+    {
+      "key": "stremio_proxy_port",
+      "label": "Puerto local Stream Selector",
+      "type": "number",
+      "env": "HA_SOL_STREMIO_PROXY_PORT",
+      "required": false,
+      "default": 8770,
+      "min": 1024,
+      "max": 65535
+    },
+    {
+      "key": "stremio_proxy_public_url",
+      "label": "Origen HTTPS público del selector",
+      "type": "text",
+      "description": "Origen HTTPS que reverse-proxea al puerto local, por ejemplo https://stremio-sol.example.com. Debe ser sólo origen, sin path.",
+      "env": "HA_SOL_STREMIO_PROXY_PUBLIC_URL",
+      "required": false
+    },
+    {
+      "key": "stremio_proxy_token",
+      "label": "Token secreto Stream Selector",
+      "type": "secret",
+      "description": "Token estable de 12+ caracteres usado en la ruta del addon selector; evita exponer un endpoint público predecible.",
+      "env": "HA_SOL_STREMIO_PROXY_TOKEN",
+      "required": false
+    },
+    {
+      "key": "stremio_proxy_use_for_play",
+      "label": "Usar selector exacto al reproducir",
+      "type": "boolean",
+      "description": "Activalo después de instalar SOL Stream Selector en Stremio. Hace que play_best use IDs sol: y entregue únicamente el stream rankeado.",
+      "env": "HA_SOL_STREMIO_PROXY_USE_FOR_PLAY",
+      "required": false,
+      "default": false
     }
   ],
   "distribution": {
