@@ -2,6 +2,7 @@ import {
   STREMIO_MCP_TOOLS,
   SolPluginClient as CoreSolPluginClient
 } from "./sol-client-core.mjs";
+import { detailDeepLink } from "./stremio.mjs";
 
 export { STREMIO_MCP_TOOLS };
 
@@ -57,11 +58,44 @@ async function responsePayload(response) {
   return { text: (await response.text().catch(() => "")).slice(0, 500) };
 }
 
+function collectUiText(node, out = [], depth = 0) {
+  if (!node || typeof node !== "object" || depth > 9 || out.length > 500) return out;
+  for (const key of ["text", "description", "class", "view_id", "resource_id"]) {
+    if (node[key]) out.push(String(node[key]));
+  }
+  if (Array.isArray(node.children)) {
+    for (const child of node.children) collectUiText(child, out, depth + 1);
+  }
+  return out;
+}
+
+function classifyStremioObservation(observation) {
+  const values = collectUiText(observation?.tree || observation?.root || null);
+  const focus = observation?.focus_hint || observation?.focused || null;
+  for (const key of ["text", "description", "class", "view_id"]) {
+    if (focus?.[key]) values.push(String(focus[key]));
+  }
+  const text = values.join(" ").toLowerCase();
+  const pkg = String(observation?.package || observation?.package_name || "").toLowerCase();
+  const loading = /\b(loading|cargando|please wait|espere|progressbar|progress bar)\b/i.test(text);
+  const streamLike = /\b(2160p?|1080p?|720p?|576p?|480p?|4k|uhd|remux|blu[ -]?ray|web[ ._-]?dl|webrip|torrent|seed(?:er)?s?|debrid|cached|\d+(?:[.,]\d+)?\s*(?:gb|mb))\b/i.test(text);
+  const playerLike = /\b(pause|pausa|subtitles?|subt[ií]tulos|audio track|pista de audio|playback speed|velocidad de reproducci[oó]n)\b/i.test(text);
+  const stremio = pkg.includes("stremio") || text.includes("stremio");
+  return {
+    stremio,
+    loading,
+    streamLike,
+    playerLike,
+    focusText: focus?.text || focus?.description || null,
+    uiEventSequence: observation?.ui_event_sequence ?? null
+  };
+}
+
 export class SolPluginClient extends CoreSolPluginClient {
   constructor(env = process.env) {
     super(env);
     this.stremioAutoPlayFirstStream = boolEnv(env, "HA_SOL_STREMIO_AUTOPLAY_FIRST_STREAM", true);
-    this.stremioFirstStreamDelayMs = numberEnv(env, "HA_SOL_STREMIO_FIRST_STREAM_DELAY_MS", 1800, 250, 10000);
+    this.stremioFirstStreamDelayMs = numberEnv(env, "HA_SOL_STREMIO_FIRST_STREAM_DELAY_MS", 3500, 500, 15000);
     this.stremioAutoSelectStream = boolEnv(env, "HA_SOL_STREMIO_AUTOSELECT_STREAM", true);
     this.stremioTvEnabled = boolEnv(env, "HA_SOL_TV_ENABLED", false);
     this.stremioTvUrl = normalizeTvUrl(env.HA_SOL_TV_URL || "");
@@ -76,7 +110,10 @@ export class SolPluginClient extends CoreSolPluginClient {
         enabled: this.stremioAutoPlayFirstStream,
         configured: Boolean(this.stremioRemoteEntityId),
         delayMs: this.stremioFirstStreamDelayMs,
-        transport: "Home Assistant remote.send_command DPAD_CENTER"
+        transport: "Home Assistant remote.send_command DPAD_CENTER",
+        readiness: this.stremioTvEnabled && this.stremioTvUrl
+          ? "Android TV Satellite waits for the stream list before sending OK"
+          : "fixed fallback delay"
       },
       visualAutoSelect: {
         enabled: this.stremioAutoSelectStream,
@@ -88,11 +125,70 @@ export class SolPluginClient extends CoreSolPluginClient {
     };
   }
 
+  async tvObserveRaw(waitMs = 0) {
+    if (!this.stremioTvEnabled || !this.stremioTvUrl) return null;
+    const url = new URL(`${this.stremioTvUrl}/observe`);
+    if (waitMs > 0) url.searchParams.set("wait_ms", String(Math.min(1500, Math.max(0, Math.trunc(waitMs)))));
+    try {
+      const response = await fetch(url, {
+        method: "GET",
+        signal: AbortSignal.timeout(Math.max(this.stremioTvTimeoutMs, waitMs + 1500))
+      });
+      if (!response.ok) return null;
+      return await response.json().catch(() => null);
+    } catch {
+      return null;
+    }
+  }
+
+  async waitForStreamUi() {
+    if (!this.stremioTvEnabled || !this.stremioTvUrl) {
+      await sleep(this.stremioFirstStreamDelayMs);
+      return { ready: true, via: "fixed_delay", waitedMs: this.stremioFirstStreamDelayMs };
+    }
+
+    const started = Date.now();
+    const timeoutMs = Math.max(this.stremioFirstStreamDelayMs, 6500);
+    let last = null;
+    await sleep(500);
+
+    while (Date.now() - started < timeoutMs) {
+      const observation = await this.tvObserveRaw(650);
+      if (observation) {
+        last = classifyStremioObservation(observation);
+        if (last.playerLike) {
+          return { ready: false, alreadyPlaying: true, via: "tv_satellite", waitedMs: Date.now() - started, state: last };
+        }
+        if (last.stremio && !last.loading && last.streamLike) {
+          return { ready: true, via: "tv_satellite", waitedMs: Date.now() - started, state: last };
+        }
+      }
+      await sleep(250);
+    }
+
+    return {
+      ready: true,
+      via: "tv_satellite_timeout_fallback",
+      waitedMs: Date.now() - started,
+      state: last,
+      note: "Accessibility did not expose an unmistakable stream row; sending one OK after the bounded wait."
+    };
+  }
+
   async clickFirstStream() {
     if (!this.stremioAutoPlayFirstStream) return { ok: false, reason: "stremio_first_stream_autoplay_disabled" };
     if (!this.stremioRemoteEntityId) return { ok: false, reason: "stremio_remote_entity_id_required" };
 
-    await sleep(this.stremioFirstStreamDelayMs);
+    const readiness = await this.waitForStreamUi();
+    if (readiness.alreadyPlaying) {
+      return {
+        ok: true,
+        skipped: true,
+        reason: "stremio_player_already_visible",
+        readiness
+      };
+    }
+
     try {
       const result = await this.haService("remote", "send_command", {
         entity_id: this.stremioRemoteEntityId,
@@ -104,14 +200,14 @@ export class SolPluginClient extends CoreSolPluginClient {
         service: "remote.send_command",
         remoteEntityId: this.stremioRemoteEntityId,
         command: "DPAD_CENTER",
-        delayMs: this.stremioFirstStreamDelayMs,
+        readiness,
         result
       };
     } catch (error) {
       return {
         ok: false,
         reason: error?.message || String(error),
-        delayMs: this.stremioFirstStreamDelayMs
+        readiness
       };
     }
   }
@@ -209,12 +305,24 @@ export class SolPluginClient extends CoreSolPluginClient {
     if (tool !== "home_assistant_stremio_play_best") return result;
     if (result?.deliveryMode !== "visual_selection_required") return result;
 
+    const content = result.content || {};
+    const autoPlayLink = detailDeepLink({
+      type: content.type,
+      id: content.id,
+      videoId: content.videoId || content.id,
+      autoPlay: true
+    });
+    const launch = result?.launch?.deepLink === autoPlayLink
+      ? result.launch
+      : await this.launchStremio(autoPlayLink);
+
     const firstStreamClick = await this.clickFirstStream();
     if (firstStreamClick.ok) {
       const { visualSelectionHint, ...rest } = result;
       return {
         ...rest,
-        deliveryMode: "first_stream_center_click",
+        launch,
+        deliveryMode: firstStreamClick.skipped ? "stremio_autoplay_started" : "first_stream_center_click",
         firstStreamClick,
         playbackRequested: true
       };
@@ -224,11 +332,12 @@ export class SolPluginClient extends CoreSolPluginClient {
     if (!autoSelection.ok) {
       return {
         ...result,
+        launch,
         firstStreamClick,
         autoSelection,
         visualSelectionHint: {
           ...(result.visualSelectionHint || {}),
-          instruction: "The automatic DPAD_CENTER attempt failed and the ranked stream could not be matched by Accessibility. Use home_assistant_tv_observe and select the first visible stream manually."
+          instruction: "Stremio was relaunched with autoPlay=true. The plugin then waited for the stream UI and attempted one DPAD_CENTER, but playback was not confirmed. Use home_assistant_tv_observe to inspect the current focus before another keypress."
         }
       };
     }
@@ -236,6 +345,7 @@ export class SolPluginClient extends CoreSolPluginClient {
     const { visualSelectionHint, ...rest } = result;
     return {
       ...rest,
+      launch,
       deliveryMode: "visual_selection_automatic_fallback",
       firstStreamClick,
       autoSelection,
