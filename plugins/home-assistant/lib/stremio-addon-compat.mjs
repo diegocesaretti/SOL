@@ -3,6 +3,7 @@ import {
   STREMIO_MCP_TOOLS as CORE_STREMIO_MCP_TOOLS,
   SolPluginClient as CoreSolPluginClient
 } from "./sol-client-core.mjs";
+import { StremioSelectorProxy } from "./stremio-proxy.mjs";
 
 const TRANSIENT_HTTP = new Set([408, 425, 429, 500, 502, 503, 504]);
 const SIZE_RE = /(?<!\d)(\d+(?:[.,]\d+)?)\s*(TiB|TB|GiB|GB|MiB|MB)\b/i;
@@ -57,6 +58,30 @@ function applyNativeOnlyPolicy() {
       };
     };
     CoreSolPluginClient.prototype.__solNativeOnlyStatusPatched = true;
+  }
+
+  if (!StremioSelectorProxy.prototype.__solRetired) {
+    StremioSelectorProxy.prototype.status = function retiredSelectorStatus() {
+      return {
+        enabled: false,
+        started: false,
+        readyForInstall: false,
+        publicOrigin: null,
+        manifestUrl: null,
+        installDeepLink: null,
+        activeSessions: 0,
+        retired: true,
+        requirement: null
+      };
+    };
+    StremioSelectorProxy.prototype.ensureStarted = async function retiredSelectorStart() {
+      return this.status();
+    };
+    Object.defineProperty(StremioSelectorProxy.prototype, "readyForInstall", {
+      configurable: true,
+      get() { return false; }
+    });
+    StremioSelectorProxy.prototype.__solRetired = true;
   }
 }
 
