@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "id": "home-assistant",
   "name": "Home Assistant",
-  "version": "0.3.11",
-  "description": "Home Assistant bridge for SOL with Stream Bridge-compatible Stremio addon transport, resilient native playback fallback, Android TV control, addon ranking and UI-aware first-stream autoplay.",
+  "version": "0.3.12",
+  "description": "Home Assistant bridge for SOL with Stream Bridge-compatible Stremio transport, graceful exact-selector fallback and screenshot-independent playback verification.",
   "runtime": "node",
   "entry": "index.mjs",
   "args": [],
@@ -322,6 +322,17 @@
       "max": 15000
     },
     {
+      "key": "stremio_playback_verify_ms",
+      "label": "Ventana de verificación de reproducción (ms)",
+      "type": "number",
+      "description": "Después del autoplay/OK, observa Accessibility del TV Satellite para detectar controles del reproductor. Una captura negra no se considera fallo porque el video puede renderizarse en una Surface protegida.",
+      "env": "HA_SOL_STREMIO_PLAYBACK_VERIFY_MS",
+      "required": false,
+      "default": 4000,
+      "min": 500,
+      "max": 15000
+    },
+    {
       "key": "stremio_auto_select_stream",
       "label": "Matcher visual de stream (fallback)",
       "type": "boolean",
@@ -369,7 +380,7 @@
       "key": "stremio_proxy_use_for_play",
       "label": "Usar selector exacto al reproducir",
       "type": "boolean",
-      "description": "Activalo después de instalar SOL Stream Selector en Stremio. Si no hay selección directa disponible, play_best cae al flujo nativo de Stremio en vez de abortar.",
+      "description": "Si el selector no está realmente listo (por ejemplo falta URL HTTPS pública/token), play_best cae automáticamente al flujo nativo en vez de abortar la reproducción.",
       "env": "HA_SOL_STREMIO_PROXY_USE_FOR_PLAY",
       "required": false,
       "default": false
