@@ -1,21 +1,49 @@
 # Home Assistant · SOL plugin
 
-Native SOL plugin for Home Assistant. It keeps an event-driven local mirror of Home Assistant state, adds optional computer-use control for Android TV, and from **0.3.5** adds a Stremio deep-link layer compatible with the **standard Stremio Android TV app from Google Play**.
+Native SOL plugin for Home Assistant. It keeps an event-driven local mirror of Home Assistant state, adds optional computer-use control for Android TV, and includes Stremio integration compatible with the **standard Stremio Android TV app from Google Play**.
 
-## Stremio 0.3.5
+## Stremio 0.3.6
 
-Stremio itself is not modified, repackaged or replaced. SOL launches documented `stremio://` deep links through Home Assistant's Android TV Remote integration:
+0.3.6 extends the 0.3.5 deep-link layer with native support for the Stremio addon protocol. SOL can now query user-configured addon manifests, request their `stream` resources, merge/deduplicate the results and rank them before opening Stremio.
 
 ```text
 SOL / Codex
    → HomeAssistant.solplugin
-      → remote.turn_on(activity="stremio:///...")
-         → standard Stremio app
+      → Cinemeta title/episode resolution
+      → configured Stremio addons
+         → /stream/{type}/{videoId}.json
+      → dedupe + ranking
+      → selected stream
 ```
 
-Pause/play/volume/seek remain Home Assistant media/remote actions. The Stremio layer is responsible for semantic content navigation.
+The standard Stremio app is never modified or repackaged.
 
-### Stremio MCP tools
+### Stream ranking
+
+The selector can infer and rank by:
+
+- 4K / 1080p / 720p / 480p
+- Latino / Español / English labels
+- H.264 / H.265 / AV1
+- file size when advertised in the stream label
+- seeders when advertised
+- cached/debrid hints when advertised
+- HDR / Dolby Vision preferences
+- preferred addon/provider
+- low-quality CAM/TS/Screener penalties
+
+Configured addon manifest URLs are stored as a plugin secret because some addon configurations embed user-specific data in the URL. MCP stream tools return safe summaries and do not expose direct stream URLs or manifest URLs.
+
+### MCP tools added in 0.3.6
+
+- `home_assistant_stremio_addons`
+- `home_assistant_stremio_streams`
+- `home_assistant_stremio_select_stream`
+- `home_assistant_stremio_play_best`
+- `home_assistant_stremio_proxy_status`
+- `home_assistant_stremio_proxy_install`
+
+Existing 0.3.5 tools remain available:
 
 - `home_assistant_stremio_status`
 - `home_assistant_stremio_search`
@@ -29,30 +57,63 @@ Pause/play/volume/seek remain Home Assistant media/remote actions. The Stremio l
 - `home_assistant_stremio_open_addon`
 - `home_assistant_stremio_open_deep_link`
 
-`search`, `resolve` and `play` use Cinemeta to turn natural titles into Stremio/IMDb ids. Series requests can resolve an exact season and episode and construct the corresponding `videoId`. `adjacent_episode` can resolve the next or previous Cinemeta episode.
-
-Examples:
+### Example
 
 ```text
-"Abrí Stremio"
-→ stremio:///board
+"Poneme Breaking Bad temporada 2 capítulo 3 en 1080p latino"
 
-"Buscá Interstellar"
-→ stremio:///search?search=Interstellar
+Cinemeta
+→ tt0903747:2:3
 
-"Poné Breaking Bad temporada 2 episodio 3"
-→ resolve title → tt0903747
-→ videoId tt0903747:2:3
-→ stremio:///detail/series/tt0903747/tt0903747:2:3?autoPlay=true
+Configured addons
+→ provider A: 4K HEVC English
+→ provider A: 1080p H264 Latino
+→ provider B: 1080p English
+
+SOL ranking
+→ 1080p H264 Latino
 ```
 
-### Official deep-link limitation
+## Exact selected-stream delivery: SOL Stream Selector
 
-`autoPlay=true` is best-effort on Android TV. Official Stremio deep links cannot force a specific stream, addon/provider, quality or audio source. If Stremio does not already know a usable stream URL or `bingeGroup`, it may stop at the detail/stream-selection screen. The Android TV Satellite can then be used for visual fallback/verification without modifying Stremio.
+Official Stremio deep links do not accept an arbitrary `stream=`/`infoHash=` parameter. 0.3.6 therefore includes an optional Stremio addon proxy called **SOL Stream Selector**.
 
-## Existing Home Assistant tools
+When enabled, SOL creates temporary `sol:` metadata/video IDs. Stremio requests those IDs from SOL Stream Selector, which returns **only the stream SOL selected**.
 
-State/control:
+```text
+SOL selects stream
+      ↓
+sol:<session>:series:tt0903747:2:3
+      ↓
+Stremio → SOL Stream Selector /stream/...
+      ↓
+one selected stream
+      ↓
+playback
+```
+
+The proxy preserves the upstream stream object (`url`, `infoHash`/`fileIdx`, `ytId`, etc.) and supplies a stable `bingeGroup` when the provider did not supply one.
+
+### HTTPS requirement
+
+Stremio requires remote addon URLs to use trusted HTTPS; the documented HTTP exception is `127.0.0.1`, which on Android TV refers to the TV itself, not the computer running SOL. Therefore the selector binds locally on port `8770` by default, but exact mode must be exposed through a trusted HTTPS reverse proxy/tunnel before installing it in Stremio.
+
+Configure:
+
+- **SOL Stream Selector proxy** = enabled
+- **Puerto local Stream Selector** = normally `8770`
+- **Origen HTTPS público del selector** = e.g. `https://stremio-sol.example.com`
+- **Token secreto Stream Selector** = stable random 12+ character token
+
+Then invoke `home_assistant_stremio_proxy_install` once. Stremio opens its normal addon-install prompt. After installation, enable **Usar selector exacto al reproducir**.
+
+If the HTTPS selector is not configured, `home_assistant_stremio_play_best` still resolves and ranks the best stream, opens the normal Stremio stream-selection page with autoplay disabled, and returns a precise addon/title/quality hint so Android TV Satellite can select the matching visible result.
+
+## Existing Home Assistant + TV architecture
+
+Pause/play/volume/seek remain Home Assistant media/remote actions. Android TV Satellite remains an optional visual fallback/verification layer; it is not required for addon aggregation or exact selector mode.
+
+Home Assistant state/control tools:
 
 - `home_assistant_cache_status`
 - `home_assistant_get_state`
@@ -62,7 +123,7 @@ State/control:
 - `home_assistant_get_services`
 - `home_assistant_call_service`
 
-Optional Android TV Satellite:
+Optional Android TV Satellite tools:
 
 - `home_assistant_tv_status`
 - `home_assistant_tv_observe`
@@ -73,13 +134,3 @@ Optional Android TV Satellite:
 - `home_assistant_tv_launch_app`
 - `home_assistant_tv_navigate`
 - `home_assistant_tv_navigate_path`
-
-## Stremio setup
-
-1. Install the normal Stremio Android TV app from Google Play.
-2. In Home Assistant configure **Android TV Remote** for that TV.
-3. Put its `remote.*` entity in **Remote Android TV para Stremio**. If left blank, the plugin reuses `tv_remote_entity_id`.
-4. Enable **Permitir control desde Codex**.
-5. Keep **Control Stremio por deep links** enabled.
-
-No custom Stremio APK, pairing token or modified package name is required.
