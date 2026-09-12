@@ -94,6 +94,7 @@ function compactPlayResult(result) {
     firstStreamClick: result.firstStreamClick ? {
       ok: result.firstStreamClick.ok === true,
       commandSent: result.firstStreamClick.commandSent ?? null,
+      selectionConfirmed: result.firstStreamClick.selectionConfirmed ?? null,
       reason: result.firstStreamClick.reason ?? null,
       readiness: compactReadiness(result.firstStreamClick.readiness),
       playbackVerification: compactVerification(result.firstStreamClick.playbackVerification)
@@ -227,21 +228,38 @@ export function installStremioDebugging(SolPluginClient, STREMIO_MCP_TOOLS) {
     const verification = result?.playbackVerification;
     const centerWasSent = result?.ok === true && result?.command === "DPAD_CENTER";
     const confirmed = verification?.confirmed === true;
+    const state = verification?.state || result?.readiness?.state || null;
+    const streamListStillVisible = state?.streamLike === true && state?.playerLike !== true;
 
-    // Sending DPAD_CENTER is transport success, not proof that a stream was selected.
-    // If playback remains unverified, allow play_best to continue into the visual matcher.
-    const adjusted = centerWasSent && !confirmed
-      ? {
-          ...result,
-          ok: false,
-          commandSent: true,
-          reason: "stremio_center_sent_but_playback_unverified"
-        }
-      : result;
+    // Sending DPAD_CENTER proves transport only. Continue into visual matching only
+    // when Accessibility actually says the stream list is still on screen. If the
+    // player surface is opaque to Accessibility, keep the result unverified instead
+    // of risking a second click on a playing video.
+    let adjusted = result;
+    if (centerWasSent && confirmed) {
+      adjusted = { ...result, commandSent: true, selectionConfirmed: true };
+    } else if (centerWasSent && streamListStillVisible) {
+      adjusted = {
+        ...result,
+        ok: false,
+        commandSent: true,
+        selectionConfirmed: false,
+        reason: "stremio_center_sent_stream_list_still_visible"
+      };
+    } else if (centerWasSent) {
+      adjusted = {
+        ...result,
+        commandSent: true,
+        selectionConfirmed: null,
+        reason: result?.reason || "stremio_center_sent_playback_unverified"
+      };
+    }
 
     this.__stremioDebugEvent("click_first_stream", {
       ok: adjusted?.ok === true,
       commandSent: adjusted?.commandSent ?? centerWasSent,
+      selectionConfirmed: adjusted?.selectionConfirmed ?? null,
+      streamListStillVisible,
       reason: adjusted?.reason ?? null,
       readiness: compactReadiness(adjusted?.readiness),
       playbackVerification: compactVerification(adjusted?.playbackVerification)
