@@ -91,8 +91,8 @@ test("compat layer falls back from encoded episode id to raw colons when needed"
     const result = await aggregator.getStreams("series", "tt0903747:2:3");
     assert.equal(result.streams.length, 1);
     assert.equal(calls.length, 2);
-    assert.equal(result.providers[0].attempts[0].variant, "encoded_id");
-    assert.equal(result.providers[0].attempts[1].variant, "raw_colons_fallback");
+    assert.equal(result.providers[0].attempts[0].variant, "configured_url_encoded_id");
+    assert.equal(result.providers[0].attempts[1].variant, "configured_url_raw_colons_fallback");
   } finally {
     globalThis.fetch = originalFetch;
   }

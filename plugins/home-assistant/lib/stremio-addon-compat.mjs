@@ -13,7 +13,6 @@ const REMOVED_PROXY_TOOLS = new Set([
 ]);
 
 function applyNativeOnlyPolicy() {
-  // Legacy proxy environment values are intentionally ignored from 0.3.13 onward.
   process.env.HA_SOL_STREMIO_PROXY_ENABLED = "false";
   process.env.HA_SOL_STREMIO_PROXY_USE_FOR_PLAY = "false";
 
@@ -25,13 +24,13 @@ function applyNativeOnlyPolicy() {
 
   const playBest = CORE_STREMIO_MCP_TOOLS.find((tool) => tool?.name === "home_assistant_stremio_play_best");
   if (playBest) {
-    playBest.description = "Resolve content, optionally query/rank configured Stremio addons for a best-effort visible match, then use the normal Play Store Stremio UI for playback. No public HTTPS selector proxy or SOL addon installation is required.";
+    playBest.description = "Resolve content, query the configured Stremio addon while preserving its own filtered/ordered stream list, then use the normal Play Store Stremio UI for playback. No public HTTPS selector proxy or SOL addon installation is required.";
     if (playBest.inputSchema?.properties) delete playBest.inputSchema.properties.useSelectorProxy;
   }
 
   const statusTool = CORE_STREMIO_MCP_TOOLS.find((tool) => tool?.name === "home_assistant_stremio_status");
   if (statusTool) {
-    statusTool.description = "Report Stremio deep-link, addon aggregation, native playback and Android TV Satellite readiness.";
+    statusTool.description = "Report Stremio deep-link, configured-addon transport, native playback and Android TV Satellite readiness.";
   }
 
   if (!CoreSolPluginClient.prototype.__solNativeOnlyStatusPatched) {
@@ -52,7 +51,7 @@ function applyNativeOnlyPolicy() {
         },
         limitations: [
           "Official Stremio deep links cannot directly carry an exact stream/provider/quality.",
-          "When Android TV Satellite can match the ranked stream text, SOL may select it visually; otherwise playback falls back to the first native Stremio stream.",
+          "The configured addon's own stream filtering/order is preserved; Android TV Satellite may match that preferred first stream visually.",
           "Pause/play/volume/seek remain Home Assistant media/remote controls, not Stremio deep-link commands."
         ]
       };
@@ -89,6 +88,11 @@ applyNativeOnlyPolicy();
 
 function clean(value) {
   return String(value ?? "").trim();
+}
+
+function boolValue(value, fallback = true) {
+  if (value === undefined || value === null || value === "") return fallback;
+  return /^(1|true|yes|on)$/i.test(String(value));
 }
 
 function sleep(ms) {
@@ -145,17 +149,57 @@ function profileMode(manifestUrl) {
   }
 }
 
+function splitConfiguredManifestUrl(manifestUrl) {
+  const raw = clean(manifestUrl);
+  if (!raw) throw new Error("stremio_addon_manifest_url_required");
+  let parsed;
+  try { parsed = new URL(raw); } catch { throw new Error("stremio_addon_manifest_url_invalid"); }
+  if (!/^https?:$/.test(parsed.protocol)) throw new Error("stremio_addon_manifest_url_invalid");
+
+  const hashIndex = raw.indexOf("#");
+  const noHash = hashIndex >= 0 ? raw.slice(0, hashIndex) : raw;
+  const queryIndex = noHash.indexOf("?");
+  const pathPart = queryIndex >= 0 ? noHash.slice(0, queryIndex) : noHash;
+  const queryPart = queryIndex >= 0 ? noHash.slice(queryIndex) : "";
+  const normalizedPath = pathPart.replace(/\/+$/, "");
+
+  let manifestPart = normalizedPath;
+  if (!/\/manifest\.json$/i.test(manifestPart)) {
+    if (/manifest\.json$/i.test(manifestPart)) {
+      manifestPart = manifestPart.slice(0, -"manifest.json".length).replace(/\/+$/, "") + "/manifest.json";
+    } else {
+      manifestPart = `${manifestPart}/manifest.json`;
+    }
+  }
+
+  const basePart = manifestPart.slice(0, -"/manifest.json".length);
+  return {
+    raw,
+    manifestUrl: `${manifestPart}${queryPart}`,
+    basePart,
+    queryPart,
+    queryPreserved: Boolean(queryPart)
+  };
+}
+
 function resourceUrl(manifestUrl, mediaType, mediaId, { rawColons = false } = {}) {
-  const url = new URL(manifestUrl);
-  const marker = "/manifest.json";
-  if (!url.pathname.endsWith(marker)) throw new Error("stremio_addon_manifest_path_invalid");
-  const basePath = url.pathname.slice(0, -marker.length);
+  const configured = splitConfiguredManifestUrl(manifestUrl);
   const type = encodeURIComponent(String(mediaType));
   let id = encodeURIComponent(String(mediaId));
   if (rawColons) id = id.replace(/%3A/gi, ":");
-  url.pathname = `${basePath}/stream/${type}/${id}.json`;
-  url.hash = "";
-  return url.toString();
+  return `${configured.basePart}/stream/${type}/${id}.json${configured.queryPart}`;
+}
+
+function safeRouteDiagnostic(manifestUrl, mediaType, mediaId, variant) {
+  const configured = splitConfiguredManifestUrl(manifestUrl);
+  return {
+    variant,
+    profileMode: profileMode(configured.manifestUrl),
+    queryPreserved: configured.queryPreserved,
+    mediaType: String(mediaType),
+    idShape: String(mediaId).includes(":") ? "episode_id" : "plain_id",
+    resourceShape: "/stream/{type}/{id}.json"
+  };
 }
 
 function requestError(error) {
@@ -230,9 +274,9 @@ async function fetchStreams(url, timeoutMs, retries = 1) {
   return { ok: false, error: "stremio_addon_request_failed", networkAttempts: attempts.length };
 }
 
-function safeAttempt(variant, result) {
+function safeAttempt(route, result) {
   return {
-    variant,
+    ...route,
     ok: Boolean(result.ok),
     status: result.status ?? null,
     elapsedMs: result.elapsedMs ?? null,
@@ -245,14 +289,14 @@ function safeAttempt(variant, result) {
 async function requestProvider(addon, mediaType, mediaId, timeoutMs, retries = 1) {
   const manifestCompatible = addonSupportsStream(addon.manifest, mediaType, mediaId);
   const attempts = [];
-  const variants = [{ rawColons: false, label: "encoded_id" }];
-  if (String(mediaId).includes(":")) variants.push({ rawColons: true, label: "raw_colons_fallback" });
+  const variants = [{ rawColons: false, label: "configured_url_encoded_id" }];
+  if (String(mediaId).includes(":")) variants.push({ rawColons: true, label: "configured_url_raw_colons_fallback" });
 
   let firstError = null;
   for (const variant of variants) {
     const url = resourceUrl(addon.manifestUrl, mediaType, mediaId, variant);
     const result = await fetchStreams(url, timeoutMs, retries);
-    attempts.push(safeAttempt(variant.label, result));
+    attempts.push(safeAttempt(safeRouteDiagnostic(addon.manifestUrl, mediaType, mediaId, variant.label), result));
     if (result.ok && result.streams.length > 0) {
       return {
         streams: result.streams,
@@ -274,10 +318,19 @@ async function requestProvider(addon, mediaType, mediaId, timeoutMs, retries = 1
   };
 }
 
-export function installStremioAddonCompatibilityPatch(aggregator, { retries = 1 } = {}) {
+function providerOrderIndex(addons, entry) {
+  const addonIndex = Math.max(0, addons.indexOf(entry.addon));
+  const providerIndex = Number.isFinite(Number(entry.providerIndex)) ? Number(entry.providerIndex) : Number.MAX_SAFE_INTEGER;
+  return [addonIndex, providerIndex];
+}
+
+export function installStremioAddonCompatibilityPatch(aggregator, { retries = 1, preserveAddonOrder } = {}) {
   if (!aggregator || aggregator.__solCompatPatched) return aggregator;
   aggregator.__solCompatPatched = true;
   aggregator.addonRetries = Math.max(0, Math.min(3, Number(retries) || 0));
+  aggregator.preserveAddonOrder = preserveAddonOrder === undefined
+    ? boolValue(process.env.HA_SOL_STREMIO_PRESERVE_ADDON_ORDER, true)
+    : Boolean(preserveAddonOrder);
 
   const originalStatus = aggregator.status.bind(aggregator);
   const originalRankStreams = aggregator.rankStreams.bind(aggregator);
@@ -288,7 +341,8 @@ export function installStremioAddonCompatibilityPatch(aggregator, { retries = 1 
       ...status,
       requestTimeoutMs: this.timeoutMs,
       retryCount: this.addonRetries,
-      protocolMode: "stream_bridge_compatible",
+      protocolMode: "configured_manifest_exact_path",
+      selectionMode: this.preserveAddonOrder ? "addon_order" : "sol_ranked",
       addons: (status.addons || []).map((item, index) => ({
         ...item,
         profileMode: this.addons[index] ? profileMode(this.addons[index].manifestUrl) : "unknown"
@@ -374,8 +428,20 @@ export function installStremioAddonCompatibilityPatch(aggregator, { retries = 1 
         const sizeGb = streamSizeGb(entry.stream);
         return sizeGb === null ? entry : { ...entry, details: { ...entry.details, sizeGb } };
       })
-      .filter((entry) => !(Number.isFinite(maxSizeGb) && maxSizeGb > 0 && entry.details.sizeGb !== null && entry.details.sizeGb > maxSizeGb))
-      .sort((a, b) => b.score - a.score || (b.details.seeders || 0) - (a.details.seeders || 0) || ((a.details.sizeGb ?? Infinity) - (b.details.sizeGb ?? Infinity)));
+      .filter((entry) => !(Number.isFinite(maxSizeGb) && maxSizeGb > 0 && entry.details.sizeGb !== null && entry.details.sizeGb > maxSizeGb));
+
+    if (this.preserveAddonOrder) {
+      ranked.sort((a, b) => {
+        const [addonA, providerA] = providerOrderIndex(this.addons, a);
+        const [addonB, providerB] = providerOrderIndex(this.addons, b);
+        return addonA - addonB || providerA - providerB;
+      });
+    } else {
+      ranked.sort((a, b) => b.score - a.score
+        || (b.details.seeders || 0) - (a.details.seeders || 0)
+        || ((a.details.sizeGb ?? Infinity) - (b.details.sizeGb ?? Infinity)));
+    }
+
     return { ...result, ranked };
   };
 
@@ -383,11 +449,13 @@ export function installStremioAddonCompatibilityPatch(aggregator, { retries = 1 
 }
 
 export const __test = {
+  splitConfiguredManifestUrl,
   resourceUrl,
   requestProvider,
   declaresStream,
   profileMode,
   fetchStreamsOnce,
   streamKey,
-  streamSizeGb
+  streamSizeGb,
+  providerOrderIndex
 };
