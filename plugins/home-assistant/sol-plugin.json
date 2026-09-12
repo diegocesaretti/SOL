@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "id": "home-assistant",
   "name": "Home Assistant",
-  "version": "0.3.8",
-  "description": "Home Assistant bridge for SOL with persistent state cache, Android TV control, standard Play Store Stremio deep links, addon stream aggregation/ranking, first-stream autoplay through Home Assistant Remote and optional visual/HTTPS selector fallbacks.",
+  "version": "0.3.9",
+  "description": "Home Assistant bridge for SOL with persistent state cache, Android TV control, standard Play Store Stremio deep links, addon stream aggregation/ranking, UI-aware first-stream autoplay and optional visual/HTTPS selector fallbacks.",
   "runtime": "node",
   "entry": "index.mjs",
   "args": [],
@@ -195,7 +195,7 @@
       "key": "stremio_autoplay_default",
       "label": "Solicitar autoPlay por defecto",
       "type": "boolean",
-      "description": "Agrega autoPlay=true cuando existe un videoId. En el modo selector proxy, Stremio recibe un solo stream seleccionado.",
+      "description": "Solicita autoPlay=true en Android TV cuando existe un videoId. Si Stremio no puede reutilizar un stream conocido, el plugin espera la lista y hace el OK final.",
       "env": "HA_SOL_STREMIO_AUTOPLAY",
       "required": false,
       "default": true
@@ -283,21 +283,21 @@
       "key": "stremio_autoplay_first_stream",
       "label": "Reproducir el primer stream automáticamente",
       "type": "boolean",
-      "description": "Después de abrir la lista de streams espera a que cargue y envía un único DPAD_CENTER mediante Home Assistant Remote. No requiere TV Satellite.",
+      "description": "Después de abrir el contenido, solicita autoplay nativo y, si la lista de streams queda visible, envía un único DPAD_CENTER mediante Home Assistant Remote. Con TV Satellite espera a detectar que la lista cargó antes del OK.",
       "env": "HA_SOL_STREMIO_AUTOPLAY_FIRST_STREAM",
       "required": false,
       "default": true
     },
     {
       "key": "stremio_first_stream_delay_ms",
-      "label": "Espera antes del OK al primer stream (ms)",
+      "label": "Espera/fallback antes del OK al primer stream (ms)",
       "type": "number",
-      "description": "Tiempo para que los addons carguen la lista antes de enviar DPAD_CENTER. Si el OK llega demasiado pronto, aumentá este valor.",
+      "description": "Sin TV Satellite es la espera fija antes del OK. Con Satellite, la UI se observa hasta detectar streams y este valor sirve como base del tiempo máximo de espera.",
       "env": "HA_SOL_STREMIO_FIRST_STREAM_DELAY_MS",
       "required": false,
-      "default": 1800,
-      "min": 250,
-      "max": 10000
+      "default": 3500,
+      "min": 500,
+      "max": 15000
     },
     {
       "key": "stremio_auto_select_stream",
