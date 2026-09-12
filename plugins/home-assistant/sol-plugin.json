@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "id": "home-assistant",
   "name": "Home Assistant",
-  "version": "0.3.6",
-  "description": "Home Assistant bridge for SOL with persistent state cache, optimized Android TV computer-use control, standard Play Store Stremio deep links, addon stream aggregation/ranking and an optional HTTPS SOL Stream Selector proxy for exact stream delivery.",
+  "version": "0.3.7",
+  "description": "Home Assistant bridge for SOL with persistent state cache, optimized Android TV computer-use control, standard Play Store Stremio deep links, addon stream aggregation/ranking, automatic TV Satellite stream selection and an optional HTTPS SOL Stream Selector proxy for exact stream delivery.",
   "runtime": "node",
   "entry": "index.mjs",
   "args": [],
@@ -278,6 +278,15 @@
       "env": "HA_SOL_STREMIO_PREFER_DV",
       "required": false,
       "default": false
+    },
+    {
+      "key": "stremio_auto_select_stream",
+      "label": "Reproducir automáticamente el stream elegido",
+      "type": "boolean",
+      "description": "Cuando no se usa el selector HTTPS exacto, usa Android TV Satellite para buscar y pulsar automáticamente el stream que SOL rankeó como mejor. Si no logra identificarlo de forma segura, deja la pantalla abierta para selección visual.",
+      "env": "HA_SOL_STREMIO_AUTOSELECT_STREAM",
+      "required": false,
+      "default": true
     },
     {
       "key": "stremio_proxy_enabled",
