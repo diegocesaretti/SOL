@@ -1,7 +1,91 @@
 import { addonSupportsStream } from "./stremio-addons.mjs";
+import {
+  STREMIO_MCP_TOOLS as CORE_STREMIO_MCP_TOOLS,
+  SolPluginClient as CoreSolPluginClient
+} from "./sol-client-core.mjs";
+import { StremioSelectorProxy } from "./stremio-proxy.mjs";
 
 const TRANSIENT_HTTP = new Set([408, 425, 429, 500, 502, 503, 504]);
 const SIZE_RE = /(?<!\d)(\d+(?:[.,]\d+)?)\s*(TiB|TB|GiB|GB|MiB|MB)\b/i;
+const REMOVED_PROXY_TOOLS = new Set([
+  "home_assistant_stremio_proxy_status",
+  "home_assistant_stremio_proxy_install"
+]);
+
+function applyNativeOnlyPolicy() {
+  // Legacy proxy environment values are intentionally ignored from 0.3.13 onward.
+  process.env.HA_SOL_STREMIO_PROXY_ENABLED = "false";
+  process.env.HA_SOL_STREMIO_PROXY_USE_FOR_PLAY = "false";
+
+  for (let index = CORE_STREMIO_MCP_TOOLS.length - 1; index >= 0; index -= 1) {
+    if (REMOVED_PROXY_TOOLS.has(CORE_STREMIO_MCP_TOOLS[index]?.name)) {
+      CORE_STREMIO_MCP_TOOLS.splice(index, 1);
+    }
+  }
+
+  const playBest = CORE_STREMIO_MCP_TOOLS.find((tool) => tool?.name === "home_assistant_stremio_play_best");
+  if (playBest) {
+    playBest.description = "Resolve content, optionally query/rank configured Stremio addons for a best-effort visible match, then use the normal Play Store Stremio UI for playback. No public HTTPS selector proxy or SOL addon installation is required.";
+    if (playBest.inputSchema?.properties) delete playBest.inputSchema.properties.useSelectorProxy;
+  }
+
+  const statusTool = CORE_STREMIO_MCP_TOOLS.find((tool) => tool?.name === "home_assistant_stremio_status");
+  if (statusTool) {
+    statusTool.description = "Report Stremio deep-link, addon aggregation, native playback and Android TV Satellite readiness.";
+  }
+
+  if (!CoreSolPluginClient.prototype.__solNativeOnlyStatusPatched) {
+    const originalStatus = CoreSolPluginClient.prototype.stremioStatus;
+    CoreSolPluginClient.prototype.stremioStatus = function stremioStatusNativeOnly() {
+      const status = originalStatus.call(this);
+      const { selectorProxy: _selectorProxy, ...rest } = status;
+      const capabilities = { ...(rest.capabilities || {}) };
+      delete capabilities.exactSelectedStreamViaProxy;
+      return {
+        ...rest,
+        playbackMode: "native_stremio_only",
+        capabilities: {
+          ...capabilities,
+          nativeInstalledAddonPlayback: true,
+          bestEffortVisualRankedSelection: true,
+          publicHttpsSelectorRequired: false
+        },
+        limitations: [
+          "Official Stremio deep links cannot directly carry an exact stream/provider/quality.",
+          "When Android TV Satellite can match the ranked stream text, SOL may select it visually; otherwise playback falls back to the first native Stremio stream.",
+          "Pause/play/volume/seek remain Home Assistant media/remote controls, not Stremio deep-link commands."
+        ]
+      };
+    };
+    CoreSolPluginClient.prototype.__solNativeOnlyStatusPatched = true;
+  }
+
+  if (!StremioSelectorProxy.prototype.__solRetired) {
+    StremioSelectorProxy.prototype.status = function retiredSelectorStatus() {
+      return {
+        enabled: false,
+        started: false,
+        readyForInstall: false,
+        publicOrigin: null,
+        manifestUrl: null,
+        installDeepLink: null,
+        activeSessions: 0,
+        retired: true,
+        requirement: null
+      };
+    };
+    StremioSelectorProxy.prototype.ensureStarted = async function retiredSelectorStart() {
+      return this.status();
+    };
+    Object.defineProperty(StremioSelectorProxy.prototype, "readyForInstall", {
+      configurable: true,
+      get() { return false; }
+    });
+    StremioSelectorProxy.prototype.__solRetired = true;
+  }
+}
+
+applyNativeOnlyPolicy();
 
 function clean(value) {
   return String(value ?? "").trim();
