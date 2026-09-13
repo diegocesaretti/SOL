@@ -8,6 +8,11 @@ function numberEnv(env, name, fallback, min, max) {
   return Math.max(min, Math.min(max, Math.trunc(value)));
 }
 
+export function haOnlyDelayMs(env = process.env) {
+  const configured = numberEnv(env, "HA_SOL_STREMIO_FIRST_STREAM_DELAY_MS", 8000, 500, 15000);
+  return Math.max(8000, configured);
+}
+
 export function installStremioHaOnlyTiming(SolPluginClient) {
   const proto = SolPluginClient?.prototype;
   if (!proto || proto.__stremioHaOnlyTimingInstalled) return SolPluginClient;
@@ -21,8 +26,7 @@ export function installStremioHaOnlyTiming(SolPluginClient) {
       return originalWaitForStreamUi.call(this);
     }
 
-    const configured = numberEnv(this.env || process.env, "HA_SOL_STREMIO_FIRST_STREAM_DELAY_MS", 8000, 500, 15000);
-    const waitedMs = Math.max(8000, configured);
+    const waitedMs = haOnlyDelayMs(this.env || process.env);
     await sleep(waitedMs);
     return {
       ready: true,
@@ -35,12 +39,11 @@ export function installStremioHaOnlyTiming(SolPluginClient) {
 
   proto.stremioStatus = function stremioStatusHaOnlyTiming() {
     const status = originalStatus.call(this);
-    const configured = numberEnv(this.env || process.env, "HA_SOL_STREMIO_FIRST_STREAM_DELAY_MS", 8000, 500, 15000);
     return {
       ...status,
       firstStreamAutoPlay: {
         ...(status.firstStreamAutoPlay || {}),
-        delayMs: Math.max(8000, configured),
+        delayMs: haOnlyDelayMs(this.env || process.env),
         readiness: "HA-only fixed delay; no Satellite observation",
         transport: "Home Assistant remote.send_command with command list [DPAD_CENTER]"
       }
