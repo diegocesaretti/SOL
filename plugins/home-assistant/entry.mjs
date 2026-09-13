@@ -8,6 +8,7 @@ import { installStremioFamilyAccountProvider } from "./lib/stremio-family-accoun
 import { installStremioAudienceClassifier } from "./lib/stremio-audience-classifier.mjs";
 import { startStremioAccountOptionsServer } from "./lib/stremio-account-options-server.mjs";
 import { installStremioLegacyAutoclick } from "./lib/stremio-legacy-autoclick.mjs";
+import { installStremioIndexedSelection } from "./lib/stremio-indexed-selection.mjs";
 import { installStremioDebugging } from "./lib/stremio-debug.mjs";
 
 // HA-only TV control policy (restored from 0.3.19): never contact Android TV Satellite.
@@ -28,5 +29,8 @@ installStremioSmartCompatibility(SolPluginClient);
 installStremioFamilyAccountProvider(SolPluginClient);
 installStremioAudienceClassifier(SolPluginClient, STREMIO_MCP_TOOLS);
 installStremioLegacyAutoclick(SolPluginClient);
+// Wrap the final playback path after legacy compatibility. The selector observes
+// SOL's chosen addon/providerIndex and replaces a blind OK with DOWN x index + OK.
+installStremioIndexedSelection(SolPluginClient);
 installStremioDebugging(SolPluginClient, STREMIO_MCP_TOOLS);
 await import("./index.mjs");
