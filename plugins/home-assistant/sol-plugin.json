@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "id": "home-assistant",
   "name": "Home Assistant",
-  "version": "0.3.25",
-  "description": "Home Assistant bridge for SOL with HA-only Android TV remote control, native Stremio playback, account-aware next episodes and isolated kids/family/sports provider profiles.",
+  "version": "0.3.26",
+  "description": "Home Assistant bridge for SOL with HA-only Android TV remote control, native Stremio playback, account-aware next episodes and isolated kids/family/sports provider profiles, including dynamic provider selection from the linked Stremio account.",
   "runtime": "node",
   "entry": "entry.mjs",
   "args": [],
@@ -60,6 +60,17 @@
       "env": "HA_SOL_API_PORT",
       "required": false,
       "default": 8767,
+      "min": 1024,
+      "max": 65535
+    },
+    {
+      "key": "stremio_options_port",
+      "label": "Puerto local para opciones de Stremio",
+      "type": "number",
+      "description": "Puerto loopback usado sólo por SOL para cargar opciones dinámicas de la cuenta de Stremio en la pantalla de configuración.",
+      "env": "HA_SOL_STREMIO_OPTIONS_PORT",
+      "required": false,
+      "default": 8768,
       "min": 1024,
       "max": 65535
     },
@@ -259,18 +270,35 @@
       "key": "stremio_family_enabled",
       "label": "Perfil infantil/familiar automático",
       "type": "boolean",
-      "description": "Cuando está activo, SOL clasifica kids/family usando decisiones semánticas explícitas de Codex, títulos forzados, géneros, ratings y una heurística conservadora. Kids y Family usan exclusivamente el proveedor familiar español/latino configurado.",
+      "description": "Cuando está activo, SOL clasifica kids/family usando decisiones semánticas explícitas de Codex, títulos forzados, géneros, ratings y una heurística conservadora. Kids y Family usan exclusivamente el proveedor familiar español/latino seleccionado.",
       "env": "HA_SOL_STREMIO_FAMILY_ENABLED",
       "required": false,
       "default": false
     },
     {
       "key": "stremio_family_addon_manifests",
-      "label": "Proveedor Stremio infantil/familiar",
+      "label": "Proveedor Kids/Family manual",
       "type": "secret",
-      "description": "Manifest(s) exclusivo(s) para películas/series infantiles o familiares. Los perfiles kids/family nunca consultan los manifests normales ni los addons generales de la cuenta.",
+      "description": "Fallback manual: manifest(s) exclusivo(s) para Kids/Family. Se usa cuando el selector de addon de cuenta está en 'Manifest manual'.",
       "env": "HA_SOL_STREMIO_FAMILY_ADDONS",
       "required": false
+    },
+    {
+      "key": "stremio_family_account_addon_id",
+      "label": "Addon Kids/Family de mi cuenta Stremio",
+      "type": "select",
+      "description": "SOL carga los addons de tipo stream instalados en tu cuenta de Stremio. Elegí el proveedor español/latino. Sólo se guarda su ID; la URL privada permanece dentro del plugin. Si el addon desaparece, Kids/Family falla cerrado.",
+      "env": "HA_SOL_STREMIO_FAMILY_ACCOUNT_ADDON_ID",
+      "required": false,
+      "default": "manual",
+      "options": [
+        { "value": "manual", "label": "Manifest manual · usar configuración de abajo" }
+      ],
+      "optionsSource": {
+        "type": "plugin-http",
+        "portSetting": "stremio_options_port",
+        "path": "/options/stremio-stream-addons"
+      }
     },
     {
       "key": "stremio_family_require_spanish",
