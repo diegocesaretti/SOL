@@ -6,6 +6,7 @@ import { renderSystemPage } from "../../ui/system.js";
 import { prepareSystemUpdate, systemUpdateStatus } from "../system-update/service.js";
 import { downloadGithubPlugin, inspectGithubPlugin } from "./github.js";
 import { pluginManager, pluginPackageMaxBytes } from "./runtime.js";
+import type { SolPluginSettingDefinition, SolPluginSettingOption, SolPluginSettingValue } from "./types.js";
 
 function canManage(principal: AuthPrincipal): boolean {
   return principal.role === "owner" || principal.role === "adult";
@@ -54,6 +55,71 @@ function approvedPermissionsFromHeader(request: IncomingMessage): string[] | und
     throw new Error("invalid_plugin_permission_approval_header");
   }
   return parsed;
+}
+
+function currentDynamicOption(definition: SolPluginSettingDefinition, values: Record<string, SolPluginSettingValue>): SolPluginSettingOption[] {
+  const current = values[definition.key];
+  if (typeof current !== "string" || !current.trim()) return [];
+  if (definition.options?.some((option) => option.value === current)) return [];
+  return [{ value: current, label: `${current} · seleccionado actualmente` }];
+}
+
+function safeDynamicOptions(value: unknown): SolPluginSettingOption[] {
+  const source = value && typeof value === "object" && !Array.isArray(value)
+    ? (value as { options?: unknown }).options
+    : undefined;
+  if (!Array.isArray(source)) throw new Error("plugin_setting_options_invalid_response");
+  if (source.length > 100) throw new Error("plugin_setting_options_too_many");
+  const options: SolPluginSettingOption[] = [];
+  for (const item of source) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const record = item as Record<string, unknown>;
+    const optionValue = typeof record.value === "string" ? record.value.trim() : "";
+    const optionLabel = typeof record.label === "string" ? record.label.trim() : "";
+    if (!optionValue || !optionLabel || optionValue.length > 200 || optionLabel.length > 200) continue;
+    options.push({ value: optionValue, label: optionLabel });
+  }
+  return options;
+}
+
+async function resolveDynamicSettingDefinitions(
+  definitions: SolPluginSettingDefinition[],
+  values: Record<string, SolPluginSettingValue>,
+): Promise<Array<SolPluginSettingDefinition & { optionsSourceError?: string }>> {
+  return await Promise.all(definitions.map(async (definition) => {
+    const source = definition.optionsSource;
+    if (definition.type !== "select" || !source) return definition;
+    const staticOptions = definition.options ?? [];
+    const currentOptions = currentDynamicOption(definition, values);
+    const portValue = Number(values[source.portSetting]);
+    if (!Number.isInteger(portValue) || portValue < 1024 || portValue > 65535) {
+      return {
+        ...definition,
+        options: [...staticOptions, ...currentOptions],
+        optionsSourceError: `dynamic_options_port_unavailable:${source.portSetting}`,
+      };
+    }
+    try {
+      const response = await fetch(`http://127.0.0.1:${portValue}${source.path}`, {
+        headers: { accept: "application/json" },
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const payload = await response.json();
+      const dynamicOptions = safeDynamicOptions(payload);
+      const merged = new Map<string, SolPluginSettingOption>();
+      for (const option of [...staticOptions, ...dynamicOptions, ...currentOptions]) {
+        if (!merged.has(option.value)) merged.set(option.value, option);
+      }
+      return { ...definition, options: [...merged.values()] };
+    } catch (error) {
+      return {
+        ...definition,
+        options: [...staticOptions, ...currentOptions],
+        optionsSourceError: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }));
 }
 
 function pluginError(response: ServerResponse, error: unknown): void {
@@ -304,7 +370,9 @@ export async function handlePluginsApi(
       return true;
     }
     try {
-      sendJson(response, 200, await pluginManager.getSettings(settingsMatch[1]!));
+      const settings = await pluginManager.getSettings(settingsMatch[1]!);
+      const definitions = await resolveDynamicSettingDefinitions(settings.definitions, settings.values);
+      sendJson(response, 200, { ...settings, definitions });
     } catch (error) {
       pluginError(response, error);
     }

@@ -4,7 +4,9 @@ import { installStremioStableClick } from "./lib/stremio-stable-click.mjs";
 import { installStremioLaunchGuard } from "./lib/stremio-launch-guard.mjs";
 import { installStremioSmartPlayback } from "./lib/stremio-smart-playback.mjs";
 import { installStremioSmartCompatibility } from "./lib/stremio-smart-compat.mjs";
+import { installStremioFamilyAccountProvider } from "./lib/stremio-family-account-provider.mjs";
 import { installStremioAudienceClassifier } from "./lib/stremio-audience-classifier.mjs";
+import { startStremioAccountOptionsServer } from "./lib/stremio-account-options-server.mjs";
 import { installStremioLegacyAutoclick } from "./lib/stremio-legacy-autoclick.mjs";
 import { installStremioDebugging } from "./lib/stremio-debug.mjs";
 
@@ -15,11 +17,15 @@ process.env.HA_SOL_TV_ENABLED = "false";
 process.env.HA_SOL_STREMIO_CENTER_TRANSPORT = "home_assistant";
 process.env.HA_SOL_STREMIO_AUTOSELECT_STREAM = "false";
 
+startStremioAccountOptionsServer();
 installHomeAssistantOnlyTvControl(SolPluginClient);
 installStremioStableClick(SolPluginClient);
 installStremioLaunchGuard(SolPluginClient);
 installStremioSmartPlayback(SolPluginClient, STREMIO_MCP_TOOLS);
 installStremioSmartCompatibility(SolPluginClient);
+// Install before the audience wrapper so Kids/Family classification reaches this
+// adapter as profile=family and only then enters the stable smart-playback path.
+installStremioFamilyAccountProvider(SolPluginClient);
 installStremioAudienceClassifier(SolPluginClient, STREMIO_MCP_TOOLS);
 installStremioLegacyAutoclick(SolPluginClient);
 installStremioDebugging(SolPluginClient, STREMIO_MCP_TOOLS);
