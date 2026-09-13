@@ -49,11 +49,12 @@ function classifyObservation(observation) {
 
 function settings(client) {
   const env = client?.env || process.env;
+  const transport = centerTransport(env);
   return {
     centerDelayMs: numberEnv(env, "HA_SOL_STREMIO_CENTER_DELAY_MS", 900, 0, 5000),
     readyTimeoutMs: numberEnv(env, "HA_SOL_STREMIO_STREAM_READY_TIMEOUT_MS", 12000, 250, 30000),
-    centerTransport: centerTransport(env),
-    focusNudge: focusNudgeMode(env),
+    centerTransport: transport,
+    focusNudge: transport === "home_assistant" ? focusNudgeMode(env) : "off",
     focusNudgeDelayMs: numberEnv(env, "HA_SOL_STREMIO_FOCUS_NUDGE_DELAY_MS", 250, 0, 2000),
     confirmations: 2
   };
