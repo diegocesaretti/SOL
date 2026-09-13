@@ -13,6 +13,11 @@ function centerTransport(env) {
   return ["auto", "satellite", "home_assistant"].includes(value) ? value : "auto";
 }
 
+function focusNudgeMode(env) {
+  const value = String(env?.HA_SOL_STREMIO_FOCUS_NUDGE || "right_left").trim().toLowerCase();
+  return ["off", "right_left"].includes(value) ? value : "right_left";
+}
+
 function collectUiText(node, out = [], depth = 0) {
   if (!node || typeof node !== "object" || depth > 9 || out.length > 500) return out;
   for (const key of ["text", "description", "class", "view_id", "resource_id"]) {
@@ -48,6 +53,8 @@ function settings(client) {
     centerDelayMs: numberEnv(env, "HA_SOL_STREMIO_CENTER_DELAY_MS", 900, 0, 5000),
     readyTimeoutMs: numberEnv(env, "HA_SOL_STREMIO_STREAM_READY_TIMEOUT_MS", 12000, 250, 30000),
     centerTransport: centerTransport(env),
+    focusNudge: focusNudgeMode(env),
+    focusNudgeDelayMs: numberEnv(env, "HA_SOL_STREMIO_FOCUS_NUDGE_DELAY_MS", 250, 0, 2000),
     confirmations: 2
   };
 }
@@ -135,15 +142,32 @@ async function sendCenterViaSatellite(client) {
   };
 }
 
-async function sendCenterViaHomeAssistant(client, satelliteResult = null) {
+async function sendRemoteKeyViaHomeAssistant(client, command) {
+  return await client.haService("remote", "send_command", {
+    entity_id: client.stremioRemoteEntityId,
+    command: [command]
+  });
+}
+
+async function sendCenterViaHomeAssistant(client, cfg, satelliteResult = null) {
   if (!client?.stremioRemoteEntityId) {
     return { ok: false, via: "home_assistant_remote", reason: "stremio_remote_entity_id_required", satelliteResult };
   }
+
+  const commands = [];
   try {
-    const result = await client.haService("remote", "send_command", {
-      entity_id: client.stremioRemoteEntityId,
-      command: ["DPAD_CENTER"]
-    });
+    if (cfg.focusNudge === "right_left") {
+      await sendRemoteKeyViaHomeAssistant(client, "DPAD_RIGHT");
+      commands.push("DPAD_RIGHT");
+      if (cfg.focusNudgeDelayMs > 0) await sleep(cfg.focusNudgeDelayMs);
+
+      await sendRemoteKeyViaHomeAssistant(client, "DPAD_LEFT");
+      commands.push("DPAD_LEFT");
+      if (cfg.focusNudgeDelayMs > 0) await sleep(cfg.focusNudgeDelayMs);
+    }
+
+    const result = await sendRemoteKeyViaHomeAssistant(client, "DPAD_CENTER");
+    commands.push("DPAD_CENTER");
     return {
       ok: true,
       via: satelliteResult ? "home_assistant_remote_fallback" : "home_assistant_remote",
@@ -151,6 +175,9 @@ async function sendCenterViaHomeAssistant(client, satelliteResult = null) {
       remoteEntityId: client.stremioRemoteEntityId,
       command: "DPAD_CENTER",
       commandPayload: ["DPAD_CENTER"],
+      commands,
+      focusNudge: cfg.focusNudge,
+      focusNudgeDelayMs: cfg.focusNudgeDelayMs,
       satelliteResult,
       result
     };
@@ -159,19 +186,22 @@ async function sendCenterViaHomeAssistant(client, satelliteResult = null) {
       ok: false,
       via: satelliteResult ? "home_assistant_remote_fallback" : "home_assistant_remote",
       command: "DPAD_CENTER",
+      commands,
+      focusNudge: cfg.focusNudge,
+      focusNudgeDelayMs: cfg.focusNudgeDelayMs,
       reason: error?.message || String(error),
       satelliteResult
     };
   }
 }
 
-async function sendCenter(client, transport) {
-  if (transport === "home_assistant") return sendCenterViaHomeAssistant(client);
+async function sendCenter(client, cfg) {
+  if (cfg.centerTransport === "home_assistant") return sendCenterViaHomeAssistant(client, cfg);
 
   const satelliteResult = await sendCenterViaSatellite(client);
-  if (satelliteResult.ok || transport === "satellite") return satelliteResult;
+  if (satelliteResult.ok || cfg.centerTransport === "satellite") return satelliteResult;
 
-  return sendCenterViaHomeAssistant(client, satelliteResult);
+  return sendCenterViaHomeAssistant(client, cfg, satelliteResult);
 }
 
 export function installStremioStableClick(SolPluginClient) {
@@ -195,6 +225,8 @@ export function installStremioStableClick(SolPluginClient) {
         readyTimeoutMs: cfg.readyTimeoutMs,
         stableConfirmations: cfg.confirmations,
         centerTransport: cfg.centerTransport,
+        focusNudge: cfg.focusNudge,
+        focusNudgeDelayMs: cfg.focusNudgeDelayMs,
         centerTransportPolicy: "auto uses TV Satellite dpad_center first and falls back to Home Assistant only when Satellite reports failure",
         blindTimeoutClick: false
       }
@@ -308,14 +340,17 @@ export function installStremioStableClick(SolPluginClient) {
     }
 
     const cfg = settings(this);
-    const center = await sendCenter(this, cfg.centerTransport);
+    const center = await sendCenter(this, cfg);
     this.__stremioDebugEvent?.("center_transport", {
       requested: cfg.centerTransport,
       ok: center?.ok === true,
       via: center?.via || null,
       reason: center?.reason || null,
       fallback: center?.fallback || center?.satelliteResult?.fallback || null,
-      satelliteVia: center?.satelliteResult?.via || null
+      satelliteVia: center?.satelliteResult?.via || null,
+      focusNudge: center?.focusNudge || cfg.focusNudge,
+      focusNudgeDelayMs: center?.focusNudgeDelayMs ?? cfg.focusNudgeDelayMs,
+      commands: center?.commands || null
     });
 
     if (!center.ok) {
@@ -337,8 +372,11 @@ export function installStremioStableClick(SolPluginClient) {
       service: center.service || null,
       remoteEntityId: center.remoteEntityId || null,
       command: "DPAD_CENTER",
+      commands: center.commands || ["DPAD_CENTER"],
       readiness,
       centerTransport: cfg.centerTransport,
+      focusNudge: cfg.focusNudge,
+      focusNudgeDelayMs: cfg.focusNudgeDelayMs,
       center,
       playbackVerification
     };
