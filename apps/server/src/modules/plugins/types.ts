@@ -40,6 +40,12 @@ export interface SolPluginSettingOption {
   label: string;
 }
 
+export interface SolPluginSettingOptionsSource {
+  type: "plugin-http";
+  portSetting: string;
+  path: string;
+}
+
 export interface SolPluginSettingDefinition {
   key: string;
   label: string;
@@ -51,6 +57,7 @@ export interface SolPluginSettingDefinition {
   min?: number;
   max?: number;
   options?: SolPluginSettingOption[];
+  optionsSource?: SolPluginSettingOptionsSource;
 }
 
 export interface SolPluginGithubReleaseDistribution {
@@ -162,6 +169,20 @@ function settingDefault(value: unknown, type: SolPluginSettingType, name: string
   return value;
 }
 
+function settingOptionsSource(value: unknown, name: string): SolPluginSettingOptionsSource | undefined {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${name}.optionsSource must be an object`);
+  const input = value as Record<string, unknown>;
+  if (input.type !== "plugin-http") throw new Error(`${name}.optionsSource.type must be plugin-http`);
+  const portSetting = text(input.portSetting, `${name}.optionsSource.portSetting`, 64).toLowerCase();
+  if (!SETTING_KEY_RE.test(portSetting)) throw new Error(`${name}.optionsSource.portSetting is invalid`);
+  const path = text(input.path, `${name}.optionsSource.path`, 240);
+  if (!path.startsWith("/") || path.startsWith("//") || path.includes("?") || path.includes("#")) {
+    throw new Error(`${name}.optionsSource.path must be an absolute local path without query or fragment`);
+  }
+  return { type: "plugin-http", portSetting, path };
+}
+
 function validateSettings(value: unknown): SolPluginSettingDefinition[] {
   if (value === undefined) return [];
   if (!Array.isArray(value) || value.length > 80) throw new Error("settings must be an array with at most 80 items");
@@ -200,12 +221,16 @@ function validateSettings(value: unknown): SolPluginSettingDefinition[] {
         };
       });
     }
-    if (type === "select" && (!options || !options.length)) throw new Error(`settings[${index}] select requires options`);
-    const defaultValue = settingDefault(input.default, type, `settings[${index}]`);
-    if (type === "select" && defaultValue !== undefined && !options?.some((option) => option.value === defaultValue)) {
-      throw new Error(`settings[${index}].default must match an option`);
+    const optionsSource = settingOptionsSource(input.optionsSource, `settings[${index}]`);
+    if (optionsSource && type !== "select") throw new Error(`settings[${index}].optionsSource is only valid for select`);
+    if (type === "select" && (!options || !options.length) && !optionsSource) {
+      throw new Error(`settings[${index}] select requires options or optionsSource`);
     }
-    return { key, label, type, description, env, required, default: defaultValue, min, max, options };
+    const defaultValue = settingDefault(input.default, type, `settings[${index}]`);
+    if (type === "select" && defaultValue !== undefined && options?.length && !options.some((option) => option.value === defaultValue)) {
+      throw new Error(`settings[${index}].default must match a static option`);
+    }
+    return { key, label, type, description, env, required, default: defaultValue, min, max, options, optionsSource };
   });
 }
 
@@ -263,7 +288,7 @@ export function validateSettingValues(
     const stringValue = raw.trim();
     if (!stringValue && definition.required && !options.allowMissingRequired) throw new Error(`setting ${key} is required`);
     if (stringValue.length > 2_000) throw new Error(`setting ${key} is too long`);
-    if (definition.type === "select" && !definition.options?.some((option) => option.value === stringValue)) {
+    if (definition.type === "select" && !definition.optionsSource && !definition.options?.some((option) => option.value === stringValue)) {
       throw new Error(`setting ${key} must match one of its options`);
     }
     if (stringValue) result[key] = stringValue;
