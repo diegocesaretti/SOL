@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "id": "home-assistant",
   "name": "Home Assistant",
-  "version": "0.3.19",
+  "version": "0.3.20",
   "description": "Home Assistant bridge for SOL with HA-only Android TV remote control, native Stremio playback, account-aware next episodes and isolated family/sports provider profiles.",
   "runtime": "node",
   "entry": "entry.mjs",
