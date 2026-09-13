@@ -4,6 +4,7 @@ import { installStremioStableClick } from "./lib/stremio-stable-click.mjs";
 import { installStremioLaunchGuard } from "./lib/stremio-launch-guard.mjs";
 import { installStremioSmartPlayback } from "./lib/stremio-smart-playback.mjs";
 import { installStremioSmartCompatibility } from "./lib/stremio-smart-compat.mjs";
+import { installStremioAudienceClassifier } from "./lib/stremio-audience-classifier.mjs";
 import { installStremioLegacyAutoclick } from "./lib/stremio-legacy-autoclick.mjs";
 import { installStremioDebugging } from "./lib/stremio-debug.mjs";
 
@@ -19,6 +20,7 @@ installStremioStableClick(SolPluginClient);
 installStremioLaunchGuard(SolPluginClient);
 installStremioSmartPlayback(SolPluginClient, STREMIO_MCP_TOOLS);
 installStremioSmartCompatibility(SolPluginClient);
+installStremioAudienceClassifier(SolPluginClient, STREMIO_MCP_TOOLS);
 installStremioLegacyAutoclick(SolPluginClient);
 installStremioDebugging(SolPluginClient, STREMIO_MCP_TOOLS);
 await import("./index.mjs");
