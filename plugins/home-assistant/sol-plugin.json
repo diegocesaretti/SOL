@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "id": "home-assistant",
   "name": "Home Assistant",
-  "version": "0.3.20",
+  "version": "0.3.21",
   "description": "Home Assistant bridge for SOL with HA-only Android TV remote control, native Stremio playback, account-aware next episodes and isolated family/sports provider profiles.",
   "runtime": "node",
   "entry": "entry.mjs",
@@ -138,7 +138,7 @@
       "key": "stremio_remote_entity_id",
       "label": "Remote Android TV para Stremio",
       "type": "text",
-      "description": "Entidad remote.* de Android TV Remote usada para despertar con tecla 0, abrir deep links y enviar OK. Si queda vacío se usa tv_remote_entity_id.",
+      "description": "Entidad remote.* de Android TV Remote usada para abrir deep links y enviar OK. Si queda vacío se usa tv_remote_entity_id.",
       "env": "HA_SOL_STREMIO_REMOTE_ENTITY_ID",
       "required": false
     },
@@ -401,10 +401,10 @@
       "key": "stremio_first_stream_delay_ms",
       "label": "Espera antes de OK de Stremio (ms)",
       "type": "number",
-      "description": "Espera fija entre abrir el detalle de Stremio y enviar DPAD_CENTER por Home Assistant. No se consulta Android TV Satellite.",
+      "description": "Espera HA-only entre abrir el detalle de Stremio y enviar DPAD_CENTER por Home Assistant. En esta versión se aplica un mínimo de 8000 ms para evitar que el OK llegue mientras la lista nativa todavía está cargando.",
       "env": "HA_SOL_STREMIO_FIRST_STREAM_DELAY_MS",
       "required": false,
-      "default": 3500,
+      "default": 8000,
       "min": 500,
       "max": 15000
     }
