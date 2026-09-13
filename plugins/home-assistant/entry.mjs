@@ -6,12 +6,13 @@ import { installStremioSmartPlayback } from "./lib/stremio-smart-playback.mjs";
 import { installStremioSmartCompatibility } from "./lib/stremio-smart-compat.mjs";
 import { installStremioFamilyAccountProvider } from "./lib/stremio-family-account-provider.mjs";
 import { installStremioAudienceClassifier } from "./lib/stremio-audience-classifier.mjs";
+import { installStremioFamilyLanguagePolicy } from "./lib/stremio-family-language-policy.mjs";
 import { startStremioAccountOptionsServer } from "./lib/stremio-account-options-server.mjs";
 import { installStremioLegacyAutoclick } from "./lib/stremio-legacy-autoclick.mjs";
 import { installStremioIndexedSelection } from "./lib/stremio-indexed-selection.mjs";
 import { installStremioDebugging } from "./lib/stremio-debug.mjs";
 
-// HA-only TV control policy (restored from 0.3.19): never contact Android TV Satellite.
+// HA-only TV control policy: never contact Android TV Satellite.
 // Keep all remote key transport inside Home Assistant so a dead Satellite cannot
 // stall DPAD/OK commands or queue retries before Home Assistant receives them.
 process.env.HA_SOL_TV_ENABLED = "false";
@@ -24,13 +25,15 @@ installStremioStableClick(SolPluginClient);
 installStremioLaunchGuard(SolPluginClient);
 installStremioSmartPlayback(SolPluginClient, STREMIO_MCP_TOOLS);
 installStremioSmartCompatibility(SolPluginClient);
-// Install before the audience wrapper so Kids/Family classification reaches this
-// adapter as profile=family and only then enters the stable smart-playback path.
+// Keep the old isolated provider adapter inside the new account-wide path so it
+// remains available only as a backwards-compatible fallback.
 installStremioFamilyAccountProvider(SolPluginClient);
+// Install indexed selection before the audience wrappers. Audience classification
+// can then map Kids/Family -> family, the language policy adds latin, and this
+// selector receives that final intent before the legacy provider adapter.
+installStremioIndexedSelection(SolPluginClient);
+installStremioFamilyLanguagePolicy(SolPluginClient);
 installStremioAudienceClassifier(SolPluginClient, STREMIO_MCP_TOOLS);
 installStremioLegacyAutoclick(SolPluginClient);
-// Wrap the final playback path after legacy compatibility. The selector observes
-// SOL's chosen addon/providerIndex and replaces a blind OK with DOWN x index + OK.
-installStremioIndexedSelection(SolPluginClient);
 installStremioDebugging(SolPluginClient, STREMIO_MCP_TOOLS);
 await import("./index.mjs");
