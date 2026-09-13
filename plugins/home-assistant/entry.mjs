@@ -7,6 +7,7 @@ import { installStremioSmartCompatibility } from "./lib/stremio-smart-compat.mjs
 import { installStremioFamilyAccountProvider } from "./lib/stremio-family-account-provider.mjs";
 import { installStremioAudienceClassifier } from "./lib/stremio-audience-classifier.mjs";
 import { installStremioFamilyLanguagePolicy } from "./lib/stremio-family-language-policy.mjs";
+import { installStremioOpenToKeysDelay } from "./lib/stremio-open-to-keys-delay.mjs";
 import { startStremioAccountOptionsServer } from "./lib/stremio-account-options-server.mjs";
 import { installStremioLegacyAutoclick } from "./lib/stremio-legacy-autoclick.mjs";
 import { installStremioIndexedSelection } from "./lib/stremio-indexed-selection.mjs";
@@ -34,6 +35,7 @@ installStremioFamilyAccountProvider(SolPluginClient);
 installStremioIndexedSelection(SolPluginClient);
 installStremioFamilyLanguagePolicy(SolPluginClient);
 installStremioAudienceClassifier(SolPluginClient, STREMIO_MCP_TOOLS);
+installStremioOpenToKeysDelay(SolPluginClient);
 installStremioLegacyAutoclick(SolPluginClient);
 installStremioDebugging(SolPluginClient, STREMIO_MCP_TOOLS);
 await import("./index.mjs");
