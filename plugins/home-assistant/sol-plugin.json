@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "id": "home-assistant",
   "name": "Home Assistant",
-  "version": "0.3.23",
+  "version": "0.3.24",
   "description": "Home Assistant bridge for SOL with HA-only Android TV remote control, native Stremio playback, account-aware next episodes and isolated family/sports provider profiles.",
   "runtime": "node",
   "entry": "entry.mjs",
@@ -392,7 +392,7 @@
       "key": "stremio_autoplay_first_stream",
       "label": "Reproducir el primer stream automáticamente",
       "type": "boolean",
-      "description": "Después de la espera fija configurada, envía un único DPAD_CENTER directamente mediante Home Assistant Remote. En profile=family el OK genérico permanece desactivado para evitar elegir un proveedor no validado.",
+      "description": "Después de la espera fija configurada, envía DPAD_CENTER mediante Home Assistant Remote. Opcionalmente puede mover el foco Derecha→Izquierda antes del OK. En profile=family el OK genérico permanece desactivado para evitar elegir un proveedor no validado.",
       "env": "HA_SOL_STREMIO_AUTOPLAY_FIRST_STREAM",
       "required": false,
       "default": true
@@ -401,12 +401,36 @@
       "key": "stremio_first_stream_delay_ms",
       "label": "Espera antes de OK de Stremio (ms)",
       "type": "number",
-      "description": "Espera fija entre abrir el detalle de Stremio y enviar DPAD_CENTER por Home Assistant. No se consulta Android TV Satellite.",
+      "description": "Espera fija entre abrir el detalle de Stremio e iniciar la secuencia de foco/DPAD_CENTER por Home Assistant. No se consulta Android TV Satellite.",
       "env": "HA_SOL_STREMIO_FIRST_STREAM_DELAY_MS",
       "required": false,
       "default": 3500,
       "min": 500,
       "max": 15000
+    },
+    {
+      "key": "stremio_focus_nudge",
+      "label": "Nudge de foco antes de OK",
+      "type": "select",
+      "description": "Antes del DPAD_CENTER automático puede enviar DPAD_RIGHT y DPAD_LEFT en llamadas separadas para forzar que Stremio establezca el foco. No afecta los comandos manuales del control remoto.",
+      "env": "HA_SOL_STREMIO_FOCUS_NUDGE",
+      "required": false,
+      "default": "right_left",
+      "options": [
+        { "value": "right_left", "label": "Derecha → Izquierda → OK" },
+        { "value": "off", "label": "Desactivado · sólo OK" }
+      ]
+    },
+    {
+      "key": "stremio_focus_nudge_delay_ms",
+      "label": "Pausa entre movimientos de foco (ms)",
+      "type": "number",
+      "description": "Pausa entre DPAD_RIGHT, DPAD_LEFT y DPAD_CENTER. Se suma al delay principal sólo cuando el nudge está activado.",
+      "env": "HA_SOL_STREMIO_FOCUS_NUDGE_DELAY_MS",
+      "required": false,
+      "default": 250,
+      "min": 0,
+      "max": 2000
     }
   ],
   "distribution": {
