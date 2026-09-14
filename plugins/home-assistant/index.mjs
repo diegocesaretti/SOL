@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { mkdir } from "node:fs/promises";
 import { HaStateCache } from "./lib/cache.mjs";
 import { HomeAssistantClient } from "./lib/ha-client.mjs";
-import { SolPluginClient } from "./lib/sol-client.mjs";
+import { SolPluginClient, STREMIO_MCP_TOOLS } from "./lib/sol-client.mjs";
 
 function required(name) {
   const value = process.env[name]?.trim();
@@ -13,8 +13,7 @@ function required(name) {
 
 function boolEnv(name, fallback = false) {
   const value = process.env[name];
-  if (value === undefined) return fallback;
-  return /^(1|true|yes|on)$/i.test(value);
+  return value === undefined ? fallback : /^(1|true|yes|on)$/i.test(value);
 }
 
 function numberEnv(name, fallback, min, max) {
@@ -37,8 +36,7 @@ async function readJson(request) {
     if (total > 1024 * 1024) throw new Error("request_too_large");
     chunks.push(buffer);
   }
-  if (!chunks.length) return {};
-  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  return chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {};
 }
 
 function compactEntity(entity) {
@@ -79,23 +77,6 @@ const mcpPath = `/mcp/${randomBytes(24).toString("base64url")}`;
 const callbackUrl = `http://127.0.0.1:${config.apiPort}${mcpPath}`;
 const personBindings = new Map();
 
-function personBindingSummary(binding) {
-  if (!binding) return null;
-  return {
-    entityId: binding.entityId,
-    linkedToSolMember: Boolean(binding.linkedMemberId),
-    linkedBy: binding.linkedBy || "none"
-  };
-}
-
-function compactPerson(entity) {
-  return {
-    ...compactEntity(entity),
-    solPerson: personBindingSummary(personBindings.get(entity.entityId)),
-    semantics: "Person is a human identity; this binding does not grant SOL account access or permissions."
-  };
-}
-
 function personSyncStatus() {
   const people = cache.listPeople();
   return {
@@ -106,6 +87,19 @@ function personSyncStatus() {
   };
 }
 
+function compactPerson(entity) {
+  const binding = personBindings.get(entity.entityId);
+  return {
+    ...compactEntity(entity),
+    solPerson: binding ? {
+      entityId: binding.entityId,
+      linkedToSolMember: Boolean(binding.linkedMemberId),
+      linkedBy: binding.linkedBy || "none"
+    } : null,
+    semantics: "Person is a human identity; this binding does not grant SOL account access or permissions."
+  };
+}
+
 let lastPersonSignature = "";
 let personSyncRun = null;
 async function syncPeopleOnce() {
@@ -113,19 +107,14 @@ async function syncPeopleOnce() {
   const people = cache.listPeople();
   const signature = people.map((person) => `${person.entityId}:${person.attributes?.friendly_name || ""}`).sort().join("|");
   if (signature === lastPersonSignature && people.every((person) => personBindings.has(person.entityId))) return;
-
   const liveIds = new Set(people.map((person) => person.entityId));
-  for (const entityId of personBindings.keys()) {
-    if (!liveIds.has(entityId)) personBindings.delete(entityId);
-  }
-
+  for (const entityId of personBindings.keys()) if (!liveIds.has(entityId)) personBindings.delete(entityId);
   let allSucceeded = true;
   for (const person of people) {
-    const label = person.attributes?.friendly_name || person.registry?.name || person.entityId;
     try {
       const binding = await sol.upsertPerson({
         entityId: person.entityId,
-        label,
+        label: person.attributes?.friendly_name || person.registry?.name || person.entityId,
         autoLinkMember: config.personSync === "safe-link",
         metadata: { source: "home_assistant", entityId: person.entityId }
       });
@@ -161,13 +150,7 @@ async function onConnectionState(state, error) {
   await sol.setInputStatus(config.baseUrl, status, state === "connected" ? new Date().toISOString() : undefined)
     .catch((requestError) => console.warn(`SOL HA input status update failed: ${requestError?.message || requestError}`));
   if (state === "connected") void syncPeople();
-  if (state === "error") {
-    console.log(JSON.stringify({
-      type: "sol.plugin.health",
-      status: "degraded",
-      details: { provider: "home_assistant", error: error?.message || String(error || "connection_error") }
-    }));
-  }
+  if (state === "error") console.log(JSON.stringify({ type: "sol.plugin.health", status: "degraded", details: { provider: "home_assistant", error: error?.message || String(error || "connection_error") } }));
 }
 
 const ha = new HomeAssistantClient({
@@ -184,196 +167,59 @@ function assertTvActionAllowed() {
   if (!config.tvRemoteEntityId) throw new Error("tv_remote_entity_id_required");
 }
 
-const homeAssistantRemoteCommand = {
-  home: "HOME",
-  back: "BACK",
-  up: "DPAD_UP",
-  down: "DPAD_DOWN",
-  left: "DPAD_LEFT",
-  right: "DPAD_RIGHT",
-  center: "DPAD_CENTER"
-};
+const remoteCommands = { home: "HOME", back: "BACK", up: "DPAD_UP", down: "DPAD_DOWN", left: "DPAD_LEFT", right: "DPAD_RIGHT", center: "DPAD_CENTER" };
 
-function normalizedMoveCount(direction, count) {
+function moveCount(direction, count) {
   if (["home", "back", "center"].includes(direction)) return 1;
   const value = Number(count ?? 1);
-  if (!Number.isFinite(value)) return 1;
-  return Math.max(1, Math.min(12, Math.trunc(value)));
+  return Number.isFinite(value) ? Math.max(1, Math.min(12, Math.trunc(value))) : 1;
 }
 
-async function sendHaRemoteCommands(commands) {
-  if (!config.tvRemoteEntityId) throw new Error("tv_remote_entity_id_required");
-  if (!Array.isArray(commands) || !commands.length) throw new Error("tv_remote_commands_required");
-  const result = await ha.callService(
-    "remote",
-    "send_command",
-    { command: commands },
-    { entity_id: config.tvRemoteEntityId },
-    false
-  );
-  return {
-    ok: true,
-    mode: "home_assistant_only",
-    via: "home_assistant_remote",
-    remoteEntityId: config.tvRemoteEntityId,
-    commands,
-    result: result ?? null
-  };
+async function sendTvCommands(commands) {
+  const result = await ha.callService("remote", "send_command", { command: commands }, { entity_id: config.tvRemoteEntityId }, false);
+  return { ok: true, via: "home_assistant_remote", remoteEntityId: config.tvRemoteEntityId, commands, result: result ?? null };
 }
 
 async function navigateTv(direction, count = 1) {
-  const command = homeAssistantRemoteCommand[direction];
+  const command = remoteCommands[direction];
   if (!command) throw new Error("tv_navigation_direction_invalid");
-  const moveCount = normalizedMoveCount(direction, count);
-  return {
-    ...(await sendHaRemoteCommands(Array.from({ length: moveCount }, () => command))),
-    direction,
-    count: moveCount
-  };
+  const countValue = moveCount(direction, count);
+  return { ...(await sendTvCommands(Array.from({ length: countValue }, () => command))), direction, count: countValue };
 }
 
 async function navigateTvPath(moves) {
-  if (!Array.isArray(moves) || moves.length < 1 || moves.length > 10) {
-    throw new Error("tv_navigation_path_requires_1_to_10_moves");
-  }
+  if (!Array.isArray(moves) || moves.length < 1 || moves.length > 10) throw new Error("tv_navigation_path_requires_1_to_10_moves");
   const path = [];
   const commands = [];
   for (const move of moves) {
     const direction = String(move?.direction || "").trim().toLowerCase();
-    const command = homeAssistantRemoteCommand[direction];
+    const command = remoteCommands[direction];
     if (!command) throw new Error("tv_navigation_direction_invalid");
-    const count = normalizedMoveCount(direction, move?.count);
+    const count = moveCount(direction, move?.count);
     path.push({ direction, count });
     for (let index = 0; index < count; index += 1) commands.push(command);
     if (commands.length > 40) throw new Error("tv_navigation_path_too_long");
   }
-  return {
-    ...(await sendHaRemoteCommands(commands)),
-    path,
-    totalKeypresses: commands.length
-  };
+  return { ...(await sendTvCommands(commands)), path, totalKeypresses: commands.length };
 }
 
 const baseTools = [
-  {
-    name: "home_assistant_cache_status",
-    description: "Return Home Assistant connection, local cache freshness and Person sync status. Use this before relying on cached state when freshness matters.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    requiredScope: "read"
-  },
-  {
-    name: "home_assistant_get_state",
-    description: "Read one Home Assistant entity from SOL's event-driven local cache without a network read to Home Assistant.",
-    inputSchema: {
-      type: "object",
-      properties: { entityId: { type: "string", description: "Exact Home Assistant entity_id." } },
-      required: ["entityId"],
-      additionalProperties: false
-    },
-    requiredScope: "read"
-  },
-  {
-    name: "home_assistant_search_states",
-    description: "Search cached Home Assistant entities by entity id, friendly name, device or area. Prefer this over guessing entity ids.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        query: { type: "string" },
-        limit: { type: "number", minimum: 1, maximum: 100 }
-      },
-      required: ["query"],
-      additionalProperties: false
-    },
-    requiredScope: "read"
-  },
-  {
-    name: "home_assistant_list_people",
-    description: "List cached Home Assistant person entities with their canonical SOL Person binding. Person identity does not imply a SOL account or access grant.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    requiredScope: "read"
-  },
-  {
-    name: "home_assistant_list_areas",
-    description: "List Home Assistant areas from the cached area registry with current entity counts.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    requiredScope: "read"
-  },
-  {
-    name: "home_assistant_get_services",
-    description: "List cached Home Assistant service/action definitions, optionally filtered by domain.",
-    inputSchema: {
-      type: "object",
-      properties: { domain: { type: "string" } },
-      additionalProperties: false
-    },
-    requiredScope: "read"
-  },
-  {
-    name: "home_assistant_call_service",
-    description: "Execute a Home Assistant service/action. Requires SOL actions scope, plugin control enabled and explicit confirmation from the current human.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        confirmedByUser: { type: "boolean", const: true },
-        domain: { type: "string" },
-        service: { type: "string" },
-        target: { type: "object" },
-        serviceData: { type: "object" }
-      },
-      required: ["confirmedByUser", "domain", "service"],
-      additionalProperties: false
-    },
-    requiredScope: "actions"
-  }
+  { name: "home_assistant_cache_status", description: "Return Home Assistant connection, local cache freshness and Person sync status.", inputSchema: { type: "object", properties: {}, additionalProperties: false }, requiredScope: "read" },
+  { name: "home_assistant_get_state", description: "Read one Home Assistant entity from the event-driven local cache.", inputSchema: { type: "object", properties: { entityId: { type: "string" } }, required: ["entityId"], additionalProperties: false }, requiredScope: "read" },
+  { name: "home_assistant_search_states", description: "Search cached entities by id, friendly name, device or area.", inputSchema: { type: "object", properties: { query: { type: "string" }, limit: { type: "number", minimum: 1, maximum: 100 } }, required: ["query"], additionalProperties: false }, requiredScope: "read" },
+  { name: "home_assistant_list_people", description: "List cached Home Assistant Person entities and SOL Person bindings.", inputSchema: { type: "object", properties: {}, additionalProperties: false }, requiredScope: "read" },
+  { name: "home_assistant_list_areas", description: "List Home Assistant areas from the cached registry.", inputSchema: { type: "object", properties: {}, additionalProperties: false }, requiredScope: "read" },
+  { name: "home_assistant_get_services", description: "List cached Home Assistant service definitions.", inputSchema: { type: "object", properties: { domain: { type: "string" } }, additionalProperties: false }, requiredScope: "read" },
+  { name: "home_assistant_call_service", description: "Execute a Home Assistant service. Requires plugin control and explicit user confirmation.", inputSchema: { type: "object", properties: { confirmedByUser: { type: "boolean", const: true }, domain: { type: "string" }, service: { type: "string" }, target: { type: "object" }, serviceData: { type: "object" } }, required: ["confirmedByUser", "domain", "service"], additionalProperties: false }, requiredScope: "actions" }
 ];
 
 const tvTools = [
-  {
-    name: "home_assistant_tv_status",
-    description: "Report Android TV control status in Home Assistant-only mode. No Android TV Satellite, screenshots or Accessibility service are used.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    requiredScope: "read"
-  },
-  {
-    name: "home_assistant_tv_navigate",
-    description: "Send Home, Back or DPAD keys directly through the configured Home Assistant remote.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        direction: { type: "string", enum: ["home", "back", "up", "down", "left", "right", "center"] },
-        count: { type: "integer", minimum: 1, maximum: 12, default: 1 }
-      },
-      required: ["direction"],
-      additionalProperties: false
-    },
-    requiredScope: "actions"
-  },
-  {
-    name: "home_assistant_tv_navigate_path",
-    description: "Send a deterministic Home/Back/DPAD sequence directly through Home Assistant remote.send_command.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        moves: {
-          type: "array", minItems: 1, maxItems: 10,
-          items: {
-            type: "object",
-            properties: {
-              direction: { type: "string", enum: ["home", "back", "up", "down", "left", "right", "center"] },
-              count: { type: "integer", minimum: 1, maximum: 12, default: 1 }
-            },
-            required: ["direction"], additionalProperties: false
-          }
-        }
-      },
-      required: ["moves"], additionalProperties: false
-    },
-    requiredScope: "actions"
-  }
+  { name: "home_assistant_tv_status", description: "Report Home Assistant-only Android TV control status.", inputSchema: { type: "object", properties: {}, additionalProperties: false }, requiredScope: "read" },
+  { name: "home_assistant_tv_navigate", description: "Send Home, Back or DPAD keys through the configured Home Assistant remote.", inputSchema: { type: "object", properties: { direction: { type: "string", enum: ["home", "back", "up", "down", "left", "right", "center"] }, count: { type: "integer", minimum: 1, maximum: 12, default: 1 } }, required: ["direction"], additionalProperties: false }, requiredScope: "actions" },
+  { name: "home_assistant_tv_navigate_path", description: "Send a deterministic DPAD path through Home Assistant.", inputSchema: { type: "object", properties: { moves: { type: "array", minItems: 1, maxItems: 10, items: { type: "object", properties: { direction: { type: "string", enum: ["home", "back", "up", "down", "left", "right", "center"] }, count: { type: "integer", minimum: 1, maximum: 12, default: 1 } }, required: ["direction"], additionalProperties: false } } }, required: ["moves"], additionalProperties: false }, requiredScope: "actions" }
 ];
 
-const tools = [...baseTools, ...tvTools];
-
+const tools = [...baseTools, ...tvTools, ...STREMIO_MCP_TOOLS];
 let toolsRegistered = false;
 async function registerTools() {
   if (!sol.enabled) return;
@@ -386,6 +232,46 @@ async function registerTools() {
   }
 }
 
+async function dispatchTool(tool, args) {
+  if (tool === "home_assistant_cache_status") return { cache: cache.status(), baseUrl: config.baseUrl, personSync: personSyncStatus(), controlEnabled: config.allowControl };
+  if (tool === "home_assistant_get_state") {
+    const entity = cache.getEntity(String(args.entityId || ""));
+    if (!entity) throw new Error("entity_not_found");
+    return compactEntity(entity);
+  }
+  if (tool === "home_assistant_search_states") return { results: cache.search(String(args.query || ""), Number(args.limit || 30)).map(compactEntity), cache: cache.status() };
+  if (tool === "home_assistant_list_people") {
+    await syncPeople().catch(() => undefined);
+    return { people: cache.listPeople().map(compactPerson), personSync: personSyncStatus(), cache: cache.status() };
+  }
+  if (tool === "home_assistant_list_areas") return { areas: cache.listAreas(), cache: cache.status() };
+  if (tool === "home_assistant_get_services") {
+    const domain = typeof args.domain === "string" ? args.domain.trim() : "";
+    return { services: domain ? { [domain]: cache.services[domain] || {} } : cache.services, cache: cache.status() };
+  }
+  if (tool === "home_assistant_call_service") {
+    if (!config.allowControl) throw new Error("home_assistant_control_disabled");
+    if (args.confirmedByUser !== true) throw new Error("explicit_user_confirmation_required");
+    const domain = String(args.domain || "").trim();
+    const service = String(args.service || "").trim();
+    if (!domain || !service) throw new Error("domain_and_service_required");
+    const returnResponse = Boolean(cache.services?.[domain]?.[service]?.response);
+    const result = await ha.callService(domain, service, args.serviceData || {}, args.target || {}, returnResponse);
+    return { ok: true, result: result ?? null, cache: cache.status() };
+  }
+  if (tool === "home_assistant_tv_status") return { mode: "home_assistant_only", remoteConfigured: Boolean(config.tvRemoteEntityId), remoteEntityId: config.tvRemoteEntityId || null, controlEnabled: config.allowControl, visualObservationAvailable: false };
+  if (tool === "home_assistant_tv_navigate") {
+    assertTvActionAllowed();
+    return navigateTv(String(args.direction || "").trim().toLowerCase(), args.count);
+  }
+  if (tool === "home_assistant_tv_navigate_path") {
+    assertTvActionAllowed();
+    return navigateTvPath(args.moves);
+  }
+  if (tool.startsWith("home_assistant_stremio_")) return sol.handleStremioTool(tool, args);
+  throw new Error("tool_not_found");
+}
+
 const server = createServer(async (request, response) => {
   const path = new URL(request.url || "/", "http://127.0.0.1").pathname;
   try {
@@ -396,13 +282,7 @@ const server = createServer(async (request, response) => {
         cache: cache.status(),
         personSync: personSyncStatus(),
         controlEnabled: config.allowControl,
-        tv: {
-          mode: "home_assistant_only",
-          configured: Boolean(config.tvRemoteEntityId),
-          remoteEntityId: config.tvRemoteEntityId || null,
-          visualObservationAvailable: false,
-          batchedNavigation: true
-        }
+        tv: { mode: "home_assistant_only", configured: Boolean(config.tvRemoteEntityId), remoteEntityId: config.tvRemoteEntityId || null, visualObservationAvailable: false }
       });
       return;
     }
@@ -410,13 +290,9 @@ const server = createServer(async (request, response) => {
       sendJson(response, 404, { error: "not_found" });
       return;
     }
-
     const body = await readJson(request);
     if (body?.type === "sol.plugin.mcp.probe") {
-      if (body.pluginId !== pluginId) {
-        sendJson(response, 403, { error: "plugin_id_mismatch" });
-        return;
-      }
+      if (body.pluginId !== pluginId) return sendJson(response, 403, { error: "plugin_id_mismatch" });
       sendJson(response, 200, { ok: true, pluginId });
       return;
     }
@@ -424,108 +300,14 @@ const server = createServer(async (request, response) => {
       sendJson(response, 403, { error: "invalid_plugin_mcp_envelope" });
       return;
     }
-
-    const tool = String(body?.tool || "");
-    const args = body?.arguments && typeof body.arguments === "object" ? body.arguments : {};
-
-    if (tool === "home_assistant_cache_status") {
-      sendJson(response, 200, {
-        cache: cache.status(),
-        baseUrl: config.baseUrl,
-        personSync: personSyncStatus(),
-        controlEnabled: config.allowControl,
-        tv: { mode: "home_assistant_only", configured: Boolean(config.tvRemoteEntityId), remoteEntityId: config.tvRemoteEntityId || null }
-      });
-      return;
-    }
-    if (tool === "home_assistant_get_state") {
-      const entity = cache.getEntity(String(args.entityId || ""));
-      if (!entity) {
-        sendJson(response, 404, { error: "entity_not_found" });
-        return;
-      }
-      sendJson(response, 200, compactEntity(entity));
-      return;
-    }
-    if (tool === "home_assistant_search_states") {
-      sendJson(response, 200, {
-        results: cache.search(String(args.query || ""), Number(args.limit || 30)).map(compactEntity),
-        cache: cache.status()
-      });
-      return;
-    }
-    if (tool === "home_assistant_list_people") {
-      await syncPeople().catch(() => undefined);
-      sendJson(response, 200, {
-        people: cache.listPeople().map(compactPerson),
-        personSync: personSyncStatus(),
-        cache: cache.status()
-      });
-      return;
-    }
-    if (tool === "home_assistant_list_areas") {
-      sendJson(response, 200, { areas: cache.listAreas(), cache: cache.status() });
-      return;
-    }
-    if (tool === "home_assistant_get_services") {
-      const domain = typeof args.domain === "string" ? args.domain.trim() : "";
-      sendJson(response, 200, {
-        services: domain ? { [domain]: cache.services[domain] || {} } : cache.services,
-        cache: cache.status()
-      });
-      return;
-    }
-    if (tool === "home_assistant_call_service") {
-      if (!config.allowControl) {
-        sendJson(response, 403, { error: "home_assistant_control_disabled" });
-        return;
-      }
-      if (args.confirmedByUser !== true) {
-        sendJson(response, 403, { error: "explicit_user_confirmation_required" });
-        return;
-      }
-      const domain = String(args.domain || "").trim();
-      const service = String(args.service || "").trim();
-      if (!domain || !service) {
-        sendJson(response, 400, { error: "domain_and_service_required" });
-        return;
-      }
-      const serviceDefinition = cache.services?.[domain]?.[service];
-      const returnResponse = Boolean(serviceDefinition?.response);
-      const result = await ha.callService(domain, service, args.serviceData || {}, args.target || {}, returnResponse);
-      sendJson(response, 200, { ok: true, result: result ?? null, cache: cache.status() });
-      return;
-    }
-    if (tool === "home_assistant_tv_status") {
-      sendJson(response, 200, {
-        mode: "home_assistant_only",
-        remoteConfigured: Boolean(config.tvRemoteEntityId),
-        remoteEntityId: config.tvRemoteEntityId || null,
-        controlEnabled: config.allowControl,
-        transport: "Home Assistant remote.send_command",
-        visualObservationAvailable: false
-      });
-      return;
-    }
-    if (tool === "home_assistant_tv_navigate") {
-      assertTvActionAllowed();
-      const direction = String(args.direction || "").trim().toLowerCase();
-      const result = await navigateTv(direction, args.count);
-      sendJson(response, 200, result);
-      return;
-    }
-    if (tool === "home_assistant_tv_navigate_path") {
-      assertTvActionAllowed();
-      const result = await navigateTvPath(args.moves);
-      sendJson(response, 200, result);
-      return;
-    }
-    sendJson(response, 404, { error: "tool_not_found" });
+    const result = await dispatchTool(String(body.tool || ""), body.arguments && typeof body.arguments === "object" ? body.arguments : {});
+    sendJson(response, 200, result);
   } catch (error) {
     const message = error?.message || String(error);
-    const status = message.includes("disabled") ? 403
+    const status = message.includes("disabled") || message.includes("confirmation_required") ? 403
       : message.includes("not_found") ? 404
-        : 500;
+        : message.includes("required") || message.includes("invalid") ? 400
+          : 500;
     sendJson(response, status, { error: message });
   }
 });
@@ -538,9 +320,7 @@ server.listen(config.apiPort, "127.0.0.1", async () => {
 
 const peopleTimer = setInterval(() => void syncPeople(), 30000);
 peopleTimer.unref?.();
-const registrationRetryTimer = setInterval(() => {
-  if (!toolsRegistered) void registerTools();
-}, 15000);
+const registrationRetryTimer = setInterval(() => { if (!toolsRegistered) void registerTools(); }, 15000);
 registrationRetryTimer.unref?.();
 
 let stopping = false;
