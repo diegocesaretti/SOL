@@ -2,7 +2,7 @@ import { appendFile, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const DEBUG_TOOL_NAME = "home_assistant_stremio_debug_last";
-const MAX_TRACE_EVENTS = 200;
+const MAX_TRACE_EVENTS = 120;
 const MAX_LOG_BYTES = 1024 * 1024;
 const KEEP_LOG_LINES = 40;
 
@@ -10,66 +10,35 @@ function nowIso() {
   return new Date().toISOString();
 }
 
-function compactState(state) {
-  if (!state || typeof state !== "object") return null;
-  return {
-    stremio: state.stremio ?? null,
-    loading: state.loading ?? null,
-    streamLike: state.streamLike ?? null,
-    playerLike: state.playerLike ?? null,
-    focusText: state.focusText ?? null,
-    uiEventSequence: state.uiEventSequence ?? null
-  };
-}
-
 function compactReadiness(readiness) {
   if (!readiness || typeof readiness !== "object") return null;
   return {
     ready: readiness.ready ?? null,
-    alreadyPlaying: readiness.alreadyPlaying ?? false,
     via: readiness.via ?? null,
     waitedMs: readiness.waitedMs ?? null,
-    state: compactState(readiness.state),
-    note: readiness.note ?? null
+    openToKeysDelayMs: readiness.openToKeysDelayMs ?? null,
+    reason: readiness.reason ?? null
   };
 }
 
-function compactVerification(verification) {
-  if (!verification || typeof verification !== "object") return null;
+function compactClick(click) {
+  if (!click || typeof click !== "object") return null;
   return {
-    status: verification.status ?? null,
-    confirmed: verification.confirmed ?? null,
-    via: verification.via ?? null,
-    waitedMs: verification.waitedMs ?? null,
-    state: compactState(verification.state),
-    reason: verification.reason ?? null,
-    note: verification.note ?? null
-  };
-}
-
-function compactObservation(observation) {
-  if (!observation || typeof observation !== "object") return null;
-  return {
-    package: observation.package || observation.package_name || null,
-    uiEventSequence: observation.ui_event_sequence ?? null,
-    hasTree: Boolean(observation.tree || observation.root),
-    focusText: observation.focus_hint?.text || observation.focused?.text || observation.focus_hint?.description || observation.focused?.description || null
-  };
-}
-
-function compactAutoSelection(result) {
-  if (!result || typeof result !== "object") return null;
-  return {
-    ok: result.ok === true,
-    reason: result.reason ?? null,
-    attempt: result.attempt ?? null,
-    matchedText: result.matchedText ?? null,
-    via: result.via ?? null,
-    candidates: Array.isArray(result.candidates) ? result.candidates.slice(0, 8) : null,
-    attempts: result.attempts ?? null,
-    errors: Array.isArray(result.errors)
-      ? result.errors.slice(-12).map((item) => ({ attempt: item.attempt ?? null, text: item.text ?? null, reason: item.reason ?? null }))
-      : []
+    ok: click.ok === true,
+    commandSent: click.commandSent ?? null,
+    reason: click.reason ?? null,
+    via: click.via ?? null,
+    commands: Array.isArray(click.commands) ? click.commands : null,
+    targetIndex: click.targetIndex ?? click.indexedSelection?.index ?? null,
+    initialFocusIndex: click.initialFocusIndex ?? null,
+    requestedRights: click.requestedRights ?? null,
+    forwardedRights: click.forwardedRights ?? null,
+    suppressedRights: click.suppressedRights ?? null,
+    injectedLefts: click.injectedLefts ?? null,
+    keyDelayMs: click.keyDelayMs ?? null,
+    centerDelayMs: click.centerDelayMs ?? null,
+    centerSent: click.centerSent ?? null,
+    readiness: compactReadiness(click.readiness)
   };
 }
 
@@ -86,27 +55,30 @@ function compactPlayResult(result) {
       quality: result.selected.quality ?? null,
       codec: result.selected.codec ?? null,
       sizeGb: result.selected.sizeGb ?? null,
-      seeders: result.selected.seeders ?? null
+      seeders: result.selected.seeders ?? null,
+      nativeIndex: result.selected.nativeIndex ?? null
     } : null,
     directLookupError: result.directLookupError ?? null,
-    selectorFallbackReason: result.selectorFallbackReason ?? null,
     playbackConfirmed: result.playbackConfirmed ?? null,
-    firstStreamClick: result.firstStreamClick ? {
-      ok: result.firstStreamClick.ok === true,
-      commandSent: result.firstStreamClick.commandSent ?? null,
-      selectionConfirmed: result.firstStreamClick.selectionConfirmed ?? null,
-      reason: result.firstStreamClick.reason ?? null,
-      readiness: compactReadiness(result.firstStreamClick.readiness),
-      playbackVerification: compactVerification(result.firstStreamClick.playbackVerification)
+    firstStreamClick: compactClick(result.firstStreamClick),
+    indexedSelection: result.indexedSelection ? {
+      ok: result.indexedSelection.ok ?? null,
+      index: result.indexedSelection.index ?? null,
+      reason: result.indexedSelection.reason ?? null,
+      confidence: result.indexedSelection.confidence ?? null
     } : null,
-    autoSelection: compactAutoSelection(result.autoSelection),
-    playbackVerification: compactVerification(result.playbackVerification),
+    accountWideLanguageSelection: result.accountWideLanguageSelection ? {
+      ok: result.accountWideLanguageSelection.ok ?? null,
+      language: result.accountWideLanguageSelection.language ?? null,
+      nativeIndex: result.accountWideLanguageSelection.nativeIndex ?? null,
+      reason: result.accountWideLanguageSelection.reason ?? null,
+      failClosed: result.accountWideLanguageSelection.failClosed ?? null
+    } : null,
     launchGuard: result.launchGuard ? {
       ok: result.launchGuard.ok ?? null,
-      retries: result.launchGuard.retries ?? null,
-      finalStatus: result.launchGuard.finalStatus ?? null,
-      finalPackage: result.launchGuard.finalPackage ?? null,
-      allowStreamInput: result.launchGuard.allowStreamInput ?? null
+      mode: result.launchGuard.mode ?? null,
+      allowStreamInput: result.launchGuard.allowStreamInput ?? null,
+      wake: result.launchGuard.wake ?? null
     } : null
   };
 }
@@ -114,12 +86,10 @@ function compactPlayResult(result) {
 function toolDefinition() {
   return {
     name: DEBUG_TOOL_NAME,
-    description: "Return sanitized traces from recent Stremio play_best runs, including Android TV Satellite observation/click timing and selector failures. Never returns addon manifest URLs, tokens or direct stream URLs.",
+    description: "Return sanitized traces from recent Stremio playback runs, including indexed navigation, delays and CENTER delivery. Never returns addon URLs, tokens or direct stream URLs.",
     inputSchema: {
       type: "object",
-      properties: {
-        limit: { type: "integer", minimum: 1, maximum: 20, default: 3 }
-      },
+      properties: { limit: { type: "integer", minimum: 1, maximum: 20, default: 3 } },
       additionalProperties: false
     },
     requiredScope: "read"
@@ -159,12 +129,8 @@ export function installStremioDebugging(SolPluginClient, STREMIO_MCP_TOOLS) {
   }
 
   const originalHandle = proto.handleStremioTool;
-  const originalObserve = proto.tvObserveRaw;
-  const originalClickText = proto.tvClickText;
   const originalWaitForStreamUi = proto.waitForStreamUi;
-  const originalVerifyPlayback = proto.verifyPlayback;
   const originalClickFirstStream = proto.clickFirstStream;
-  const originalAutoSelect = proto.autoSelectVisualStream;
 
   proto.__stremioDebugPath = join(process.env.SOL_PLUGIN_DATA_DIR || new URL("../.data", import.meta.url).pathname, "stremio-debug.ndjson");
   proto.__stremioDebugWriteQueue = Promise.resolve();
@@ -184,101 +150,15 @@ export function installStremioDebugging(SolPluginClient, STREMIO_MCP_TOOLS) {
     return this.__stremioDebugWriteQueue;
   };
 
-  proto.tvObserveRaw = async function tvObserveRawDebug(waitMs = 0) {
-    const started = Date.now();
-    const result = await originalObserve.call(this, waitMs);
-    this.__stremioDebugEvent("tv_observe", {
-      waitMs,
-      elapsedMs: Date.now() - started,
-      ok: Boolean(result),
-      observation: compactObservation(result),
-      diagnostic: result ? null : "observe_returned_null_http_json_or_timeout_hidden_by_legacy_path"
-    });
-    return result;
-  };
-
-  proto.tvClickText = async function tvClickTextDebug(text) {
-    const started = Date.now();
-    const result = await originalClickText.call(this, text);
-    this.__stremioDebugEvent("click_text", {
-      elapsedMs: Date.now() - started,
-      text,
-      ok: result?.ok === true,
-      via: result?.via ?? null,
-      status: result?.status ?? null,
-      reason: result?.reason ?? null
-    });
-    return result;
-  };
-
   proto.waitForStreamUi = async function waitForStreamUiDebug(...args) {
     const result = await originalWaitForStreamUi.apply(this, args);
     this.__stremioDebugEvent("wait_for_stream_ui", compactReadiness(result) || {});
     return result;
   };
 
-  proto.verifyPlayback = async function verifyPlaybackDebug(...args) {
-    const result = await originalVerifyPlayback.apply(this, args);
-    this.__stremioDebugEvent("verify_playback", compactVerification(result) || {});
-    return result;
-  };
-
   proto.clickFirstStream = async function clickFirstStreamDebug(...args) {
     const result = await originalClickFirstStream.apply(this, args);
-    const verification = result?.playbackVerification;
-    const centerWasSent = result?.ok === true && result?.command === "DPAD_CENTER";
-    const confirmed = verification?.confirmed === true;
-    const state = verification?.state || result?.readiness?.state || null;
-    const streamListStillVisible = state?.streamLike === true && state?.playerLike !== true;
-
-    // Sending DPAD_CENTER proves transport only. Continue into visual matching only
-    // when Accessibility actually says the stream list is still on screen. If the
-    // player surface is opaque to Accessibility, keep the result unverified instead
-    // of risking a second click on a playing video.
-    let adjusted = result;
-    if (centerWasSent && confirmed) {
-      adjusted = { ...result, commandSent: true, selectionConfirmed: true };
-    } else if (centerWasSent && streamListStillVisible) {
-      adjusted = {
-        ...result,
-        ok: false,
-        commandSent: true,
-        selectionConfirmed: false,
-        reason: "stremio_center_sent_stream_list_still_visible"
-      };
-    } else if (centerWasSent) {
-      adjusted = {
-        ...result,
-        commandSent: true,
-        selectionConfirmed: null,
-        reason: result?.reason || "stremio_center_sent_playback_unverified"
-      };
-    }
-
-    this.__stremioDebugEvent("click_first_stream", {
-      ok: adjusted?.ok === true,
-      commandSent: adjusted?.commandSent ?? centerWasSent,
-      selectionConfirmed: adjusted?.selectionConfirmed ?? null,
-      streamListStillVisible,
-      reason: adjusted?.reason ?? null,
-      readiness: compactReadiness(adjusted?.readiness),
-      playbackVerification: compactVerification(adjusted?.playbackVerification)
-    });
-    return adjusted;
-  };
-
-  proto.autoSelectVisualStream = async function autoSelectVisualStreamDebug(selected) {
-    this.__stremioDebugEvent("visual_selector_start", {
-      selected: selected ? {
-        addonName: selected.addonName ?? null,
-        name: selected.name ?? null,
-        title: selected.title ?? null,
-        quality: selected.quality ?? null
-      } : null,
-      configuredAttempts: this.stremioAutoSelectAttempts
-    });
-    const result = await originalAutoSelect.call(this, selected);
-    this.__stremioDebugEvent("visual_selector_result", compactAutoSelection(result) || {});
+    this.__stremioDebugEvent("click_first_stream", compactClick(result) || {});
     return result;
   };
 
@@ -286,20 +166,20 @@ export function installStremioDebugging(SolPluginClient, STREMIO_MCP_TOOLS) {
     if (tool === DEBUG_TOOL_NAME) {
       const limit = Math.max(1, Math.min(20, Number(args.limit) || 3));
       await this.__stremioDebugWriteQueue.catch(() => {});
-      const traces = await readRecentTraces(this.__stremioDebugPath, limit);
       return {
         logFile: "stremio-debug.ndjson",
         storage: "SOL_PLUGIN_DATA_DIR",
         sanitized: true,
-        traces
+        traces: await readRecentTraces(this.__stremioDebugPath, limit)
       };
     }
 
-    if (tool !== "home_assistant_stremio_play_best") return originalHandle.call(this, tool, args);
+    const playbackTool = tool === "home_assistant_stremio_play_best" || tool === "home_assistant_stremio_play";
+    if (!playbackTool) return originalHandle.call(this, tool, args);
 
     const previous = this.__stremioDebugContext;
     const trace = {
-      schema: 1,
+      schema: 2,
       id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
       startedAt: nowIso(),
       startedMs: Date.now(),
@@ -307,37 +187,34 @@ export function installStremioDebugging(SolPluginClient, STREMIO_MCP_TOOLS) {
         query: typeof args.query === "string" ? args.query.slice(0, 300) : null,
         id: args.id ?? null,
         mediaType: args.mediaType ?? null,
-        year: args.year ?? null,
         season: args.season ?? null,
-        episode: args.episode ?? null
+        episode: args.episode ?? null,
+        language: args.language ?? null,
+        profile: args.profile ?? null
       },
       config: {
-        tvEnabled: Boolean(this.stremioTvEnabled),
-        tvConfigured: Boolean(this.stremioTvUrl),
-        tvTimeoutMs: this.stremioTvTimeoutMs,
         firstStreamDelayMs: this.stremioFirstStreamDelayMs,
-        playbackVerifyMs: this.stremioPlaybackVerifyMs,
-        visualAttempts: this.stremioAutoSelectAttempts,
-        addonConfigured: Boolean(this.addonAggregator?.configured)
+        addonConfigured: Boolean(this.addonAggregator?.configured),
+        haOnlyTvControl: true
       },
       events: []
     };
     this.__stremioDebugContext = trace;
-    this.__stremioDebugEvent("play_best_start");
+    this.__stremioDebugEvent("play_start");
 
     try {
       const result = await originalHandle.call(this, tool, args);
       trace.finishedAt = nowIso();
       trace.elapsedMs = Date.now() - trace.startedMs;
       trace.result = compactPlayResult(result);
-      this.__stremioDebugEvent("play_best_result", trace.result || {});
+      this.__stremioDebugEvent("play_result", trace.result || {});
       await this.__persistStremioDebugTrace(trace);
       return { ...result, debugTraceId: trace.id };
     } catch (error) {
       trace.finishedAt = nowIso();
       trace.elapsedMs = Date.now() - trace.startedMs;
       trace.error = error?.message || String(error);
-      this.__stremioDebugEvent("play_best_error", { error: trace.error });
+      this.__stremioDebugEvent("play_error", { error: trace.error });
       await this.__persistStremioDebugTrace(trace);
       throw error;
     } finally {
