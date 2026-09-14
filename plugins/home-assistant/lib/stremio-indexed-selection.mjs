@@ -164,19 +164,44 @@ export function planFromProviderSlices(slices, selected, { maxIndex = 100 } = {}
   return { ok: false, reason: "stremio_index_selected_addon_not_in_account", addonId };
 }
 
-function streamAccountAddons(account) {
+function resourceDescriptors(manifest) {
+  return (Array.isArray(manifest?.resources) ? manifest.resources : [])
+    .map((resource) => typeof resource === "string" ? { name: resource } : resource)
+    .filter((resource) => resource && typeof resource === "object");
+}
+
+export function accountAddonSupportsStream(addon, mediaType, mediaId) {
+  const manifest = addon?.manifest;
+  if (!manifest || typeof manifest !== "object") return true;
+  for (const resource of resourceDescriptors(manifest)) {
+    if (resource.name !== "stream") continue;
+    const types = Array.isArray(resource.types) ? resource.types
+      : Array.isArray(manifest.types) ? manifest.types
+        : [];
+    if (types.length && !types.map(String).includes(String(mediaType))) continue;
+    const prefixes = Array.isArray(resource.idPrefixes) ? resource.idPrefixes
+      : Array.isArray(manifest.idPrefixes) ? manifest.idPrefixes
+        : [];
+    if (prefixes.length && !prefixes.some((prefix) => String(mediaId).startsWith(String(prefix)))) continue;
+    return true;
+  }
+  return false;
+}
+
+function streamAccountAddons(account, mediaType, mediaId) {
   return (Array.isArray(account?.addons) ? account.addons : [])
     .filter((addon) => addon
       && Array.isArray(addon.roles)
       && addon.roles.includes("stream")
       && clean(addon.id)
-      && clean(addon.transportUrl));
+      && clean(addon.transportUrl)
+      && accountAddonSupportsStream(addon, mediaType, mediaId));
 }
 
 export async function queryAccountProviderSlices(client, { mediaType, mediaId }, account) {
   if (!mediaType || !mediaId) return { addons: [], slices: [] };
   await account.refresh({ force: false });
-  const addons = streamAccountAddons(account);
+  const addons = streamAccountAddons(account, mediaType, mediaId);
   const slices = await Promise.all(addons.map(async (addon) => {
     try {
       const result = await queryProviderStreams({
@@ -220,10 +245,7 @@ async function sendMovementKey(client, command) {
 
 async function sendSelectKey(client, command, holdMs) {
   if (!client?.stremioRemoteEntityId) throw new Error("stremio_remote_entity_id_required");
-  const payload = {
-    entity_id: client.stremioRemoteEntityId,
-    command
-  };
+  const payload = { entity_id: client.stremioRemoteEntityId, command };
   if (holdMs > 0) payload.hold_secs = holdMs / 1000;
   return client.haService("remote", "send_command", payload);
 }
