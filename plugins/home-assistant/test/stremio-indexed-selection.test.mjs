@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  accountAddonSupportsStream,
   chooseNativeStream,
   executeIndexedSelection,
   indexedNavigationTiming,
@@ -24,6 +25,18 @@ test("keeps absolute native Stremio index across account providers", () => {
   const plan = planFromProviderSlices(slices, choice.selected);
   assert.equal(plan.ok, true);
   assert.equal(plan.index, 3);
+});
+
+test("mirrors Stremio manifest type and id-prefix eligibility before counting provider rows", () => {
+  const addon = {
+    manifest: {
+      types: ["movie"],
+      resources: [{ name: "stream", types: ["movie"], idPrefixes: ["tt"] }]
+    }
+  };
+  assert.equal(accountAddonSupportsStream(addon, "movie", "tt0133093"), true);
+  assert.equal(accountAddonSupportsStream(addon, "series", "tt0903747:1:1"), false);
+  assert.equal(accountAddonSupportsStream(addon, "movie", "kitsu:123"), false);
 });
 
 test("default quality selects 1080p without changing native index", () => {
