@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "id": "home-assistant",
   "name": "Home Assistant",
-  "version": "0.3.30",
+  "version": "0.3.31",
   "description": "Home Assistant bridge for SOL with HA-only Android TV remote control, native Stremio playback, account-aware next episodes, kids/family classification and account-wide Spanish/Latin stream selection by native horizontal Stremio index.",
   "runtime": "node",
   "entry": "entry.mjs",
@@ -480,7 +480,7 @@
       "required": false,
       "default": 1500,
       "min": 0,
-      "max": 15000
+      "max": 60000
     },
     {
       "key": "stremio_indexed_key_delay_ms",
@@ -492,6 +492,28 @@
       "default": 250,
       "min": 0,
       "max": 1000
+    },
+    {
+      "key": "stremio_indexed_initial_focus_index",
+      "label": "Índice inicial de foco Stremio",
+      "type": "number",
+      "description": "Compensa dónde queda enfocado Stremio al abrir la lista. 0 = primer stream; 1 = segundo stream. En Android TV actual se usa 1 para evitar un RIGHT extra.",
+      "env": "HA_SOL_STREMIO_INDEXED_INITIAL_FOCUS_INDEX",
+      "required": false,
+      "default": 1,
+      "min": 0,
+      "max": 5
+    },
+    {
+      "key": "stremio_indexed_center_delay_ms",
+      "label": "Pausa antes de OK/CENTER indexado (ms)",
+      "type": "number",
+      "description": "Espera adicional después del último movimiento de foco y antes de enviar DPAD_CENTER. Ayuda a evitar que Stremio ignore el OK mientras termina la animación horizontal.",
+      "env": "HA_SOL_STREMIO_INDEXED_CENTER_DELAY_MS",
+      "required": false,
+      "default": 500,
+      "min": 0,
+      "max": 5000
     },
     {
       "key": "stremio_focus_nudge",
