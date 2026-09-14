@@ -26,6 +26,28 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+
+export function indexedNavigationTiming(env = process.env) {
+  const keyDelayMs = numberEnv(env, "HA_SOL_STREMIO_INDEXED_KEY_DELAY_MS", 250, 0, 1000);
+  return {
+    openToKeysDelayMs: numberEnv(env, "HA_SOL_STREMIO_OPEN_TO_KEYS_DELAY_MS", 1500, 0, 60000),
+    keyDelayMs,
+    initialFocusIndex: numberEnv(env, "HA_SOL_STREMIO_INDEXED_INITIAL_FOCUS_INDEX", 1, 0, 5),
+    centerDelayMs: numberEnv(env, "HA_SOL_STREMIO_INDEXED_CENTER_DELAY_MS", keyDelayMs, 0, 5000)
+  };
+}
+
+async function waitForIndexedNavigation(env = process.env) {
+  const timing = indexedNavigationTiming(env);
+  if (timing.openToKeysDelayMs > 0) await sleep(timing.openToKeysDelayMs);
+  return {
+    ready: true,
+    via: "configurable_open_to_keys_delay",
+    waitedMs: timing.openToKeysDelayMs,
+    openToKeysDelayMs: timing.openToKeysDelayMs
+  };
+}
+
 function selectedLanguages(selected) {
   return Array.isArray(selected?.languages)
     ? selected.languages.map((value) => clean(value).toLowerCase()).filter(Boolean)
@@ -245,18 +267,6 @@ async function queryAccountProviderSlices(client, resolved, account) {
   return { mediaType, mediaId, addons, slices };
 }
 
-async function computeAccountIndexPlan(client, resolved, selected, { maxIndex = 100 } = {}) {
-  const account = accountFor(client);
-  if (!account?.configured) return { ok: false, reason: "stremio_index_account_not_configured" };
-  const queried = await queryAccountProviderSlices(client, resolved, account);
-  return {
-    ...planFromProviderSlices(queried.slices, selected, { maxIndex }),
-    mediaType: queried.mediaType,
-    mediaId: queried.mediaId,
-    accountProviderCount: queried.addons.length,
-    queriedProviderCount: queried.slices.length
-  };
-}
 
 async function sendRemoteKey(client, command) {
   if (!client?.stremioRemoteEntityId) throw new Error("stremio_remote_entity_id_required");
@@ -266,25 +276,44 @@ async function sendRemoteKey(client, command) {
   });
 }
 
-export async function executeIndexedSelection(client, plan, { keyDelayMs = 180 } = {}) {
+export async function executeIndexedSelection(client, plan, {
+  keyDelayMs = 250,
+  initialFocusIndex = 1,
+  centerDelayMs = keyDelayMs
+} = {}) {
   if (!plan?.ok || !Number.isInteger(plan.index) || plan.index < 0) {
     return { ok: false, reason: "stremio_index_plan_required" };
   }
+
+  const targetIndex = plan.index;
+  const startIndex = Math.max(0, Number.isInteger(initialFocusIndex) ? initialFocusIndex : 0);
+  const delta = targetIndex - startIndex;
+  const movementCommand = delta >= 0 ? "DPAD_RIGHT" : "DPAD_LEFT";
+  const movementCount = Math.abs(delta);
   const commands = [];
+
   try {
-    for (let index = 0; index < plan.index; index += 1) {
-      await sendRemoteKey(client, "DPAD_RIGHT");
-      commands.push("DPAD_RIGHT");
-      if (keyDelayMs > 0) await sleep(keyDelayMs);
+    for (let index = 0; index < movementCount; index += 1) {
+      await sendRemoteKey(client, movementCommand);
+      commands.push(movementCommand);
+      if (keyDelayMs > 0 && index < movementCount - 1) await sleep(keyDelayMs);
     }
+    if (centerDelayMs > 0) await sleep(centerDelayMs);
     const result = await sendRemoteKey(client, "DPAD_CENTER");
     commands.push("DPAD_CENTER");
     return {
       ok: true,
       via: "home_assistant_indexed_selection",
-      satelliteUsed: false,
-      navigation: "horizontal_right",
-      index: plan.index,
+      navigation: delta >= 0 ? "horizontal_right" : "horizontal_left",
+      targetIndex,
+      initialFocusIndex: startIndex,
+      requestedRights: targetIndex,
+      forwardedRights: movementCommand === "DPAD_RIGHT" ? movementCount : 0,
+      injectedLefts: movementCommand === "DPAD_LEFT" ? movementCount : 0,
+      suppressedRights: Math.min(targetIndex, startIndex),
+      keyDelayMs,
+      centerDelayMs,
+      centerSent: true,
       addonId: plan.addonId || null,
       providerIndex: plan.providerIndex ?? null,
       commands,
@@ -294,9 +323,16 @@ export async function executeIndexedSelection(client, plan, { keyDelayMs = 180 }
     return {
       ok: false,
       via: "home_assistant_indexed_selection",
-      satelliteUsed: false,
-      navigation: "horizontal_right",
-      index: plan.index,
+      navigation: delta >= 0 ? "horizontal_right" : "horizontal_left",
+      targetIndex,
+      initialFocusIndex: startIndex,
+      requestedRights: targetIndex,
+      forwardedRights: commands.filter((command) => command === "DPAD_RIGHT").length,
+      injectedLefts: commands.filter((command) => command === "DPAD_LEFT").length,
+      suppressedRights: Math.min(targetIndex, startIndex),
+      keyDelayMs,
+      centerDelayMs,
+      centerSent: commands.includes("DPAD_CENTER"),
       commands,
       reason: error?.message || String(error)
     };
@@ -382,7 +418,8 @@ async function playAccountWideLanguage(client, args = {}) {
     };
   }
 
-  const readiness = await client.waitForStreamUi();
+  const timing = indexedNavigationTiming(env);
+  const readiness = await waitForIndexedNavigation(env);
   if (readiness?.ready !== true) {
     return {
       content: { type: resolved.type, id: resolved.id, videoId: resolved.videoId, selected: resolved.selected },
@@ -397,9 +434,7 @@ async function playAccountWideLanguage(client, args = {}) {
     };
   }
 
-  const selection = await executeIndexedSelection(client, plan, {
-    keyDelayMs: numberEnv(env, "HA_SOL_STREMIO_INDEXED_KEY_DELAY_MS", 180, 0, 1000)
-  });
+  const selection = await executeIndexedSelection(client, plan, timing);
 
   return {
     content: { type: resolved.type, id: resolved.id, videoId: resolved.videoId, selected: resolved.selected },
@@ -432,9 +467,6 @@ export function installStremioIndexedSelection(SolPluginClient) {
   proto.__stremioIndexedSelectionInstalled = true;
 
   const originalHandle = proto.handleStremioTool;
-  const originalResolveForStream = proto.resolveForStream;
-  const originalVisualSelect = proto.autoSelectVisualStream;
-  const originalClickFirst = proto.clickFirstStream;
   const originalStatus = proto.stremioStatus;
 
   proto.stremioStatus = function stremioStatusWithIndexedSelection() {
@@ -445,125 +477,25 @@ export function installStremioIndexedSelection(SolPluginClient) {
         enabled: boolEnv(env, "HA_SOL_STREMIO_INDEXED_SELECTION", true),
         accountWideLanguageSelection: boolEnv(env, "HA_SOL_STREMIO_ACCOUNT_WIDE_LANGUAGE_SELECTION", true),
         transport: "Home Assistant remote.send_command only",
-        satelliteUsed: false,
-        navigation: "horizontal_right",
-        keyDelayMs: numberEnv(env, "HA_SOL_STREMIO_INDEXED_KEY_DELAY_MS", 180, 0, 1000),
+        navigation: "horizontal_relative_to_initial_focus",
+        ...indexedNavigationTiming(env),
         maxIndex: numberEnv(env, "HA_SOL_STREMIO_INDEXED_MAX_INDEX", 100, 1, 200),
-        policy: "For Spanish/Latin requests, query every stream addon in linked-account order, choose a matching native stream, then send DPAD_RIGHT x index and DPAD_CENTER. Any uncertainty before the chosen row fails closed."
+        failClosed: true,
+        policy: "Spanish/Latin playback reconstructs the linked account's native stream order, compensates Stremio's initial focus, moves to the proven absolute index and only then sends DPAD_CENTER."
       }
     };
-  };
-
-  // Legacy capture remains available when account-wide selection is disabled.
-  proto.resolveForStream = async function resolveForStreamWithIndexCapture(...args) {
-    const result = await originalResolveForStream.apply(this, args);
-    const context = this.__stremioIndexedSelectionContext;
-    if (context?.active && result && typeof result === "object") context.resolved = result;
-    return result;
-  };
-
-  proto.autoSelectVisualStream = async function autoSelectVisualStreamWithIndexPlan(selected) {
-    const context = this.__stremioIndexedSelectionContext;
-    const env = this.env || process.env;
-    if (context?.active && boolEnv(env, "HA_SOL_STREMIO_INDEXED_SELECTION", true)) {
-      context.selected = selected || null;
-      context.strictLanguage = requiresExactLanguageSelection(selected, context.args);
-      if (!context.plan && context.resolved && selected) {
-        try {
-          context.plan = await computeAccountIndexPlan(this, context.resolved, selected, {
-            maxIndex: numberEnv(env, "HA_SOL_STREMIO_INDEXED_MAX_INDEX", 100, 1, 200)
-          });
-        } catch (error) {
-          context.plan = { ok: false, reason: error?.message || String(error) };
-        }
-      }
-    }
-    return originalVisualSelect.call(this, selected);
-  };
-
-  proto.clickFirstStream = async function clickFirstStreamWithIndexedSelection(...args) {
-    const context = this.__stremioIndexedSelectionContext;
-    const env = this.env || process.env;
-    if (!context?.active || !boolEnv(env, "HA_SOL_STREMIO_INDEXED_SELECTION", true)) {
-      return originalClickFirst.apply(this, args);
-    }
-
-    const guard = this.__stremioLaunchGuardContext?.last;
-    if (guard && guard.allowStreamInput === false) {
-      return { ok: false, commandSent: false, reason: "stremio_launch_guard_blocked_stream_input", launchGuard: guard };
-    }
-
-    if (context.plan?.ok) {
-      const readiness = await this.waitForStreamUi();
-      if (readiness?.alreadyPlaying) {
-        return { ok: true, skipped: true, reason: "stremio_player_already_visible", readiness, indexedSelection: context.plan };
-      }
-      if (readiness?.ready !== true) {
-        return { ok: false, commandSent: false, reason: readiness?.reason || "stremio_stream_ui_not_ready", readiness, indexedSelection: context.plan };
-      }
-      const selection = await executeIndexedSelection(this, context.plan, {
-        keyDelayMs: numberEnv(env, "HA_SOL_STREMIO_INDEXED_KEY_DELAY_MS", 180, 0, 1000)
-      });
-      return {
-        ...selection,
-        commandSent: selection.ok,
-        readiness,
-        indexedSelection: context.plan,
-        exactLanguageSelection: Boolean(context.strictLanguage)
-      };
-    }
-
-    if (context.strictLanguage) {
-      return {
-        ok: false,
-        commandSent: false,
-        reason: context.plan?.reason || "stremio_exact_language_index_unavailable",
-        indexedSelection: context.plan || null,
-        exactLanguageSelection: true,
-        note: "Spanish/Latin was requested but the native Stremio position could not be proven, so no generic CENTER was sent."
-      };
-    }
-
-    return originalClickFirst.apply(this, args);
   };
 
   proto.handleStremioTool = async function handleStremioToolWithIndexedSelection(tool, args = {}) {
     const env = this.env || process.env;
-    const accountWide = boolEnv(env, "HA_SOL_STREMIO_ACCOUNT_WIDE_LANGUAGE_SELECTION", true);
-    const indexed = boolEnv(env, "HA_SOL_STREMIO_INDEXED_SELECTION", true);
     const playbackTool = tool === "home_assistant_stremio_play_best" || tool === "home_assistant_stremio_play";
+    const enabled = boolEnv(env, "HA_SOL_STREMIO_INDEXED_SELECTION", true);
+    const accountWide = boolEnv(env, "HA_SOL_STREMIO_ACCOUNT_WIDE_LANGUAGE_SELECTION", true);
 
-    if (playbackTool && accountWide && indexed && requestedLanguage(args)) {
+    if (playbackTool && enabled && accountWide && requestedLanguage(args)) {
       return playAccountWideLanguage(this, args);
     }
-
-    if (!playbackTool) return originalHandle.call(this, tool, args);
-
-    const previous = this.__stremioIndexedSelectionContext;
-    const context = {
-      active: true,
-      tool,
-      args: { ...args },
-      resolved: null,
-      selected: null,
-      strictLanguage: Boolean(requestedLanguage(args)),
-      plan: null
-    };
-    this.__stremioIndexedSelectionContext = context;
-    try {
-      const result = await originalHandle.call(this, tool, args);
-      return result && typeof result === "object"
-        ? {
-            ...result,
-            indexedSelection: context.plan || {
-              ok: false,
-              reason: context.selected ? "stremio_index_plan_not_computed" : "stremio_selected_stream_not_observed"
-            }
-          }
-        : result;
-    } finally {
-      this.__stremioIndexedSelectionContext = previous;
-    }
+    return originalHandle.call(this, tool, args);
   };
 
   return SolPluginClient;
@@ -571,7 +503,6 @@ export function installStremioIndexedSelection(SolPluginClient) {
 
 export const __test = {
   accountFor,
-  computeAccountIndexPlan,
   languageMatches,
   queryAccountProviderSlices,
   requestedLanguage,
