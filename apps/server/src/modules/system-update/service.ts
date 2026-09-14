@@ -62,6 +62,12 @@ export function compareSystemVersions(a: string, b: string): number {
   return left[3].localeCompare(right[3]);
 }
 
+export function isSystemUpdateAvailable(installed: SystemBuildInfo, latest: SystemUpdateManifest): boolean {
+  // Stable releases advance only by semantic version. Republishing the same version
+  // from a different commit must not trigger another destructive install attempt.
+  return compareSystemVersions(latest.version, installed.version) > 0;
+}
+
 export function parseUpdateManifest(value: unknown): SystemUpdateManifest {
   if (!value || typeof value !== "object") throw new Error("system_update_manifest_invalid");
   const input = value as Record<string, unknown>;
@@ -163,14 +169,10 @@ export async function systemUpdateStatus(force = false): Promise<SystemUpdateSta
     latestManifest(force),
     updaterAvailable(),
   ]);
-  const versionComparison = compareSystemVersions(latest.version, installed.version);
-  const sameVersionDifferentPackagedCommit =
-    versionComparison === 0 && installed.commit !== "development" && latest.commit !== installed.commit;
-  const updateAvailable = versionComparison > 0 || sameVersionDifferentPackagedCommit;
   return {
     installed,
     latest,
-    updateAvailable,
+    updateAvailable: isSystemUpdateAvailable(installed, latest),
     canInstall: updater.ok,
     installUnavailableReason: updater.reason,
   };

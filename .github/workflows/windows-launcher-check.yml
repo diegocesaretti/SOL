@@ -42,6 +42,6 @@ jobs:
             if (-not $launcher.Contains($required)) { throw "Launcher missing contract: $required" }
           }
           $updater = Get-Content -Raw packaging/windows/SolUpdater/Program.cs
-          foreach ($required in @('SHA256','version.json','.update-backup','WaitForHealth','Rollback completed')) {
+          foreach ($required in @('SHA256','version.json','.update-backup-','StopProcessesUsingInstallFamily','MoveDirectoryWithRetry','DeleteDirectoryWithRetry','WaitForHealth','Rollback completed')) {
             if (-not $updater.Contains($required)) { throw "Updater missing safety contract: $required" }
           }

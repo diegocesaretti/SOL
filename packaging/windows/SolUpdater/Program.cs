@@ -57,24 +57,25 @@ internal static class Program
             VerifySha256(zipPath, request.Sha256);
             Log($"Package verified: {request.Version} {request.Commit}");
 
-            var stagingRoot = root + ".update-staging";
-            var backupRoot = root + ".update-backup";
-            DeleteDirectoryBestEffort(stagingRoot);
-            DeleteDirectoryBestEffort(backupRoot);
+            var operationId = $"{DateTime.UtcNow:yyyyMMddHHmmssfff}-{Environment.ProcessId}";
+            var stagingRoot = root + $".update-staging-{operationId}";
+            var backupRoot = root + $".update-backup-{operationId}";
+            CleanupStaleUpdateDirectories(root, stagingRoot, backupRoot);
             Directory.CreateDirectory(stagingRoot);
             ZipFile.ExtractToDirectory(zipPath, stagingRoot, overwriteFiles: true);
             var packageRoot = ResolveExtractedPackageRoot(stagingRoot);
             ValidateExtractedPackage(packageRoot, request);
 
             await WaitForProcessExit(launcherPid, TimeSpan.FromSeconds(30));
+            await StopProcessesUsingInstallFamily(root, TimeSpan.FromSeconds(20));
 
             Process? newLauncher = null;
             var swapped = false;
             try
             {
-                Directory.Move(root, backupRoot);
+                await MoveDirectoryWithRetry(root, backupRoot, TimeSpan.FromSeconds(30));
                 swapped = true;
-                Directory.Move(packageRoot, root);
+                await MoveDirectoryWithRetry(packageRoot, root, TimeSpan.FromSeconds(30));
                 if (File.Exists(requestPath)) File.Delete(requestPath);
 
                 newLauncher = StartLauncher(root);
@@ -82,8 +83,8 @@ internal static class Program
                 if (!healthy) throw new InvalidOperationException("La nueva versión no respondió en /health.");
 
                 Log($"Update completed successfully: {request.Version} {request.Commit}");
-                DeleteDirectoryBestEffort(backupRoot);
-                DeleteDirectoryBestEffort(stagingRoot);
+                await DeleteDirectoryWithRetry(backupRoot, TimeSpan.FromSeconds(15), throwOnTimeout: false);
+                await DeleteDirectoryWithRetry(stagingRoot, TimeSpan.FromSeconds(10), throwOnTimeout: false);
                 TryDelete(zipPath);
                 return 0;
             }
@@ -105,8 +106,9 @@ internal static class Program
 
                 if (swapped && Directory.Exists(backupRoot))
                 {
-                    DeleteDirectoryBestEffort(root);
-                    Directory.Move(backupRoot, root);
+                    await StopProcessesUsingInstallFamily(root, TimeSpan.FromSeconds(15));
+                    await DeleteDirectoryWithRetry(root, TimeSpan.FromSeconds(20), throwOnTimeout: true);
+                    await MoveDirectoryWithRetry(backupRoot, root, TimeSpan.FromSeconds(30));
                     if (File.Exists(requestPath)) File.Delete(requestPath);
                     StartLauncher(root);
                     Log("Rollback completed and previous SOL build restarted.");
@@ -225,6 +227,133 @@ internal static class Program
         }
         catch (ArgumentException) { }
         catch (InvalidOperationException) { }
+    }
+
+    private static async Task StopProcessesUsingInstallFamily(string root, TimeSpan timeout)
+    {
+        var normalizedRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var deadline = DateTime.UtcNow + timeout;
+
+        while (DateTime.UtcNow < deadline)
+        {
+            var stoppedAny = false;
+            foreach (var process in Process.GetProcesses())
+            {
+                using (process)
+                {
+                    if (process.Id == Environment.ProcessId) continue;
+                    string? executable = null;
+                    try { executable = process.MainModule?.FileName; }
+                    catch { continue; }
+                    if (string.IsNullOrWhiteSpace(executable) || !IsInstallFamilyPath(executable, normalizedRoot)) continue;
+
+                    try
+                    {
+                        Log($"Stopping residual SOL process pid={process.Id} image={executable}");
+                        process.Kill(entireProcessTree: true);
+                        stoppedAny = true;
+                        try { await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5)); } catch { }
+                    }
+                    catch (Exception ex)
+                    {
+                        Log($"Could not stop residual process pid={process.Id}: {ex.Message}");
+                    }
+                }
+            }
+
+            if (!stoppedAny) return;
+            await Task.Delay(300);
+        }
+    }
+
+    private static bool IsInstallFamilyPath(string executable, string root)
+    {
+        string full;
+        try { full = Path.GetFullPath(executable); }
+        catch { return false; }
+
+        if (full.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) return true;
+        if (full.StartsWith(root + ".update-backup", StringComparison.OrdinalIgnoreCase)) return true;
+        if (full.StartsWith(root + ".update-staging", StringComparison.OrdinalIgnoreCase)) return true;
+        return false;
+    }
+
+    private static async Task MoveDirectoryWithRetry(string source, string destination, TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        Exception? lastError = null;
+        var attempt = 0;
+
+        while (DateTime.UtcNow < deadline)
+        {
+            attempt++;
+            try
+            {
+                if (Directory.Exists(destination))
+                    throw new IOException($"El destino ya existe: {destination}");
+                Directory.Move(source, destination);
+                if (attempt > 1) Log($"Directory move succeeded after {attempt} attempts: {source} -> {destination}");
+                return;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                lastError = ex;
+                Log($"Directory move retry {attempt}: {source} -> {destination}: {ex.Message}");
+                await Task.Delay(500);
+            }
+        }
+
+        throw new IOException($"No se pudo mover {source} a {destination} después de {timeout.TotalSeconds:0} s.", lastError);
+    }
+
+    private static async Task DeleteDirectoryWithRetry(string path, TimeSpan timeout, bool throwOnTimeout)
+    {
+        if (!Directory.Exists(path)) return;
+        var deadline = DateTime.UtcNow + timeout;
+        Exception? lastError = null;
+        var attempt = 0;
+
+        while (DateTime.UtcNow < deadline)
+        {
+            attempt++;
+            try
+            {
+                Directory.Delete(path, recursive: true);
+                if (attempt > 1) Log($"Directory delete succeeded after {attempt} attempts: {path}");
+                return;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                lastError = ex;
+                Log($"Directory delete retry {attempt}: {path}: {ex.Message}");
+                await Task.Delay(500);
+            }
+        }
+
+        if (throwOnTimeout)
+            throw new IOException($"No se pudo eliminar {path} después de {timeout.TotalSeconds:0} s.", lastError);
+        Log($"Leaving stale directory for later cleanup: {path}: {lastError?.Message}");
+    }
+
+    private static void CleanupStaleUpdateDirectories(string root, params string[] keep)
+    {
+        var parent = Path.GetDirectoryName(root);
+        var name = Path.GetFileName(root);
+        if (string.IsNullOrWhiteSpace(parent) || string.IsNullOrWhiteSpace(name) || !Directory.Exists(parent)) return;
+        var keepSet = new HashSet<string>(keep.Select(Path.GetFullPath), StringComparer.OrdinalIgnoreCase);
+
+        foreach (var pattern in new[] { $"{name}.update-backup*", $"{name}.update-staging*" })
+        {
+            IEnumerable<string> directories;
+            try { directories = Directory.EnumerateDirectories(parent, pattern, SearchOption.TopDirectoryOnly).ToArray(); }
+            catch { continue; }
+            foreach (var directory in directories)
+            {
+                var full = Path.GetFullPath(directory);
+                if (keepSet.Contains(full)) continue;
+                DeleteDirectoryBestEffort(full);
+            }
+        }
     }
 
     private static Process StartLauncher(string root)
