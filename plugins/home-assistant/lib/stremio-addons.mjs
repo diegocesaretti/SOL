@@ -1,12 +1,8 @@
 const RESOLUTIONS = [2160, 1440, 1080, 720, 576, 480, 360];
 const BAD_SOURCE_RE = /\b(cam|hdcam|telesync|telecine|tsrip|screener|scr)\b/i;
-const LATIN_RE = /\b(latino|latina|latam|latin[ -]?america|audio[ ._-]*latino|espanol[ ._-]*latino|spanish[ ._-]*latino)\b/i;
-const SPANISH_RE = /\b(espanol|spanish|castellano|spa|esp)\b/i;
+const LATIN_RE = /\b(latino|latina|latam|latin[ -]?america|audio[ ._-]*latino|espa(?:n|ñ)ol[ ._-]*latino|spanish[ ._-]*latino)\b/i;
+const SPANISH_RE = /\b(espa(?:n|ñ)ol|spanish|castellano|spa|esp)\b/i;
 const ENGLISH_RE = /\b(english|eng)\b/i;
-
-function clean(value) {
-  return String(value ?? "").trim();
-}
 
 function streamText(stream) {
   const hints = stream?.behaviorHints && typeof stream.behaviorHints === "object" ? stream.behaviorHints : {};
@@ -56,4 +52,4 @@ export function summarizeRankedStream(entry, index = null) {
   };
 }
 
-export const __test = { clean, streamText, parseResolution, languageTags };
+export const __test = { streamText, parseResolution, languageTags };
