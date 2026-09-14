@@ -1,238 +1,460 @@
+import { SolPluginClientCore } from "./sol-client-core.mjs";
 import {
-  STREMIO_MCP_TOOLS,
-  SolPluginClient as CoreSolPluginClient
-} from "./sol-client-core.mjs";
-import { detailDeepLink } from "./stremio.mjs";
-import { summarizeRankedStream } from "./stremio-addons.mjs";
-import { installStremioAddonCompatibilityPatch } from "./stremio-addon-compat.mjs";
+  CinemetaClient,
+  boardDeepLink,
+  detailDeepLink,
+  discoverDeepLink,
+  isStremioDeepLink,
+  libraryDeepLink,
+  searchDeepLink
+} from "./stremio.mjs";
+import { StremioAccountClient, resolveNextEpisodeFromLibrary } from "./stremio-account.mjs";
+import {
+  chooseNativeStream,
+  executeIndexedSelection,
+  indexedNavigationTiming,
+  planFromProviderSlices,
+  queryAccountProviderSlices,
+  waitForIndexedNavigation
+} from "./stremio-indexed-selection.mjs";
 
-export { STREMIO_MCP_TOOLS };
+function clean(value) {
+  return String(value ?? "").trim();
+}
 
 function boolEnv(env, name, fallback = false) {
-  const value = env[name];
-  if (value === undefined) return fallback;
+  const value = env?.[name];
+  if (value === undefined || value === null || value === "") return fallback;
   return /^(1|true|yes|on)$/i.test(String(value));
 }
 
 function numberEnv(env, name, fallback, min, max) {
-  const value = Number(env[name] ?? fallback);
+  const value = Number(env?.[name] ?? fallback);
   if (!Number.isFinite(value)) return fallback;
   return Math.max(min, Math.min(max, Math.trunc(value)));
 }
 
-function focusNudgeMode(env) {
-  const value = String(env.HA_SOL_STREMIO_FOCUS_NUDGE || "right_left").trim().toLowerCase();
-  return ["off", "right_left"].includes(value) ? value : "right_left";
-}
+const CONTENT_PROPERTIES = {
+  query: { type: "string", minLength: 1, maxLength: 300 },
+  id: { type: "string", minLength: 1, maxLength: 300 },
+  mediaType: { type: "string", enum: ["auto", "movie", "series"], default: "auto" },
+  year: { type: "integer", minimum: 1880, maximum: 2200 },
+  season: { type: "integer", minimum: 0, maximum: 10000 },
+  episode: { type: "integer", minimum: 0, maximum: 10000 }
+};
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+const PLAYBACK_PROPERTIES = {
+  ...CONTENT_PROPERTIES,
+  quality: { type: "string", enum: ["auto", "4k", "1080p", "720p", "480p"] },
+  language: { type: "string", enum: ["any", "latin", "spanish", "english"] },
+  autoPlay: { type: "boolean", default: true }
+};
 
-function safeSelection(selection) {
-  return {
-    selected: selection?.selected ? summarizeRankedStream(selection.selected, 0) : null,
-    providerCount: Array.isArray(selection?.providers) ? selection.providers.length : 0,
-    streamCount: Array.isArray(selection?.ranked) ? selection.ranked.length : 0,
-    providers: Array.isArray(selection?.providers) ? selection.providers : [],
-    errors: Array.isArray(selection?.errors) ? selection.errors : []
-  };
-}
+export const STREMIO_MCP_TOOLS = [
+  {
+    name: "home_assistant_stremio_status",
+    description: "Report the single native-index Stremio playback status and timing configuration.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    requiredScope: "read"
+  },
+  {
+    name: "home_assistant_stremio_search",
+    description: "Search Cinemeta by title. Does not launch the TV.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", minLength: 1, maxLength: 300 },
+        mediaType: { type: "string", enum: ["auto", "movie", "series"], default: "auto" },
+        year: { type: "integer", minimum: 1880, maximum: 2200 },
+        limit: { type: "integer", minimum: 1, maximum: 25, default: 10 }
+      },
+      required: ["query"],
+      additionalProperties: false
+    },
+    requiredScope: "read"
+  },
+  {
+    name: "home_assistant_stremio_resolve",
+    description: "Resolve a movie or series. For series without an explicit episode, linked Stremio history may select the episode to resume or play next.",
+    inputSchema: { type: "object", properties: CONTENT_PROPERTIES, additionalProperties: false },
+    requiredScope: "read"
+  },
+  {
+    name: "home_assistant_stremio_play_best",
+    description: "Resolve content, query every linked-account stream addon in native order, prove the absolute stream index, open official Stremio, wait, navigate one key at a time and send one final select key.",
+    inputSchema: { type: "object", properties: PLAYBACK_PROPERTIES, additionalProperties: false },
+    requiredScope: "actions"
+  },
+  {
+    name: "home_assistant_stremio_open_page",
+    description: "Open the official Stremio Board, Discover or Library page.",
+    inputSchema: {
+      type: "object",
+      properties: { page: { type: "string", enum: ["board", "discover", "library"] } },
+      required: ["page"],
+      additionalProperties: false
+    },
+    requiredScope: "actions"
+  },
+  {
+    name: "home_assistant_stremio_open_search",
+    description: "Open the official Stremio search page with a query.",
+    inputSchema: {
+      type: "object",
+      properties: { query: { type: "string", minLength: 1, maxLength: 300 } },
+      required: ["query"],
+      additionalProperties: false
+    },
+    requiredScope: "actions"
+  },
+  {
+    name: "home_assistant_stremio_open_detail",
+    description: "Open an exact official Stremio detail page without indexed stream selection.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        mediaType: { type: "string", enum: ["movie", "series"] },
+        id: { type: "string", minLength: 1, maxLength: 300 },
+        videoId: { type: "string", minLength: 1, maxLength: 300 }
+      },
+      required: ["mediaType", "id"],
+      additionalProperties: false
+    },
+    requiredScope: "actions"
+  },
+  {
+    name: "home_assistant_stremio_account_status",
+    description: "Report sanitized linked Stremio account status and counts.",
+    inputSchema: { type: "object", properties: { refresh: { type: "boolean", default: false } }, additionalProperties: false },
+    requiredScope: "read"
+  },
+  {
+    name: "home_assistant_stremio_library",
+    description: "List sanitized items from the linked Stremio library.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        mediaType: { type: "string", enum: ["all", "movie", "series"], default: "all" },
+        limit: { type: "integer", minimum: 1, maximum: 500, default: 100 },
+        refresh: { type: "boolean", default: false }
+      },
+      additionalProperties: false
+    },
+    requiredScope: "read"
+  },
+  {
+    name: "home_assistant_stremio_continue_watching",
+    description: "List Continue Watching items from the linked Stremio account.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        mediaType: { type: "string", enum: ["all", "movie", "series"], default: "all" },
+        limit: { type: "integer", minimum: 1, maximum: 200, default: 50 },
+        refresh: { type: "boolean", default: false }
+      },
+      additionalProperties: false
+    },
+    requiredScope: "read"
+  },
+  {
+    name: "home_assistant_stremio_next_episode",
+    description: "Resolve the episode to resume or play next using linked Stremio history. Does not launch the TV.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", minLength: 1, maxLength: 300 },
+        id: { type: "string", minLength: 1, maxLength: 300 },
+        year: { type: "integer", minimum: 1880, maximum: 2200 },
+        refresh: { type: "boolean", default: false }
+      },
+      additionalProperties: false
+    },
+    requiredScope: "read"
+  }
+];
 
-export class SolPluginClient extends CoreSolPluginClient {
+export class SolPluginClient extends SolPluginClientCore {
   constructor(env = process.env) {
     super(env);
+    this.stremioEnabled = boolEnv(env, "HA_SOL_STREMIO_ENABLED", true);
+    this.allowControl = boolEnv(env, "HA_SOL_ALLOW_CONTROL", false);
+    this.stremioRemoteEntityId = clean(env.HA_SOL_TV_REMOTE_ENTITY_ID);
+    this.stremioTimeoutMs = 8000;
     this.stremioAddonTimeoutMs = numberEnv(env, "HA_SOL_STREMIO_ADDON_TIMEOUT_MS", 20000, 1000, 120000);
-    this.stremioAddonRetries = numberEnv(env, "HA_SOL_STREMIO_ADDON_RETRIES", 1, 0, 3);
-    this.addonAggregator.timeoutMs = this.stremioAddonTimeoutMs;
-    installStremioAddonCompatibilityPatch(this.addonAggregator, { retries: this.stremioAddonRetries });
+    this.stremioAddonRetries = 1;
+    this.haUrl = clean(env.HA_URL).replace(/\/$/, "");
+    this.haToken = clean(env.HA_TOKEN);
+    this.cinemeta = new CinemetaClient({ timeoutMs: this.stremioTimeoutMs });
+    this.defaultPreferences = {
+      quality: clean(env.HA_SOL_STREMIO_DEFAULT_QUALITY || "1080p").toLowerCase(),
+      language: clean(env.HA_SOL_STREMIO_DEFAULT_LANGUAGE || "any").toLowerCase()
+    };
+    this.account = new StremioAccountClient({
+      enabled: boolEnv(env, "HA_SOL_STREMIO_ACCOUNT_ENABLED", false),
+      authKey: env.HA_SOL_STREMIO_ACCOUNT_AUTH_KEY || "",
+      email: env.HA_SOL_STREMIO_ACCOUNT_EMAIL || "",
+      password: env.HA_SOL_STREMIO_ACCOUNT_PASSWORD || "",
+      timeoutMs: 12000,
+      refreshMs: 60000
+    });
+  }
 
-    this.stremioAutoPlayFirstStream = boolEnv(env, "HA_SOL_STREMIO_AUTOPLAY_FIRST_STREAM", true);
-    this.stremioFirstStreamDelayMs = numberEnv(env, "HA_SOL_STREMIO_FIRST_STREAM_DELAY_MS", 3500, 0, 60000);
-    this.stremioFocusNudge = focusNudgeMode(env);
-    this.stremioFocusNudgeDelayMs = numberEnv(env, "HA_SOL_STREMIO_FOCUS_NUDGE_DELAY_MS", 250, 0, 5000);
+  async haService(domain, service, data = {}) {
+    if (!this.haUrl || !this.haToken) throw new Error("home_assistant_credentials_unavailable");
+    const response = await fetch(`${this.haUrl}/api/services/${encodeURIComponent(domain)}/${encodeURIComponent(service)}`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${this.haToken}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(data),
+      signal: AbortSignal.timeout(this.stremioTimeoutMs)
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(`home_assistant_service_http_${response.status}`);
+    return payload;
+  }
+
+  streamPreferences(args = {}) {
+    return {
+      quality: clean(args.quality || this.defaultPreferences.quality || "auto").toLowerCase(),
+      language: clean(args.language || this.defaultPreferences.language || "any").toLowerCase()
+    };
+  }
+
+  async refreshAccount(force = false) {
+    if (!this.account.configured) throw new Error("stremio_account_required_for_native_index_selection");
+    return this.account.refresh({ force });
+  }
+
+  async resolveForStream(args = {}) {
+    let request = { ...args };
+    if (!request.query && !request.id) {
+      if (!this.account.configured) throw new Error("stremio_query_or_id_required");
+      await this.refreshAccount(false);
+      const recent = this.account.mostRecentSeries();
+      if (!recent) throw new Error("stremio_account_no_recent_series");
+      request = { ...request, id: recent.mediaId, mediaType: "series" };
+    }
+
+    const explicitEpisode = request.season !== undefined && request.season !== null
+      && request.episode !== undefined && request.episode !== null;
+    if (explicitEpisode) {
+      const resolved = await this.cinemeta.resolve({
+        query: request.query,
+        id: request.id,
+        mediaType: request.mediaType || "auto",
+        year: request.year,
+        season: request.season,
+        episode: request.episode,
+        autoPlay: false
+      });
+      return { resolved, streamId: resolved.videoId || resolved.id, episodeDecision: null };
+    }
+
+    const base = await this.cinemeta.resolve({
+      query: request.query,
+      id: request.id,
+      mediaType: request.mediaType || "auto",
+      year: request.year,
+      autoPlay: false
+    });
+    if (base.type !== "series") return { resolved: base, streamId: base.videoId || base.id, episodeDecision: null };
+
+    const meta = await this.cinemeta.meta("series", base.id);
+    let decision;
+    if (this.account.configured) {
+      await this.refreshAccount(false);
+      decision = this.account.nextEpisode(meta);
+    } else {
+      decision = resolveNextEpisodeFromLibrary(meta, null);
+    }
+    if (!decision.episode) {
+      if (decision.status === "caught_up") throw new Error("stremio_series_caught_up");
+      throw new Error("stremio_series_no_released_episode");
+    }
+    const resolved = await this.cinemeta.resolve({
+      id: base.id,
+      mediaType: "series",
+      season: decision.episode.season,
+      episode: decision.episode.episode,
+      autoPlay: false
+    });
+    return {
+      resolved,
+      streamId: resolved.videoId || decision.episode.id,
+      episodeDecision: {
+        status: decision.status,
+        season: decision.episode.season,
+        episode: decision.episode.episode,
+        videoId: decision.episode.id,
+        title: decision.episode.title,
+        progressPercent: decision.history?.progressPercent ?? null,
+        watchedBitfieldUsed: decision.history?.watchedBitfieldUsed ?? false
+      }
+    };
+  }
+
+  async launchStremio(uri) {
+    if (!this.stremioEnabled) throw new Error("stremio_deep_links_disabled");
+    if (!this.allowControl) throw new Error("home_assistant_control_disabled");
+    if (!this.stremioRemoteEntityId) throw new Error("tv_remote_entity_id_required");
+    if (!isStremioDeepLink(uri)) throw new Error("stremio_deep_link_invalid_scheme");
+    const result = await this.haService("remote", "turn_on", {
+      entity_id: this.stremioRemoteEntityId,
+      activity: uri
+    });
+    return { ok: true, via: "home_assistant_remote_turn_on", deepLink: uri, result };
   }
 
   stremioStatus() {
     return {
-      ...super.stremioStatus(),
-      addonCompatibility: {
-        protocolMode: "stream_bridge_compatible",
-        requestTimeoutMs: this.stremioAddonTimeoutMs,
-        retryCount: this.stremioAddonRetries,
-        tolerantManifestFiltering: true,
-        encodedEpisodeIds: true,
-        rawColonFallback: true,
-        preservesConfiguredManifestPath: true,
-        preservesManifestQuery: true,
-        directLookupGatesNativePlayback: false
-      },
-      firstStreamAutoPlay: {
-        enabled: this.stremioAutoPlayFirstStream,
-        configured: Boolean(this.stremioRemoteEntityId),
-        delayMs: this.stremioFirstStreamDelayMs,
-        transport: "Home Assistant remote.send_command",
-        focusNudge: this.stremioFocusNudge,
-        focusNudgeDelayMs: this.stremioFocusNudgeDelayMs,
-        readiness: "fixed configurable delay; no Satellite or Accessibility dependency"
-      },
-      playbackVerification: {
-        status: "transport_only",
-        configured: false,
-        screenshotRequired: false,
-        note: "HA-only mode verifies command delivery, not the rendered video surface."
-      }
+      enabled: this.stremioEnabled,
+      architecture: "single_path_native_indexed",
+      officialStremioOnly: true,
+      remoteEntityId: this.stremioRemoteEntityId || null,
+      account: this.account.snapshot(),
+      defaults: this.defaultPreferences,
+      timing: indexedNavigationTiming(this.env)
     };
   }
 
-  async waitForStreamUi() {
-    if (this.stremioFirstStreamDelayMs > 0) await sleep(this.stremioFirstStreamDelayMs);
-    return {
-      ready: true,
-      via: "fixed_delay",
-      waitedMs: this.stremioFirstStreamDelayMs
-    };
-  }
-
-  async verifyPlayback() {
-    return {
-      status: "unverified",
-      confirmed: null,
-      via: "home_assistant_transport_only",
-      screenshotRequired: false,
-      reason: "visual_observation_not_configured"
-    };
-  }
-
-  async clickFirstStream() {
-    if (!this.stremioAutoPlayFirstStream) {
-      return { ok: false, commandSent: false, reason: "stremio_first_stream_autoplay_disabled" };
-    }
-    if (!this.stremioRemoteEntityId) {
-      return { ok: false, commandSent: false, reason: "stremio_remote_entity_id_required" };
-    }
-
-    const readiness = await this.waitForStreamUi();
-    const commands = [];
-    try {
-      if (this.stremioFocusNudge === "right_left") {
-        await this.haService("remote", "send_command", {
-          entity_id: this.stremioRemoteEntityId,
-          command: ["DPAD_RIGHT"]
-        });
-        commands.push("DPAD_RIGHT");
-        if (this.stremioFocusNudgeDelayMs > 0) await sleep(this.stremioFocusNudgeDelayMs);
-
-        await this.haService("remote", "send_command", {
-          entity_id: this.stremioRemoteEntityId,
-          command: ["DPAD_LEFT"]
-        });
-        commands.push("DPAD_LEFT");
-        if (this.stremioFocusNudgeDelayMs > 0) await sleep(this.stremioFocusNudgeDelayMs);
-      }
-
-      const result = await this.haService("remote", "send_command", {
-        entity_id: this.stremioRemoteEntityId,
-        command: ["DPAD_CENTER"]
-      });
-      commands.push("DPAD_CENTER");
-      return {
-        ok: true,
-        commandSent: true,
-        via: "home_assistant_remote",
-        service: "remote.send_command",
-        remoteEntityId: this.stremioRemoteEntityId,
-        command: "DPAD_CENTER",
-        commands,
-        readiness,
-        playbackVerification: await this.verifyPlayback(),
-        result
-      };
-    } catch (error) {
-      return {
-        ok: false,
-        commandSent: commands.includes("DPAD_CENTER"),
-        commands,
-        reason: error?.message || String(error),
-        readiness
-      };
-    }
-  }
-
-  async handleStremioTool(tool, args = {}) {
-    const effectiveTool = tool === "home_assistant_stremio_play"
-      ? "home_assistant_stremio_play_best"
-      : tool;
-    if (effectiveTool !== "home_assistant_stremio_play_best") {
-      return super.handleStremioTool(effectiveTool, args);
-    }
+  async playBest(args = {}) {
     if (!this.stremioEnabled) throw new Error("stremio_deep_links_disabled");
+    if (!this.allowControl) throw new Error("home_assistant_control_disabled");
+    if (!this.account.configured) throw new Error("stremio_account_required_for_native_index_selection");
 
-    const { resolved, streamId } = await this.resolveForStream(args);
+    const { resolved, streamId, episodeDecision } = await this.resolveForStream(args);
     const preferences = this.streamPreferences(args);
-    let selection = { selected: null, ranked: [], errors: [], providers: [] };
-    let directLookupError = null;
-
-    if (this.stremioAddonConfigError) {
-      directLookupError = this.stremioAddonConfigError;
-    } else if (this.addonAggregator.configured) {
-      try {
-        selection = await this.addonAggregator.selectStream(resolved.type, streamId, preferences);
-      } catch (error) {
-        directLookupError = error?.message || String(error);
-      }
-    } else {
-      directLookupError = "stremio_addon_manifests_not_configured";
+    const queried = await queryAccountProviderSlices(this, {
+      mediaType: resolved.type,
+      mediaId: streamId
+    }, this.account);
+    const choice = chooseNativeStream(queried.slices, preferences);
+    if (!choice.ok) {
+      return {
+        playbackRequested: false,
+        failClosed: true,
+        content: { type: resolved.type, id: resolved.id, videoId: resolved.videoId, selected: resolved.selected },
+        preferences,
+        episodeDecision,
+        selection: choice,
+        providerErrors: queried.slices.filter((slice) => slice.error).map((slice) => ({ addonId: slice.addonId, error: slice.error }))
+      };
     }
 
-    const summary = safeSelection(selection);
-    const content = {
+    const plan = planFromProviderSlices(queried.slices, choice.selected, { maxIndex: 100 });
+    if (!plan.ok) {
+      return {
+        playbackRequested: false,
+        failClosed: true,
+        content: { type: resolved.type, id: resolved.id, videoId: resolved.videoId, selected: resolved.selected },
+        preferences,
+        episodeDecision,
+        selected: choice.selected,
+        indexedSelection: plan
+      };
+    }
+
+    const nativeLink = detailDeepLink({
       type: resolved.type,
       id: resolved.id,
-      videoId: resolved.videoId,
-      selected: resolved.selected
-    };
-    const nativeLink = detailDeepLink({
-      type: content.type,
-      id: content.id,
-      videoId: content.videoId || content.id,
-      autoPlay: args.autoPlay === false ? false : true
+      videoId: resolved.videoId || streamId || resolved.id,
+      autoPlay: false
     });
     const launch = await this.launchStremio(nativeLink);
 
     if (args.autoPlay === false) {
       return {
-        content,
+        playbackRequested: false,
+        content: { type: resolved.type, id: resolved.id, videoId: resolved.videoId, selected: resolved.selected },
         preferences,
-        ...summary,
-        directLookupError,
-        launch,
-        deliveryMode: "stremio_native_detail_opened",
-        playbackRequested: false
+        episodeDecision,
+        selected: choice.selected,
+        indexedSelection: plan,
+        launch
       };
     }
 
-    const firstStreamClick = await this.clickFirstStream();
-    const nativeFallback = {
-      used: !selection.selected,
-      reason: !selection.selected
-        ? (directLookupError || (summary.errors[0]?.error ?? "stremio_direct_addon_lookup_empty"))
-        : null
-    };
-    const playbackVerification = firstStreamClick.playbackVerification || await this.verifyPlayback();
-
+    const timing = await waitForIndexedNavigation(this.env);
+    const selection = await executeIndexedSelection(this, plan, timing);
     return {
-      content,
+      playbackRequested: true,
+      playbackConfirmed: null,
+      content: { type: resolved.type, id: resolved.id, videoId: resolved.videoId, selected: resolved.selected },
       preferences,
-      ...summary,
-      directLookupError,
-      nativeFallback,
+      episodeDecision,
+      selected: choice.selected,
+      indexedSelection: plan,
+      timing,
       launch,
-      deliveryMode: firstStreamClick.ok ? "first_stream_center_click" : "stremio_native_stream_list_unconfirmed",
-      firstStreamClick,
-      playbackVerification,
-      playbackConfirmed: playbackVerification.confirmed,
-      playbackRequested: true
+      keySequence: selection,
+      providerCount: queried.addons.length,
+      providerErrors: queried.slices.filter((slice) => slice.error).map((slice) => ({ addonId: slice.addonId, error: slice.error })),
+      failClosed: true
     };
+  }
+
+  async handleStremioTool(tool, args = {}) {
+    if (tool === "home_assistant_stremio_status") return this.stremioStatus();
+    if (tool === "home_assistant_stremio_search") {
+      return {
+        query: clean(args.query),
+        results: await this.cinemeta.search(args.query, {
+          mediaType: args.mediaType || "auto",
+          year: args.year,
+          limit: args.limit || 10
+        })
+      };
+    }
+    if (tool === "home_assistant_stremio_resolve") {
+      const result = await this.resolveForStream(args);
+      return { ...result.resolved, episodeDecision: result.episodeDecision };
+    }
+    if (tool === "home_assistant_stremio_play_best") return this.playBest(args);
+    if (tool === "home_assistant_stremio_account_status") {
+      if (args.refresh && this.account.configured) await this.refreshAccount(true);
+      return this.account.snapshot();
+    }
+    if (tool === "home_assistant_stremio_library") {
+      await this.refreshAccount(Boolean(args.refresh));
+      return { ...this.account.snapshot(), items: this.account.safeLibrary({ mediaType: args.mediaType || "all", limit: args.limit || 100 }) };
+    }
+    if (tool === "home_assistant_stremio_continue_watching") {
+      await this.refreshAccount(Boolean(args.refresh));
+      return { ...this.account.snapshot(), items: this.account.continueWatching({ mediaType: args.mediaType || "all", limit: args.limit || 50 }) };
+    }
+    if (tool === "home_assistant_stremio_next_episode") {
+      if (!args.query && !args.id) throw new Error("stremio_query_or_id_required");
+      await this.refreshAccount(Boolean(args.refresh));
+      const base = await this.cinemeta.resolve({ query: args.query, id: args.id, mediaType: "series", year: args.year, autoPlay: false });
+      const meta = await this.cinemeta.meta("series", base.id);
+      const decision = this.account.nextEpisode(meta);
+      return {
+        series: { id: base.id, name: base.selected?.name || meta.name || null },
+        decision: decision.episode ? {
+          status: decision.status,
+          season: decision.episode.season,
+          episode: decision.episode.episode,
+          videoId: decision.episode.id,
+          title: decision.episode.title,
+          progressPercent: decision.history?.progressPercent ?? null
+        } : { status: decision.status, episode: null }
+      };
+    }
+    if (tool === "home_assistant_stremio_open_page") {
+      const page = clean(args.page).toLowerCase();
+      const uri = page === "board" ? boardDeepLink()
+        : page === "discover" ? discoverDeepLink()
+          : page === "library" ? libraryDeepLink()
+            : null;
+      if (!uri) throw new Error("stremio_page_invalid");
+      return this.launchStremio(uri);
+    }
+    if (tool === "home_assistant_stremio_open_search") return this.launchStremio(searchDeepLink(args.query));
+    if (tool === "home_assistant_stremio_open_detail") {
+      return this.launchStremio(detailDeepLink({ type: args.mediaType, id: args.id, videoId: args.videoId || null, autoPlay: false }));
+    }
+    throw new Error("stremio_tool_not_found");
   }
 }
