@@ -111,7 +111,7 @@ test("compensates the initial Stremio focus before sending DPAD_CENTER", async (
     index: 3,
     addonId: "latino.provider",
     providerIndex: 1
-  }, { keyDelayMs: 0, initialFocusIndex: 1, centerDelayMs: 0 });
+  }, { keyDelayMs: 0, initialFocusIndex: 1, centerDelayMs: 0, centerCommand: "DPAD_CENTER", centerHoldMs: 120 });
 
   assert.equal(result.ok, true);
   assert.equal(result.navigation, "horizontal_right");
@@ -124,8 +124,9 @@ test("compensates the initial Stremio focus before sending DPAD_CENTER", async (
   assert.deepEqual(seen.map((entry) => entry.payload.command), [
     ["DPAD_RIGHT"],
     ["DPAD_RIGHT"],
-    ["DPAD_CENTER"]
+    "DPAD_CENTER"
   ]);
+  assert.equal(seen[2].payload.hold_secs, 0.12);
   assert.ok(seen.every((entry) => entry.domain === "remote" && entry.service === "send_command"));
 });
 
@@ -149,14 +150,16 @@ test("moves left when the target is before the configured initial focus", async 
   const client = {
     stremioRemoteEntityId: "remote.tv_cocina",
     async haService(_domain, _service, payload) {
-      seen.push(payload.command[0]);
+      seen.push(Array.isArray(payload.command) ? payload.command[0] : payload.command);
       return { ok: true };
     }
   };
   const result = await executeIndexedSelection(client, { ok: true, index: 0 }, {
     keyDelayMs: 0,
     initialFocusIndex: 1,
-    centerDelayMs: 0
+    centerDelayMs: 0,
+    centerCommand: "DPAD_CENTER",
+    centerHoldMs: 120
   });
   assert.equal(result.ok, true);
   assert.equal(result.navigation, "horizontal_left");
@@ -169,12 +172,43 @@ test("indexed timing accepts up to 60 seconds before navigation", () => {
     HA_SOL_STREMIO_OPEN_TO_KEYS_DELAY_MS: "45000",
     HA_SOL_STREMIO_INDEXED_KEY_DELAY_MS: "500",
     HA_SOL_STREMIO_INDEXED_INITIAL_FOCUS_INDEX: "1",
-    HA_SOL_STREMIO_INDEXED_CENTER_DELAY_MS: "1200"
+    HA_SOL_STREMIO_INDEXED_CENTER_DELAY_MS: "1200",
+    HA_SOL_STREMIO_INDEXED_CENTER_COMMAND: "ENTER",
+    HA_SOL_STREMIO_INDEXED_CENTER_HOLD_MS: "180"
   });
   assert.deepEqual(timing, {
     openToKeysDelayMs: 45000,
     keyDelayMs: 500,
     initialFocusIndex: 1,
-    centerDelayMs: 1200
+    centerDelayMs: 1200,
+    centerCommand: "ENTER",
+    centerHoldMs: 180
   });
+});
+
+test("can send ENTER as the indexed select key with an atomic hold", async () => {
+  const seen = [];
+  const client = {
+    stremioRemoteEntityId: "remote.tv_cocina",
+    async haService(_domain, _service, payload) {
+      seen.push(payload);
+      return { ok: true };
+    }
+  };
+  const result = await executeIndexedSelection(client, { ok: true, index: 1 }, {
+    keyDelayMs: 0,
+    initialFocusIndex: 1,
+    centerDelayMs: 0,
+    centerCommand: "ENTER",
+    centerHoldMs: 200
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.centerSent, true);
+  assert.equal(result.centerCommand, "ENTER");
+  assert.equal(result.centerHoldMs, 200);
+  assert.deepEqual(seen, [{
+    entity_id: "remote.tv_cocina",
+    command: "ENTER",
+    hold_secs: 0.2
+  }]);
 });
