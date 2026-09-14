@@ -112,10 +112,12 @@ test("play_best continues through native Stremio when direct addon lookup return
     assert.equal(result.deliveryMode, "first_stream_center_click");
     assert.equal(result.playbackRequested, true);
     const launch = calls.find((entry) => entry.href.endsWith("/api/services/remote/turn_on"));
-    const click = calls.find((entry) => entry.href.endsWith("/api/services/remote/send_command"));
+    const click = calls.find((entry) => entry.href.endsWith("/api/services/remote/send_command")
+      && Array.isArray(entry.body?.command)
+      && entry.body.command.includes("DPAD_CENTER"));
     assert.ok(launch.body.activity.includes("tt0121766"));
     assert.ok(launch.body.activity.includes("autoPlay=true"));
-    assert.deepEqual(click.body, { entity_id: "remote.android_tv", command: "DPAD_CENTER" });
+    assert.deepEqual(click.body, { entity_id: "remote.android_tv", command: ["DPAD_CENTER"] });
   } finally {
     globalThis.fetch = originalFetch;
   }
