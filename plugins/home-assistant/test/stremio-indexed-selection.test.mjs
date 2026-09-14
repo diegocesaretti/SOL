@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   chooseNativeLanguageStream,
   executeIndexedSelection,
+  indexedNavigationTiming,
   planFromProviderSlices,
   requiresExactLanguageSelection
 } from "../lib/stremio-indexed-selection.mjs";
@@ -95,7 +96,7 @@ test("requires exact selection for explicit or detected Spanish/Latin streams", 
   assert.equal(requiresExactLanguageSelection({ languages: ["english"] }, { language: "any" }), false);
 });
 
-test("sends one Home Assistant DPAD_RIGHT per native position then DPAD_CENTER", async () => {
+test("compensates the initial Stremio focus before sending DPAD_CENTER", async () => {
   const seen = [];
   const client = {
     stremioRemoteEntityId: "remote.tv_cocina",
@@ -110,13 +111,17 @@ test("sends one Home Assistant DPAD_RIGHT per native position then DPAD_CENTER",
     index: 3,
     addonId: "latino.provider",
     providerIndex: 1
-  }, { keyDelayMs: 0 });
+  }, { keyDelayMs: 0, initialFocusIndex: 1, centerDelayMs: 0 });
 
   assert.equal(result.ok, true);
   assert.equal(result.navigation, "horizontal_right");
-  assert.deepEqual(result.commands, ["DPAD_RIGHT", "DPAD_RIGHT", "DPAD_RIGHT", "DPAD_CENTER"]);
+  assert.equal(result.targetIndex, 3);
+  assert.equal(result.initialFocusIndex, 1);
+  assert.equal(result.suppressedRights, 1);
+  assert.equal(result.forwardedRights, 2);
+  assert.equal(result.centerSent, true);
+  assert.deepEqual(result.commands, ["DPAD_RIGHT", "DPAD_RIGHT", "DPAD_CENTER"]);
   assert.deepEqual(seen.map((entry) => entry.payload.command), [
-    ["DPAD_RIGHT"],
     ["DPAD_RIGHT"],
     ["DPAD_RIGHT"],
     ["DPAD_CENTER"]
@@ -137,4 +142,39 @@ test("rejects indexes above the configured safety cap", () => {
   assert.equal(plan.ok, false);
   assert.equal(plan.reason, "stremio_index_exceeds_safe_limit");
   assert.equal(plan.index, 34);
+});
+
+test("moves left when the target is before the configured initial focus", async () => {
+  const seen = [];
+  const client = {
+    stremioRemoteEntityId: "remote.tv_cocina",
+    async haService(_domain, _service, payload) {
+      seen.push(payload.command[0]);
+      return { ok: true };
+    }
+  };
+  const result = await executeIndexedSelection(client, { ok: true, index: 0 }, {
+    keyDelayMs: 0,
+    initialFocusIndex: 1,
+    centerDelayMs: 0
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.navigation, "horizontal_left");
+  assert.equal(result.injectedLefts, 1);
+  assert.deepEqual(seen, ["DPAD_LEFT", "DPAD_CENTER"]);
+});
+
+test("indexed timing accepts up to 60 seconds before navigation", () => {
+  const timing = indexedNavigationTiming({
+    HA_SOL_STREMIO_OPEN_TO_KEYS_DELAY_MS: "45000",
+    HA_SOL_STREMIO_INDEXED_KEY_DELAY_MS: "500",
+    HA_SOL_STREMIO_INDEXED_INITIAL_FOCUS_INDEX: "1",
+    HA_SOL_STREMIO_INDEXED_CENTER_DELAY_MS: "1200"
+  });
+  assert.deepEqual(timing, {
+    openToKeysDelayMs: 45000,
+    keyDelayMs: 500,
+    initialFocusIndex: 1,
+    centerDelayMs: 1200
+  });
 });
