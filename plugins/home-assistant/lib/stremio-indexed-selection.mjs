@@ -33,7 +33,11 @@ export function indexedNavigationTiming(env = process.env) {
     openToKeysDelayMs: numberEnv(env, "HA_SOL_STREMIO_OPEN_TO_KEYS_DELAY_MS", 1500, 0, 60000),
     keyDelayMs,
     initialFocusIndex: numberEnv(env, "HA_SOL_STREMIO_INDEXED_INITIAL_FOCUS_INDEX", 1, 0, 5),
-    centerDelayMs: numberEnv(env, "HA_SOL_STREMIO_INDEXED_CENTER_DELAY_MS", keyDelayMs, 0, 5000)
+    centerDelayMs: numberEnv(env, "HA_SOL_STREMIO_INDEXED_CENTER_DELAY_MS", keyDelayMs, 0, 5000),
+    centerCommand: ["DPAD_CENTER", "ENTER"].includes(clean(env?.HA_SOL_STREMIO_INDEXED_CENTER_COMMAND).toUpperCase())
+      ? clean(env.HA_SOL_STREMIO_INDEXED_CENTER_COMMAND).toUpperCase()
+      : "DPAD_CENTER",
+    centerHoldMs: numberEnv(env, "HA_SOL_STREMIO_INDEXED_CENTER_HOLD_MS", 120, 0, 1000)
   };
 }
 
@@ -268,18 +272,22 @@ async function queryAccountProviderSlices(client, resolved, account) {
 }
 
 
-async function sendRemoteKey(client, command) {
+async function sendRemoteKey(client, command, { scalar = false, holdMs = 0 } = {}) {
   if (!client?.stremioRemoteEntityId) throw new Error("stremio_remote_entity_id_required");
-  return client.haService("remote", "send_command", {
+  const payload = {
     entity_id: client.stremioRemoteEntityId,
-    command: [command]
-  });
+    command: scalar ? command : [command]
+  };
+  if (holdMs > 0) payload.hold_secs = holdMs / 1000;
+  return client.haService("remote", "send_command", payload);
 }
 
 export async function executeIndexedSelection(client, plan, {
   keyDelayMs = 250,
   initialFocusIndex = 1,
-  centerDelayMs = keyDelayMs
+  centerDelayMs = keyDelayMs,
+  centerCommand = "DPAD_CENTER",
+  centerHoldMs = 120
 } = {}) {
   if (!plan?.ok || !Number.isInteger(plan.index) || plan.index < 0) {
     return { ok: false, reason: "stremio_index_plan_required" };
@@ -299,8 +307,8 @@ export async function executeIndexedSelection(client, plan, {
       if (keyDelayMs > 0 && index < movementCount - 1) await sleep(keyDelayMs);
     }
     if (centerDelayMs > 0) await sleep(centerDelayMs);
-    const result = await sendRemoteKey(client, "DPAD_CENTER");
-    commands.push("DPAD_CENTER");
+    const result = await sendRemoteKey(client, centerCommand, { scalar: true, holdMs: centerHoldMs });
+    commands.push(centerCommand);
     return {
       ok: true,
       via: "home_assistant_indexed_selection",
@@ -313,6 +321,8 @@ export async function executeIndexedSelection(client, plan, {
       suppressedRights: Math.min(targetIndex, startIndex),
       keyDelayMs,
       centerDelayMs,
+      centerCommand,
+      centerHoldMs,
       centerSent: true,
       addonId: plan.addonId || null,
       providerIndex: plan.providerIndex ?? null,
@@ -332,7 +342,9 @@ export async function executeIndexedSelection(client, plan, {
       suppressedRights: Math.min(targetIndex, startIndex),
       keyDelayMs,
       centerDelayMs,
-      centerSent: commands.includes("DPAD_CENTER"),
+      centerCommand,
+      centerHoldMs,
+      centerSent: commands.includes(centerCommand),
       commands,
       reason: error?.message || String(error)
     };
@@ -481,7 +493,7 @@ export function installStremioIndexedSelection(SolPluginClient) {
         ...indexedNavigationTiming(env),
         maxIndex: numberEnv(env, "HA_SOL_STREMIO_INDEXED_MAX_INDEX", 100, 1, 200),
         failClosed: true,
-        policy: "Spanish/Latin playback reconstructs the linked account's native stream order, compensates Stremio's initial focus, moves to the proven absolute index and only then sends DPAD_CENTER."
+        policy: "Spanish/Latin playback reconstructs the linked account's native stream order, compensates Stremio's initial focus, moves to the proven absolute index and only then sends one explicit select-key press/release."
       }
     };
   };
