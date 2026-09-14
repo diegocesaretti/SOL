@@ -1,119 +1,136 @@
 # Home Assistant · SOL plugin
 
-Native SOL plugin for Home Assistant. It keeps an event-driven local mirror of Home Assistant state, adds optional computer-use control for Android TV, and includes Stremio integration compatible with the **standard Stremio Android TV app from Google Play**.
+Plugin nativo de SOL para Home Assistant, Android TV y Stremio. La arquitectura actual usa **Home Assistant como único transporte de control de TV** y la **app oficial de Stremio para Android TV**, sin APK modificada, sin Android TV Satellite, sin Accessibility, sin screenshots y sin proxy selector externo.
 
-## Stremio 0.3.6
-
-0.3.6 extends the 0.3.5 deep-link layer with native support for the Stremio addon protocol. SOL can now query user-configured addon manifests, request their `stream` resources, merge/deduplicate the results and rank them before opening Stremio.
+## Arquitectura actual · 0.3.32
 
 ```text
 SOL / Codex
-   → HomeAssistant.solplugin
-      → Cinemeta title/episode resolution
-      → configured Stremio addons
-         → /stream/{type}/{videoId}.json
-      → dedupe + ranking
-      → selected stream
+   ↓
+HomeAssistant.solplugin
+   ├─ Home Assistant WebSocket + REST
+   ├─ remote.send_command para Android TV
+   ├─ Cinemeta para resolver títulos/episodios
+   ├─ cuenta de Stremio y addons instalados
+   └─ Stremio oficial
+        ↓
+      lista nativa horizontal de streams
+        ↓
+      LEFT/RIGHT × delta + DPAD_CENTER
 ```
 
-The standard Stremio app is never modified or repackaged.
+El plugin mantiene un espejo local event-driven del estado de Home Assistant y expone herramientas para lectura/control. Para Stremio puede resolver películas y episodios, consultar addons, puntuar streams y, cuando se pide Español/Latino, reconstruir el orden nativo de la cuenta para navegar a la posición absoluta correspondiente.
 
-### Stream ranking
+## Selección Español / Latino por índice nativo
 
-The selector can infer and rank by:
+Para una orden como:
+
+```text
+"Poné Minions en latino"
+```
+
+la ruta recomendada es:
+
+```text
+resolver título / episodio
+   ↓
+consultar todos los addons de stream de la cuenta
+   ↓
+conservar orden de addons + orden de streams de cada addon
+   ↓
+filtrar Español / Latino / LATAM
+   ↓
+rankear calidad manteniendo nativeIndex
+   ↓
+abrir el detalle en Stremio oficial
+   ↓
+espera configurable
+   ↓
+LEFT/RIGHT desde el foco inicial hasta nativeIndex
+   ↓
+pausa configurable
+   ↓
+DPAD_CENTER
+```
+
+La selección es **fail-closed**: si no existe un stream del idioma pedido o el índice nativo no es confiable, SOL no confirma otro stream a ciegas.
+
+Los parámetros relevantes son:
+
+- `HA_SOL_STREMIO_OPEN_TO_KEYS_DELAY_MS`: espera después de abrir Stremio y antes del primer movimiento. Rango 0–60000 ms.
+- `HA_SOL_STREMIO_INDEXED_KEY_DELAY_MS`: pausa entre movimientos LEFT/RIGHT.
+- `HA_SOL_STREMIO_INDEXED_INITIAL_FOCUS_INDEX`: índice que Stremio deja enfocado al abrir la lista; actualmente 1 por defecto.
+- `HA_SOL_STREMIO_INDEXED_CENTER_DELAY_MS`: pausa después del último movimiento y antes de `DPAD_CENTER`.
+
+El diagnóstico registra el índice objetivo, foco inicial, movimientos realmente enviados, RIGHT suprimidos por compensación, LEFT inyectados, delays y si `DPAD_CENTER` fue enviado.
+
+## Ranking de streams
+
+Cuando corresponde seleccionar o resumir candidatos, SOL puede considerar:
 
 - 4K / 1080p / 720p / 480p
-- Latino / Español / English labels
+- Latino / Español / English
 - H.264 / H.265 / AV1
-- file size when advertised in the stream label
-- seeders when advertised
-- cached/debrid hints when advertised
-- HDR / Dolby Vision preferences
-- preferred addon/provider
-- low-quality CAM/TS/Screener penalties
+- tamaño del archivo cuando está informado
+- seeders cuando están informados
+- hints cached/debrid
+- HDR / Dolby Vision
+- proveedor/addon preferido
+- penalizaciones para CAM/TS/Screener
 
-Configured addon manifest URLs are stored as a plugin secret because some addon configurations embed user-specific data in the URL. MCP stream tools return safe summaries and do not expose direct stream URLs or manifest URLs.
+Las URLs de manifests configurados se tratan como secretos porque algunos addons incluyen datos personales en su URL. Las herramientas MCP devuelven resúmenes seguros y no exponen URLs directas de streams ni manifests secretos.
 
-### MCP tools added in 0.3.6
+## Cuenta de Stremio
 
-- `home_assistant_stremio_addons`
-- `home_assistant_stremio_streams`
-- `home_assistant_stremio_select_stream`
-- `home_assistant_stremio_play_best`
-- `home_assistant_stremio_proxy_status`
-- `home_assistant_stremio_proxy_install`
+La cuenta es opcional para la reproducción básica, pero habilita:
 
-Existing 0.3.5 tools remain available:
+- biblioteca y Continue Watching
+- progreso y episodios vistos
+- addons instalados y su orden
+- selección account-wide Español/Latino por índice nativo
+- decisiones de siguiente episodio
+
+El método recomendado es `authKey`; también existe login por email/contraseña. Los secretos quedan dentro del proceso del plugin.
+
+Kids/Family usa la misma ruta account-wide de idioma cuando hay cuenta vinculada. Se conserva un manifest Family manual únicamente como fallback opcional.
+
+## Herramientas Stremio
+
+El plugin expone:
 
 - `home_assistant_stremio_status`
 - `home_assistant_stremio_search`
 - `home_assistant_stremio_resolve`
+- `home_assistant_stremio_addons`
+- `home_assistant_stremio_streams`
+- `home_assistant_stremio_select_stream`
+- `home_assistant_stremio_play_best`
+- `home_assistant_stremio_play`
+- `home_assistant_stremio_adjacent_episode`
 - `home_assistant_stremio_open_page`
 - `home_assistant_stremio_open_search`
 - `home_assistant_stremio_open_detail`
-- `home_assistant_stremio_play`
-- `home_assistant_stremio_adjacent_episode`
 - `home_assistant_stremio_open_catalog`
 - `home_assistant_stremio_open_addon`
 - `home_assistant_stremio_open_deep_link`
 
-### Example
+`home_assistant_stremio_play` se conserva como alias compatible de la reproducción actual; no mantiene una segunda implementación de playback.
 
-```text
-"Poneme Breaking Bad temporada 2 capítulo 3 en 1080p latino"
+## Android TV: sólo Home Assistant
 
-Cinemeta
-→ tt0903747:2:3
+El control de TV utiliza exclusivamente la entidad `remote.*` configurada en Home Assistant. Las herramientas disponibles son:
 
-Configured addons
-→ provider A: 4K HEVC English
-→ provider A: 1080p H264 Latino
-→ provider B: 1080p English
+- `home_assistant_tv_status`
+- `home_assistant_tv_navigate`
+- `home_assistant_tv_navigate_path`
 
-SOL ranking
-→ 1080p H264 Latino
-```
+No se usan capturas, coordenadas, Accessibility, `click_text`, `set_text` ni un servicio auxiliar en Android TV.
 
-## Exact selected-stream delivery: SOL Stream Selector
+Antes de abrir un detalle de Stremio, el launch guard puede enviar la tecla de wake `0` por `remote.send_command`. No existe watchdog visual; la navegación posterior es determinista y auditable por comandos.
 
-Official Stremio deep links do not accept an arbitrary `stream=`/`infoHash=` parameter. 0.3.6 therefore includes an optional Stremio addon proxy called **SOL Stream Selector**.
+## Home Assistant
 
-When enabled, SOL creates temporary `sol:` metadata/video IDs. Stremio requests those IDs from SOL Stream Selector, which returns **only the stream SOL selected**.
-
-```text
-SOL selects stream
-      ↓
-sol:<session>:series:tt0903747:2:3
-      ↓
-Stremio → SOL Stream Selector /stream/...
-      ↓
-one selected stream
-      ↓
-playback
-```
-
-The proxy preserves the upstream stream object (`url`, `infoHash`/`fileIdx`, `ytId`, etc.) and supplies a stable `bingeGroup` when the provider did not supply one.
-
-### HTTPS requirement
-
-Stremio requires remote addon URLs to use trusted HTTPS; the documented HTTP exception is `127.0.0.1`, which on Android TV refers to the TV itself, not the computer running SOL. Therefore the selector binds locally on port `8770` by default, but exact mode must be exposed through a trusted HTTPS reverse proxy/tunnel before installing it in Stremio.
-
-Configure:
-
-- **SOL Stream Selector proxy** = enabled
-- **Puerto local Stream Selector** = normally `8770`
-- **Origen HTTPS público del selector** = e.g. `https://stremio-sol.example.com`
-- **Token secreto Stream Selector** = stable random 12+ character token
-
-Then invoke `home_assistant_stremio_proxy_install` once. Stremio opens its normal addon-install prompt. After installation, enable **Usar selector exacto al reproducir**.
-
-If the HTTPS selector is not configured, `home_assistant_stremio_play_best` still resolves and ranks the best stream, opens the normal Stremio stream-selection page with autoplay disabled, and returns a precise addon/title/quality hint so Android TV Satellite can select the matching visible result.
-
-## Existing Home Assistant + TV architecture
-
-Pause/play/volume/seek remain Home Assistant media/remote actions. Android TV Satellite remains an optional visual fallback/verification layer; it is not required for addon aggregation or exact selector mode.
-
-Home Assistant state/control tools:
+El plugin mantiene las herramientas normales de estado y servicios, entre ellas:
 
 - `home_assistant_cache_status`
 - `home_assistant_get_state`
@@ -123,14 +140,13 @@ Home Assistant state/control tools:
 - `home_assistant_get_services`
 - `home_assistant_call_service`
 
-Optional Android TV Satellite tools:
+Las actualizaciones WebSocket mantienen el caché al día y una reconciliación periódica corrige eventuales desvíos.
 
-- `home_assistant_tv_status`
-- `home_assistant_tv_observe`
-- `home_assistant_tv_screenshot`
-- `home_assistant_tv_tap`
-- `home_assistant_tv_click_text`
-- `home_assistant_tv_set_text`
-- `home_assistant_tv_launch_app`
-- `home_assistant_tv_navigate`
-- `home_assistant_tv_navigate_path`
+## Principios de la ruta Stremio
+
+- Stremio es siempre la app oficial.
+- Home Assistant es el único transporte de teclas.
+- El ranking y la posición visual son conceptos separados: se puede elegir el mejor candidato sin perder su `nativeIndex`.
+- No se colapsan entradas visuales si hacerlo pudiera cambiar la posición absoluta.
+- Si un error previo vuelve inseguro el índice, no se manda CENTER.
+- La reproducción genérica conserva un flujo simple configurable; la ruta account-wide Español/Latino usa navegación indexada explícita.
