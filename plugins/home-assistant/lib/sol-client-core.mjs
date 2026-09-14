@@ -17,7 +17,6 @@ import {
   parseAddonManifestList,
   summarizeRankedStream
 } from "./stremio-addons.mjs";
-import { StremioSelectorProxy } from "./stremio-proxy.mjs";
 
 function boolEnv(env, name, fallback = false) {
   const value = env[name];
@@ -78,7 +77,7 @@ const STREMIO_ACTION_SUFFIX = " Uses Home Assistant Android TV Remote remote.tur
 export const STREMIO_MCP_TOOLS = [
   {
     name: "home_assistant_stremio_status",
-    description: "Report Stremio deep-link, addon aggregation and optional SOL Stream Selector proxy status.",
+    description: "Report Stremio deep-link, addon aggregation and native Play Store playback status.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     requiredScope: "read"
   },
@@ -139,23 +138,11 @@ export const STREMIO_MCP_TOOLS = [
     requiredScope: "read"
   },
   {
-    name: "home_assistant_stremio_proxy_status",
-    description: "Report the optional SOL Stream Selector addon proxy state. Exact injection into standard Stremio requires this proxy to be exposed through trusted HTTPS and installed in Stremio.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    requiredScope: "read"
-  },
-  {
-    name: "home_assistant_stremio_proxy_install",
-    description: "Open the Stremio install prompt for the SOL Stream Selector addon. Requires the selector proxy public HTTPS origin/token to be configured and reachable." + STREMIO_ACTION_SUFFIX,
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    requiredScope: "actions"
-  },
-  {
     name: "home_assistant_stremio_play_best",
-    description: "Resolve content, query configured Stremio addons and rank/select the best stream. When the HTTPS SOL Stream Selector proxy is enabled for playback, Stremio receives exactly that selected stream; otherwise it opens the normal detail page without autoplay and returns a visual-selection hint for Android TV Satellite." + STREMIO_ACTION_SUFFIX,
+    description: "Resolve content, query configured Stremio addons and rank/select the best stream, then use the standard Play Store Stremio native stream list for playback." + STREMIO_ACTION_SUFFIX,
     inputSchema: {
       type: "object",
-      properties: { ...CONTENT_RESOLVE_PROPERTIES, ...STREAM_PREFERENCE_PROPERTIES, autoPlay: { type: "boolean" }, useSelectorProxy: { type: "boolean", description: "Override configured exact selector proxy use for this request." } },
+      properties: { ...CONTENT_RESOLVE_PROPERTIES, ...STREAM_PREFERENCE_PROPERTIES, autoPlay: { type: "boolean" } },
       additionalProperties: false
     },
     requiredScope: "actions"
@@ -200,7 +187,7 @@ export const STREMIO_MCP_TOOLS = [
   },
   {
     name: "home_assistant_stremio_play",
-    description: "Resolve a movie or exact series episode from a natural title/IMDb id, build the official Stremio deep link and launch it on Android TV. This legacy path does not select an exact addon stream; prefer home_assistant_stremio_play_best when addons are configured." + STREMIO_ACTION_SUFFIX,
+    description: "Resolve a movie or exact series episode from a natural title/IMDb id, build the official Stremio deep link and launch it on Android TV. This compatibility alias does not select an exact addon stream by itself; prefer home_assistant_stremio_play_best when addons are configured." + STREMIO_ACTION_SUFFIX,
     inputSchema: {
       type: "object",
       properties: { ...CONTENT_RESOLVE_PROPERTIES, autoPlay: { type: "boolean" } },
@@ -298,21 +285,6 @@ export class SolPluginClient {
     };
     this.addonAggregator = new StremioAddonAggregator({ manifestUrls: addonManifests, timeoutMs: this.stremioTimeoutMs });
 
-    this.stremioProxyConfigError = null;
-    try {
-      this.selectorProxy = new StremioSelectorProxy({
-        aggregator: this.addonAggregator,
-        cinemeta: this.cinemeta,
-        enabled: boolEnv(env, "HA_SOL_STREMIO_PROXY_ENABLED", false),
-        port: numberEnv(env, "HA_SOL_STREMIO_PROXY_PORT", 8770, 1024, 65535),
-        publicUrl: env.HA_SOL_STREMIO_PROXY_PUBLIC_URL || "",
-        token: env.HA_SOL_STREMIO_PROXY_TOKEN || ""
-      });
-    } catch (error) {
-      this.stremioProxyConfigError = error?.message || String(error);
-      this.selectorProxy = new StremioSelectorProxy({ aggregator: this.addonAggregator, cinemeta: this.cinemeta, enabled: false });
-    }
-    this.stremioProxyUseForPlay = boolEnv(env, "HA_SOL_STREMIO_PROXY_USE_FOR_PLAY", false);
 
     this.mcpProxyServer = null;
     this.mcpProxyUrl = "";
@@ -391,9 +363,11 @@ export class SolPluginClient {
   }
 
   streamPreferences(args = {}) {
+    const profile = String(args.profile || "").trim().toLowerCase();
+    const profileLanguage = profile === "family" || profile === "kids" ? "latin" : null;
     return {
       quality: args.quality || this.stremioDefaultPreferences.quality,
-      language: args.language || this.stremioDefaultPreferences.language,
+      language: args.language || profileLanguage || this.stremioDefaultPreferences.language,
       codec: args.codec || this.stremioDefaultPreferences.codec,
       maxSizeGb: args.maxSizeGb === undefined ? this.stremioDefaultPreferences.maxSizeGb : Number(args.maxSizeGb),
       provider: args.provider || null,
@@ -434,22 +408,18 @@ export class SolPluginClient {
         configError: this.stremioAddonConfigError,
         defaults: this.stremioDefaultPreferences
       },
-      selectorProxy: {
-        ...this.selectorProxy.status(),
-        useForPlay: this.stremioProxyUseForPlay,
-        configError: this.stremioProxyConfigError
-      },
+      playbackMode: "native_stremio_only",
       capabilities: {
         ...STREMIO_DEEP_LINK_CAPABILITIES,
         addonManifestDiscovery: true,
         addonStreamAggregation: true,
         addonStreamRanking: true,
-        exactSelectedStreamViaProxy: this.selectorProxy.readyForInstall
+        nativeInstalledAddonPlayback: true,
+        publicHttpsSelectorRequired: false
       },
       limitations: [
         "Official Stremio deep links cannot directly carry an exact stream/provider/quality.",
-        "Without the SOL Stream Selector HTTPS proxy, exact selection falls back to visual selection in the normal Stremio stream list.",
-        "Remote Stremio addons must be served over trusted HTTPS; 127.0.0.1 is the documented exception but points to the TV itself on Android TV.",
+        "Exact Spanish/Latin selection is performed by reconstructing Stremio's native account stream order and navigating to the proven index.",
         "Pause/play/volume/seek remain Home Assistant media/remote controls, not Stremio deep-link commands."
       ]
     };
@@ -487,7 +457,7 @@ export class SolPluginClient {
       remoteEntityId: this.stremioRemoteEntityId,
       deepLink: uri,
       result,
-      verificationHint: "If Android TV Satellite is configured, use home_assistant_tv_observe after launch when visual confirmation matters."
+      verificationHint: "Navigation and playback control use the configured Home Assistant remote."
     };
   }
 
@@ -553,18 +523,6 @@ export class SolPluginClient {
         errors: selection.errors
       };
     }
-    if (tool === "home_assistant_stremio_proxy_status") {
-      if (this.stremioProxyConfigError) return { ...this.selectorProxy.status(), configError: this.stremioProxyConfigError };
-      return this.selectorProxy.status();
-    }
-    if (tool === "home_assistant_stremio_proxy_install") {
-      if (this.stremioProxyConfigError) throw new Error(this.stremioProxyConfigError);
-      if (!this.addonAggregator.configured) throw new Error("stremio_addon_manifests_required");
-      await this.selectorProxy.ensureStarted();
-      const uri = this.selectorProxy.installDeepLink();
-      if (!uri) throw new Error("stremio_proxy_not_configured");
-      return { proxy: this.selectorProxy.status(), launch: await this.launchStremio(uri) };
-    }
     if (tool === "home_assistant_stremio_play_best") {
       if (this.stremioAddonConfigError) throw new Error(this.stremioAddonConfigError);
       if (!this.addonAggregator.configured) throw new Error("stremio_addon_manifests_required");
@@ -573,28 +531,6 @@ export class SolPluginClient {
       const selection = await this.addonAggregator.selectStream(resolved.type, streamId, preferences);
       if (!selection.selected) throw new Error("stremio_no_streams_found");
       const selected = summarizeRankedStream(selection.selected, 0);
-      const useProxy = args.useSelectorProxy === undefined ? this.stremioProxyUseForPlay : Boolean(args.useSelectorProxy);
-
-      if (useProxy) {
-        if (this.stremioProxyConfigError) throw new Error(this.stremioProxyConfigError);
-        await this.selectorProxy.ensureStarted();
-        const proxySelection = this.selectorProxy.buildSelectionDeepLink({
-          type: resolved.type,
-          id: resolved.id,
-          season: resolved.season,
-          episode: resolved.episode,
-          preferences,
-          autoPlay
-        });
-        return {
-          content: { type: resolved.type, id: resolved.id, videoId: resolved.videoId, selected: resolved.selected },
-          preferences,
-          selected,
-          deliveryMode: "selector_proxy_exact",
-          proxy: { manifestUrl: this.selectorProxy.manifestUrl(), sessionId: proxySelection.sessionId },
-          launch: await this.launchStremio(proxySelection.deepLink)
-        };
-      }
 
       const normalLink = detailDeepLink({
         type: resolved.type,
@@ -606,14 +542,14 @@ export class SolPluginClient {
         content: { type: resolved.type, id: resolved.id, videoId: resolved.videoId, selected: resolved.selected },
         preferences,
         selected,
-        deliveryMode: "visual_selection_required",
+        deliveryMode: "native_stream_list",
         visualSelectionHint: {
           addonName: selected.addonName,
           name: selected.name,
           title: selected.title,
           quality: selected.quality,
           languages: selected.languages,
-          instruction: "Stremio deep links cannot inject a stream. After opening the detail/stream list, use home_assistant_tv_observe and select the visible stream matching this addon/title/quality. Do not accept a different stream merely because it appears first."
+          instruction: "Stremio deep links cannot inject a stream directly. Use the native Stremio stream list or account-wide indexed selection when an exact language was requested."
         },
         launch: await this.launchStremio(normalLink)
       };
