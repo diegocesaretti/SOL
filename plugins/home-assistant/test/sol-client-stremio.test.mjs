@@ -93,7 +93,7 @@ test("Matrix Spanish follows exactly one launch-wait-move-center path", async ()
     HA_SOL_STREMIO_DEFAULT_LANGUAGE: "any",
     HA_SOL_STREMIO_OPEN_TO_KEYS_DELAY_MS: "0",
     HA_SOL_STREMIO_INDEXED_KEY_DELAY_MS: "0",
-    HA_SOL_STREMIO_INDEXED_INITIAL_FOCUS_INDEX: "1",
+    HA_SOL_STREMIO_INDEXED_INITIAL_FOCUS_INDEX: "0",
     HA_SOL_STREMIO_INDEXED_CENTER_DELAY_MS: "0",
     HA_SOL_STREMIO_INDEXED_CENTER_HOLD_MS: "120",
     HA_SOL_TV_REMOTE_ENTITY_ID: "remote.tv",
@@ -108,7 +108,8 @@ test("Matrix Spanish follows exactly one launch-wait-move-center path", async ()
   };
   client.resolveForStream = async () => ({ resolved: { type: "movie", id: "tt0133093", videoId: "tt0133093", selected: { name: "The Matrix" } }, streamId: "tt0133093", episodeDecision: null });
   let launched = null;
-  client.launchStremio = async (uri) => { launched = uri; return { ok: true, deepLink: uri }; };
+  let launchCount = 0;
+  client.launchStremio = async (uri) => { launchCount += 1; launched = uri; return { ok: true, deepLink: uri }; };
   client.haService = async (_domain, _service, payload) => { calls.push(payload); return { ok: true }; };
 
   try {
@@ -116,8 +117,9 @@ test("Matrix Spanish follows exactly one launch-wait-move-center path", async ()
     assert.equal(result.playbackRequested, true);
     assert.equal(result.selected.nativeIndex, 3);
     assert.equal(result.preferences.quality, "1080p");
+    assert.equal(launchCount, 1);
     assert.equal(launched.includes("autoPlay=true"), false);
-    assert.deepEqual(calls.map((item) => item.command), [["DPAD_RIGHT"], ["DPAD_RIGHT"], "DPAD_CENTER"]);
+    assert.deepEqual(calls.map((item) => item.command), ["DPAD_RIGHT", "DPAD_RIGHT", "DPAD_RIGHT", "DPAD_CENTER"]);
     assert.equal(calls.at(-1).hold_secs, 0.12);
   } finally {
     globalThis.fetch = originalFetch;
