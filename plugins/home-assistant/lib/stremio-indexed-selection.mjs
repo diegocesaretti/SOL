@@ -20,7 +20,7 @@ export function indexedNavigationTiming(env = process.env) {
   return {
     openToKeysDelayMs: numberEnv(env, "HA_SOL_STREMIO_OPEN_TO_KEYS_DELAY_MS", 1500, 0, 60000),
     keyDelayMs,
-    initialFocusIndex: numberEnv(env, "HA_SOL_STREMIO_INDEXED_INITIAL_FOCUS_INDEX", 0, 0, 5),
+    initialFocusIndex: 0,
     centerDelayMs: numberEnv(env, "HA_SOL_STREMIO_INDEXED_CENTER_DELAY_MS", keyDelayMs, 0, 10000),
     centerCommand: ["DPAD_CENTER", "ENTER"].includes(clean(env?.HA_SOL_STREMIO_INDEXED_CENTER_COMMAND).toUpperCase())
       ? clean(env.HA_SOL_STREMIO_INDEXED_CENTER_COMMAND).toUpperCase()
