@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
-const INSTALL_MARK = Symbol.for("sol.home_assistant.stremio_manual_latin_defaults");
+const INSTALL_MARK = Symbol.for("sol.home_assistant.stremio_manual_spanish_defaults");
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -47,11 +47,11 @@ function firstConfiguredMatch(configured, candidates) {
   return null;
 }
 
-export function installManualLatinTitlePolicy(SolPluginClientClass, env = process.env) {
+export function installManualSpanishTitlePolicy(SolPluginClientClass, env = process.env) {
   const prototype = SolPluginClientClass?.prototype;
   if (!prototype || prototype[INSTALL_MARK]) return { installed: false, reason: "already_installed_or_invalid_class" };
 
-  const normalizedTitles = parseConfiguredTitles(env?.HA_SOL_STREMIO_LATIN_DEFAULT_TITLES);
+  const normalizedTitles = parseConfiguredTitles(env?.HA_SOL_STREMIO_SPANISH_DEFAULT_TITLES);
   const configured = new Set(normalizedTitles);
   const context = new AsyncLocalStorage();
   const originalPlayBest = prototype.playBest;
@@ -65,12 +65,12 @@ export function installManualLatinTitlePolicy(SolPluginClientClass, env = proces
 
   Object.defineProperty(prototype, INSTALL_MARK, { value: true, configurable: false, enumerable: false });
 
-  prototype.playBest = function playBestWithManualLatinDefaults(args = {}) {
+  prototype.playBest = function playBestWithManualSpanishDefaults(args = {}) {
     const state = { query: clean(args.query), resolvedTitle: null };
     return context.run(state, () => originalPlayBest.call(this, args));
   };
 
-  prototype.resolveForStream = async function resolveForStreamWithManualLatinDefaults(args = {}) {
+  prototype.resolveForStream = async function resolveForStreamWithManualSpanishDefaults(args = {}) {
     const result = await originalResolveForStream.call(this, args);
     const state = context.getStore();
     if (state) {
@@ -80,7 +80,7 @@ export function installManualLatinTitlePolicy(SolPluginClientClass, env = proces
     return result;
   };
 
-  prototype.streamPreferences = function streamPreferencesWithManualLatinDefaults(args = {}) {
+  prototype.streamPreferences = function streamPreferencesWithManualSpanishDefaults(args = {}) {
     const base = originalStreamPreferences.call(this, args);
     const explicitLanguage = specificLanguage(args.language);
     if (explicitLanguage || configured.size === 0) {
@@ -95,20 +95,21 @@ export function installManualLatinTitlePolicy(SolPluginClientClass, env = proces
 
     return {
       ...base,
-      language: "latin",
+      language: "spanish",
       languageSource: "manual_title_default",
-      matchedManualLatinTitle: matchedTitle
+      matchedManualSpanishTitle: matchedTitle
     };
   };
 
   if (typeof originalStatus === "function") {
-    prototype.stremioStatus = function stremioStatusWithManualLatinDefaults() {
+    prototype.stremioStatus = function stremioStatusWithManualSpanishDefaults() {
       return {
         ...originalStatus.call(this),
-        manualLatinDefaults: {
+        manualSpanishDefaults: {
           count: configured.size,
           matching: "normalized_exact_title",
-          language: "latin"
+          language: "spanish",
+          latinoPriority: true
         }
       };
     };
