@@ -102,7 +102,7 @@ test("visual position 17 means native index 16 and exactly 16 RIGHT commands fro
   assert.deepEqual(seen, [...Array(16).fill("DPAD_RIGHT"), "DPAD_CENTER"]);
 });
 
-test("moves left when target is before a configured nonzero initial focus", async () => {
+test("moves left when target is before a programmatic nonzero initial focus", async () => {
   const seen = [];
   const client = { stremioRemoteEntityId: "remote.tv_cocina", async haService(_domain, _service, payload) { seen.push(payload.command); return { ok: true }; } };
   const result = await executeIndexedSelection(client, { ok: true, index: 0 }, { keyDelayMs: 0, initialFocusIndex: 1, centerDelayMs: 0, centerCommand: "DPAD_CENTER", centerHoldMs: 120 });
@@ -110,8 +110,8 @@ test("moves left when target is before a configured nonzero initial focus", asyn
   assert.deepEqual(seen, ["DPAD_LEFT", "DPAD_CENTER"]);
 });
 
-test("default timing starts at the first stream", () => {
-  const timing = indexedNavigationTiming({});
+test("runtime timing is pinned to first stream even if an old persisted focus env says 1", () => {
+  const timing = indexedNavigationTiming({ HA_SOL_STREMIO_INDEXED_INITIAL_FOCUS_INDEX: "1" });
   assert.equal(timing.initialFocusIndex, 0);
 });
 
@@ -124,7 +124,7 @@ test("timing supports long startup delay and independent select timing", () => {
     HA_SOL_STREMIO_INDEXED_CENTER_COMMAND: "ENTER",
     HA_SOL_STREMIO_INDEXED_CENTER_HOLD_MS: "180"
   });
-  assert.deepEqual(timing, { openToKeysDelayMs: 45000, keyDelayMs: 500, initialFocusIndex: 1, centerDelayMs: 1200, centerCommand: "ENTER", centerHoldMs: 180 });
+  assert.deepEqual(timing, { openToKeysDelayMs: 45000, keyDelayMs: 500, initialFocusIndex: 0, centerDelayMs: 1200, centerCommand: "ENTER", centerHoldMs: 180 });
 });
 
 test("rejects indexes above the safety cap", () => {
