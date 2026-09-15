@@ -104,6 +104,27 @@ test("deduplicates simultaneous and recently repeated identical play_best reques
   assert.equal(physicalRuns, 1);
 });
 
+test("in-flight duplicate protection remains active when post-completion dedupe window is zero", async () => {
+  const client = new SolPluginClient({ HA_SOL_STREMIO_PLAYBACK_DEDUPE_MS: "0" });
+  let physicalRuns = 0;
+  let releaseRun;
+  const gate = new Promise((resolve) => { releaseRun = resolve; });
+  client.playBest = async () => {
+    physicalRuns += 1;
+    await gate;
+    return { playbackRequested: true };
+  };
+  const args = { query: "Matrix", language: "spanish" };
+  const first = client.handleStremioTool("home_assistant_stremio_play_best", args);
+  const second = client.handleStremioTool("home_assistant_stremio_play_best", args);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(physicalRuns, 1);
+  releaseRun();
+  await Promise.all([first, second]);
+  await client.handleStremioTool("home_assistant_stremio_play_best", args);
+  assert.equal(physicalRuns, 2);
+});
+
 test("different play_best requests are not deduplicated", async () => {
   const client = new SolPluginClient({ HA_SOL_STREMIO_PLAYBACK_DEDUPE_MS: "30000" });
   let physicalRuns = 0;
@@ -145,7 +166,7 @@ test("Matrix Spanish follows exactly one launch-wait-move-center path", async ()
     HA_SOL_STREMIO_DEFAULT_LANGUAGE: "any",
     HA_SOL_STREMIO_OPEN_TO_KEYS_DELAY_MS: "0",
     HA_SOL_STREMIO_INDEXED_KEY_DELAY_MS: "0",
-    HA_SOL_STREMIO_INDEXED_INITIAL_FOCUS_INDEX: "0",
+    HA_SOL_STREMIO_INDEXED_INITIAL_FOCUS_INDEX: "1",
     HA_SOL_STREMIO_INDEXED_CENTER_DELAY_MS: "0",
     HA_SOL_STREMIO_INDEXED_CENTER_HOLD_MS: "120",
     HA_SOL_TV_REMOTE_ENTITY_ID: "remote.tv",
@@ -169,6 +190,7 @@ test("Matrix Spanish follows exactly one launch-wait-move-center path", async ()
     assert.equal(result.playbackRequested, true);
     assert.equal(result.selected.nativeIndex, 3);
     assert.equal(result.preferences.quality, "1080p");
+    assert.equal(result.timing.initialFocusIndex, 0);
     assert.equal(launchCount, 1);
     assert.equal(launched.includes("autoPlay=true"), false);
     assert.deepEqual(calls.map((item) => item.command), ["DPAD_RIGHT", "DPAD_RIGHT", "DPAD_RIGHT", "DPAD_CENTER"]);
