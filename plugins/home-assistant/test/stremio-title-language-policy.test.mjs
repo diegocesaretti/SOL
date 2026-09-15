@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  installManualLatinTitlePolicy,
+  installManualSpanishTitlePolicy,
   normalizeConfiguredTitle,
   parseConfiguredTitles
 } from "../lib/stremio-title-language-policy.mjs";
@@ -40,45 +40,46 @@ test("parses semicolon, pipe, newline and JSON-array title lists", () => {
   assert.deepEqual(parseConfiguredTitles('["Coco","Amélie"]'), ["coco", "amelie"]);
 });
 
-test("configured resolved title defaults to Latin when no specific language was requested", async () => {
+test("configured resolved title defaults to Spanish when no specific language was requested", async () => {
   const Client = FakeClientClass("El Niño y la Garza");
-  const installed = installManualLatinTitlePolicy(Client, {
-    HA_SOL_STREMIO_LATIN_DEFAULT_TITLES: "matrix; el nino y la garza"
+  const installed = installManualSpanishTitlePolicy(Client, {
+    HA_SOL_STREMIO_SPANISH_DEFAULT_TITLES: "matrix; el nino y la garza"
   });
   assert.equal(installed.installed, true);
 
   const result = await new Client().playBest({ query: "El NINO y la GARZA!!!", language: "any" });
-  assert.equal(result.preferences.language, "latin");
+  assert.equal(result.preferences.language, "spanish");
   assert.equal(result.preferences.languageSource, "manual_title_default");
-  assert.equal(result.preferences.matchedManualLatinTitle, "el nino y la garza");
+  assert.equal(result.preferences.matchedManualSpanishTitle, "el nino y la garza");
 });
 
 test("resolved catalog title can match even when the spoken query differs", async () => {
   const Client = FakeClientClass("Amélie");
-  installManualLatinTitlePolicy(Client, { HA_SOL_STREMIO_LATIN_DEFAULT_TITLES: "amelie" });
+  installManualSpanishTitlePolicy(Client, { HA_SOL_STREMIO_SPANISH_DEFAULT_TITLES: "amelie" });
 
   const result = await new Client().playBest({ query: "la pelicula francesa de amelie" });
-  assert.equal(result.preferences.language, "latin");
-  assert.equal(result.preferences.matchedManualLatinTitle, "amelie");
+  assert.equal(result.preferences.language, "spanish");
+  assert.equal(result.preferences.matchedManualSpanishTitle, "amelie");
 });
 
 test("an explicit specific language overrides the manual title default", async () => {
   const Client = FakeClientClass("Coco");
-  installManualLatinTitlePolicy(Client, { HA_SOL_STREMIO_LATIN_DEFAULT_TITLES: "COCO" });
+  installManualSpanishTitlePolicy(Client, { HA_SOL_STREMIO_SPANISH_DEFAULT_TITLES: "COCO" });
 
   const result = await new Client().playBest({ query: "coco", language: "english" });
   assert.equal(result.preferences.language, "english");
   assert.equal(result.preferences.languageSource, "explicit");
-  assert.equal("matchedManualLatinTitle" in result.preferences, false);
+  assert.equal("matchedManualSpanishTitle" in result.preferences, false);
 });
 
-test("status exposes manual-default policy count without changing normal playback settings", () => {
+test("status exposes manual-default policy count and Latino priority", () => {
   const Client = FakeClientClass("Matrix");
-  installManualLatinTitlePolicy(Client, { HA_SOL_STREMIO_LATIN_DEFAULT_TITLES: "Matrix; Coco" });
+  installManualSpanishTitlePolicy(Client, { HA_SOL_STREMIO_SPANISH_DEFAULT_TITLES: "Matrix; Coco" });
   const status = new Client().stremioStatus();
-  assert.deepEqual(status.manualLatinDefaults, {
+  assert.deepEqual(status.manualSpanishDefaults, {
     count: 2,
     matching: "normalized_exact_title",
-    language: "latin"
+    language: "spanish",
+    latinoPriority: true
   });
 });
