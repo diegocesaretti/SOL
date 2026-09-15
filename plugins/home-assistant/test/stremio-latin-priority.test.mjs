@@ -15,18 +15,19 @@ function slices(titles) {
   }];
 }
 
-test("classifies Mexico flag above textual Latin labels", () => {
+test("classifies Mexico flag above textual Latin labels above other Latin flags", () => {
   const mexico = inspectStream({ title: "Movie 720p 🇲🇽" });
   const latino = inspectStream({ title: "Movie 1080p LATINO" });
   const argentina = inspectStream({ title: "Movie 4K 🇦🇷" });
 
   assert.deepEqual(mexico.languages, ["latin"]);
-  assert.equal(mexico.latinPriority, 2);
+  assert.equal(mexico.latinPriority, 3);
   assert.equal(mexico.latinSignal, "mexico_flag");
-  assert.equal(latino.latinPriority, 1);
+  assert.equal(latino.latinPriority, 2);
   assert.equal(latino.latinSignal, "latin_label");
   assert.deepEqual(argentina.languages, ["latin"]);
-  assert.equal(argentina.latinPriority, 0);
+  assert.equal(argentina.latinPriority, 1);
+  assert.equal(argentina.latinSignal, "latin_flag");
 });
 
 test("Mexico flag wins before requested quality", () => {
