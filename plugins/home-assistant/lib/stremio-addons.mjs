@@ -87,17 +87,18 @@ function audioMetadata(text) {
       ? "single"
       : "unknown";
 
+  // Keep the compact legacy tags stable for callers while audioLanguages is the
+  // canonical structured representation used by native stream selection.
   const languages = [];
   if (spanishVariant === "latin") languages.push("latin");
-  for (const language of audioLanguages) {
-    if (!languages.includes(language)) languages.push(language);
-  }
+  if (SPANISH_RE.test(text) || text.includes("🇪🇸")) languages.push("spanish");
+  if (ENGLISH_RE.test(text) || text.includes("🇬🇧") || text.includes("🇺🇸")) languages.push("english");
 
   return {
     audioType,
     audioLanguages,
     spanishVariant,
-    languages,
+    languages: [...new Set(languages)],
     latinPriority: Number(strongestLatin?.latinPriority || 0),
     latinSignal: strongestLatin?.latinSignal || null
   };
