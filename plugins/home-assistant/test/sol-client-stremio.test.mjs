@@ -18,7 +18,7 @@ async function listen(handler) {
   return { server, url: `http://127.0.0.1:${address.port}` };
 }
 
-test("registers Stremio tools directly without an MCP forwarding proxy", async () => {
+test("registers one public Stremio playback action without detail-launch bypass", async () => {
   let registered = null;
   const solHost = await listen(async (req, res) => {
     if (req.url === "/v1/plugin-api/mcp/tools/register") {
@@ -36,8 +36,9 @@ test("registers Stremio tools directly without an MCP forwarding proxy", async (
     await client.registerMcpTools(callbackUrl, STREMIO_MCP_TOOLS);
     assert.equal(registered.callbackUrl, callbackUrl);
     assert.equal("mcpProxyServer" in client, false);
-    assert.ok(registered.tools.some((tool) => tool.name === "home_assistant_stremio_play_best"));
+    assert.equal(registered.tools.filter((tool) => tool.name === "home_assistant_stremio_play_best").length, 1);
     assert.equal(registered.tools.some((tool) => tool.name === "home_assistant_stremio_play"), false);
+    assert.equal(registered.tools.some((tool) => tool.name === "home_assistant_stremio_open_detail"), false);
   } finally {
     solHost.server.close();
   }
@@ -70,6 +71,57 @@ test("merges playback defaults before native stream selection", () => {
   const client = new SolPluginClient({ HA_SOL_STREMIO_DEFAULT_QUALITY: "1080p", HA_SOL_STREMIO_DEFAULT_LANGUAGE: "spanish" });
   assert.deepEqual(client.streamPreferences({}), { quality: "1080p", language: "spanish" });
   assert.deepEqual(client.streamPreferences({ quality: "4k", language: "latin" }), { quality: "4k", language: "latin" });
+});
+
+test("deduplicates simultaneous and recently repeated identical play_best requests", async () => {
+  const client = new SolPluginClient({ HA_SOL_STREMIO_PLAYBACK_DEDUPE_MS: "30000" });
+  let physicalRuns = 0;
+  let releaseRun;
+  const gate = new Promise((resolve) => { releaseRun = resolve; });
+  client.playBest = async () => {
+    physicalRuns += 1;
+    await gate;
+    return { playbackRequested: true, marker: physicalRuns };
+  };
+
+  const args = { query: "Matrix", language: "spanish", quality: "1080p" };
+  const first = client.handleStremioTool("home_assistant_stremio_play_best", args);
+  const second = client.handleStremioTool("home_assistant_stremio_play_best", args);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(physicalRuns, 1);
+  releaseRun();
+
+  const [firstResult, secondResult] = await Promise.all([first, second]);
+  assert.equal(firstResult.playbackRequested, true);
+  assert.equal(secondResult.playbackRequested, true);
+  assert.equal(secondResult.deduplicated, true);
+  assert.equal(secondResult.dedupeReason, "identical_playback_in_flight");
+  assert.equal(physicalRuns, 1);
+
+  const thirdResult = await client.handleStremioTool("home_assistant_stremio_play_best", args);
+  assert.equal(thirdResult.deduplicated, true);
+  assert.equal(thirdResult.dedupeReason, "identical_playback_recently_completed");
+  assert.equal(physicalRuns, 1);
+});
+
+test("different play_best requests are not deduplicated", async () => {
+  const client = new SolPluginClient({ HA_SOL_STREMIO_PLAYBACK_DEDUPE_MS: "30000" });
+  let physicalRuns = 0;
+  client.playBest = async (args) => {
+    physicalRuns += 1;
+    return { playbackRequested: true, query: args.query };
+  };
+  await client.handleStremioTool("home_assistant_stremio_play_best", { query: "Matrix", language: "spanish" });
+  await client.handleStremioTool("home_assistant_stremio_play_best", { query: "Interstellar", language: "spanish" });
+  assert.equal(physicalRuns, 2);
+});
+
+test("removed open_detail tool cannot launch Stremio", async () => {
+  const client = new SolPluginClient({});
+  await assert.rejects(
+    () => client.handleStremioTool("home_assistant_stremio_open_detail", { mediaType: "movie", id: "tt0133093" }),
+    /stremio_tool_not_found/
+  );
 });
 
 test("Matrix Spanish follows exactly one launch-wait-move-center path", async () => {
@@ -113,7 +165,7 @@ test("Matrix Spanish follows exactly one launch-wait-move-center path", async ()
   client.haService = async (_domain, _service, payload) => { calls.push(payload); return { ok: true }; };
 
   try {
-    const result = await client.playBest({ query: "Matrix", language: "spanish" });
+    const result = await client.handleStremioTool("home_assistant_stremio_play_best", { query: "Matrix", language: "spanish" });
     assert.equal(result.playbackRequested, true);
     assert.equal(result.selected.nativeIndex, 3);
     assert.equal(result.preferences.quality, "1080p");
