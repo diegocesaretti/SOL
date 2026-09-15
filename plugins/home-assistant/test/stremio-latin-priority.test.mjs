@@ -20,12 +20,16 @@ test("classifies Mexico flag above textual Latin labels above other Latin flags"
   const latino = inspectStream({ title: "Movie 1080p LATINO" });
   const argentina = inspectStream({ title: "Movie 4K 🇦🇷" });
 
-  assert.deepEqual(mexico.languages, ["latin"]);
+  assert.deepEqual(mexico.audioLanguages, ["spanish"]);
+  assert.deepEqual(mexico.languages, ["latin", "spanish"]);
+  assert.equal(mexico.spanishVariant, "latin");
   assert.equal(mexico.latinPriority, 3);
   assert.equal(mexico.latinSignal, "mexico_flag");
+  assert.deepEqual(latino.audioLanguages, ["spanish"]);
   assert.equal(latino.latinPriority, 2);
   assert.equal(latino.latinSignal, "latin_label");
-  assert.deepEqual(argentina.languages, ["latin"]);
+  assert.deepEqual(argentina.audioLanguages, ["spanish"]);
+  assert.deepEqual(argentina.languages, ["latin", "spanish"]);
   assert.equal(argentina.latinPriority, 1);
   assert.equal(argentina.latinSignal, "latin_flag");
 });
@@ -40,6 +44,7 @@ test("Mexico flag wins before requested quality", () => {
   assert.equal(choice.nativeIndex, 1);
   assert.equal(choice.selected.latinSignal, "mexico_flag");
   assert.equal(choice.selected.resolution, 720);
+  assert.deepEqual(choice.selected.audioLanguages, ["spanish"]);
 });
 
 test("LAT or Latino wins before other Latin markers and then quality applies", () => {
