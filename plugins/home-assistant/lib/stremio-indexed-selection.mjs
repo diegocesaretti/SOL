@@ -5,6 +5,12 @@ function clean(value) {
   return String(value ?? "").trim();
 }
 
+function boolEnv(env, name, fallback = false) {
+  const value = env?.[name];
+  if (value === undefined || value === null || value === "") return fallback;
+  return /^(1|true|yes|on)$/i.test(String(value));
+}
+
 function numberEnv(env, name, fallback, min, max) {
   const value = Number(env?.[name] ?? fallback);
   if (!Number.isFinite(value)) return fallback;
@@ -21,6 +27,9 @@ export function indexedNavigationTiming(env = process.env) {
     openToKeysDelayMs: numberEnv(env, "HA_SOL_STREMIO_OPEN_TO_KEYS_DELAY_MS", 1500, 0, 60000),
     keyDelayMs,
     initialFocusIndex: 0,
+    resetBeforeNavigation: boolEnv(env, "HA_SOL_STREMIO_RESET_BEFORE_NAVIGATION", false),
+    resetLeftHoldMs: 7000,
+    resetPostDownDelayMs: 1000,
     centerDelayMs: numberEnv(env, "HA_SOL_STREMIO_INDEXED_CENTER_DELAY_MS", keyDelayMs, 0, 10000),
     centerCommand: ["DPAD_CENTER", "ENTER"].includes(clean(env?.HA_SOL_STREMIO_INDEXED_CENTER_COMMAND).toUpperCase())
       ? clean(env.HA_SOL_STREMIO_INDEXED_CENTER_COMMAND).toUpperCase()
@@ -243,17 +252,12 @@ export async function queryAccountProviderSlices(client, { mediaType, mediaId },
   return { addons, slices };
 }
 
-async function sendMovementKey(client, command) {
+async function sendRemoteKey(client, command, holdMs = 0) {
   if (!client?.stremioRemoteEntityId) throw new Error("stremio_remote_entity_id_required");
-  return client.haService("remote", "send_command", {
+  const payload = {
     entity_id: client.stremioRemoteEntityId,
     command
-  });
-}
-
-async function sendSelectKey(client, command, holdMs) {
-  if (!client?.stremioRemoteEntityId) throw new Error("stremio_remote_entity_id_required");
-  const payload = { entity_id: client.stremioRemoteEntityId, command };
+  };
   if (holdMs > 0) payload.hold_secs = holdMs / 1000;
   return client.haService("remote", "send_command", payload);
 }
@@ -261,6 +265,9 @@ async function sendSelectKey(client, command, holdMs) {
 export async function executeIndexedSelection(client, plan, {
   keyDelayMs = 250,
   initialFocusIndex = 0,
+  resetBeforeNavigation = false,
+  resetLeftHoldMs = 7000,
+  resetPostDownDelayMs = 1000,
   centerDelayMs = keyDelayMs,
   centerCommand = "DPAD_CENTER",
   centerHoldMs = 120
@@ -275,15 +282,32 @@ export async function executeIndexedSelection(client, plan, {
   const movementCommand = delta >= 0 ? "DPAD_RIGHT" : "DPAD_LEFT";
   const movementCount = Math.abs(delta);
   const commands = [];
+  const resetCommands = [];
 
   try {
+    if (resetBeforeNavigation) {
+      await sendRemoteKey(client, "DPAD_LEFT", resetLeftHoldMs);
+      commands.push("DPAD_LEFT");
+      resetCommands.push("DPAD_LEFT");
+
+      await sendRemoteKey(client, "DPAD_RIGHT");
+      commands.push("DPAD_RIGHT");
+      resetCommands.push("DPAD_RIGHT");
+
+      await sendRemoteKey(client, "DPAD_DOWN");
+      commands.push("DPAD_DOWN");
+      resetCommands.push("DPAD_DOWN");
+
+      if (resetPostDownDelayMs > 0) await sleep(resetPostDownDelayMs);
+    }
+
     for (let index = 0; index < movementCount; index += 1) {
-      await sendMovementKey(client, movementCommand);
+      await sendRemoteKey(client, movementCommand);
       commands.push(movementCommand);
       if (keyDelayMs > 0 && index < movementCount - 1) await sleep(keyDelayMs);
     }
     if (centerDelayMs > 0) await sleep(centerDelayMs);
-    const result = await sendSelectKey(client, centerCommand, centerHoldMs);
+    const result = await sendRemoteKey(client, centerCommand, centerHoldMs);
     commands.push(centerCommand);
     return {
       ok: true,
@@ -293,6 +317,10 @@ export async function executeIndexedSelection(client, plan, {
       movementCommand,
       movementCount,
       keyDelayMs,
+      resetBeforeNavigation,
+      resetLeftHoldMs: resetBeforeNavigation ? resetLeftHoldMs : 0,
+      resetPostDownDelayMs: resetBeforeNavigation ? resetPostDownDelayMs : 0,
+      resetCommands,
       centerDelayMs,
       centerCommand,
       centerHoldMs,
@@ -311,6 +339,10 @@ export async function executeIndexedSelection(client, plan, {
       movementCommand,
       movementCount,
       keyDelayMs,
+      resetBeforeNavigation,
+      resetLeftHoldMs: resetBeforeNavigation ? resetLeftHoldMs : 0,
+      resetPostDownDelayMs: resetBeforeNavigation ? resetPostDownDelayMs : 0,
+      resetCommands,
       centerDelayMs,
       centerCommand,
       centerHoldMs,

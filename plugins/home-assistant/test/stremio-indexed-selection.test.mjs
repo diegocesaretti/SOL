@@ -86,6 +86,40 @@ test("sends every movement in its own HA call and the final select atomically", 
   assert.equal(seen[3].payload.hold_secs, 0.12);
 });
 
+test("optional reset runs once before indexed movement without changing native index math", async () => {
+  const seen = [];
+  const client = {
+    stremioRemoteEntityId: "remote.tv_cocina",
+    async haService(_domain, _service, payload) { seen.push({ ...payload }); return { ok: true }; }
+  };
+  const result = await executeIndexedSelection(client, { ok: true, index: 2 }, {
+    keyDelayMs: 0,
+    initialFocusIndex: 0,
+    resetBeforeNavigation: true,
+    resetLeftHoldMs: 7000,
+    resetPostDownDelayMs: 0,
+    centerDelayMs: 0,
+    centerCommand: "DPAD_CENTER",
+    centerHoldMs: 0
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.targetIndex, 2);
+  assert.equal(result.movementCount, 2);
+  assert.deepEqual(result.resetCommands, ["DPAD_LEFT", "DPAD_RIGHT", "DPAD_DOWN"]);
+  assert.deepEqual(seen.map((entry) => entry.command), [
+    "DPAD_LEFT",
+    "DPAD_RIGHT",
+    "DPAD_DOWN",
+    "DPAD_RIGHT",
+    "DPAD_RIGHT",
+    "DPAD_CENTER"
+  ]);
+  assert.equal(seen[0].hold_secs, 7);
+  assert.equal("hold_secs" in seen[1], false);
+  assert.equal("hold_secs" in seen[2], false);
+});
+
 test("visual position 17 means native index 16 and exactly 16 RIGHT commands from first-stream focus", async () => {
   const seen = [];
   const client = {
@@ -113,6 +147,14 @@ test("moves left when target is before a programmatic nonzero initial focus", as
 test("runtime timing is pinned to first stream even if an old persisted focus env says 1", () => {
   const timing = indexedNavigationTiming({ HA_SOL_STREMIO_INDEXED_INITIAL_FOCUS_INDEX: "1" });
   assert.equal(timing.initialFocusIndex, 0);
+  assert.equal(timing.resetBeforeNavigation, false);
+});
+
+test("timing exposes the optional fixed reset sequence", () => {
+  const timing = indexedNavigationTiming({ HA_SOL_STREMIO_RESET_BEFORE_NAVIGATION: "true" });
+  assert.equal(timing.resetBeforeNavigation, true);
+  assert.equal(timing.resetLeftHoldMs, 7000);
+  assert.equal(timing.resetPostDownDelayMs, 1000);
 });
 
 test("timing supports long startup delay and independent select timing", () => {
@@ -124,7 +166,17 @@ test("timing supports long startup delay and independent select timing", () => {
     HA_SOL_STREMIO_INDEXED_CENTER_COMMAND: "ENTER",
     HA_SOL_STREMIO_INDEXED_CENTER_HOLD_MS: "180"
   });
-  assert.deepEqual(timing, { openToKeysDelayMs: 45000, keyDelayMs: 500, initialFocusIndex: 0, centerDelayMs: 1200, centerCommand: "ENTER", centerHoldMs: 180 });
+  assert.deepEqual(timing, {
+    openToKeysDelayMs: 45000,
+    keyDelayMs: 500,
+    initialFocusIndex: 0,
+    resetBeforeNavigation: false,
+    resetLeftHoldMs: 7000,
+    resetPostDownDelayMs: 1000,
+    centerDelayMs: 1200,
+    centerCommand: "ENTER",
+    centerHoldMs: 180
+  });
 });
 
 test("rejects indexes above the safety cap", () => {
