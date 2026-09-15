@@ -3,6 +3,8 @@ const BAD_SOURCE_RE = /\b(cam|hdcam|telesync|telecine|tsrip|screener|scr)\b/i;
 const LATIN_LABEL_RE = /\b(lat|latam|latino|latina|latin[ -]?america|audio[ ._-]*latino|espa(?:n|ñ)ol[ ._-]*latino|spanish[ ._-]*latino)\b/i;
 const LATIN_FLAG_RE = /🇦🇷|🇲🇽|🇨🇴|🇨🇱|🇺🇾|🇵🇪|🇻🇪/u;
 const MEXICO_FLAG_RE = /🇲🇽/u;
+const SPAIN_FLAG_RE = /🇪🇸/u;
+const ENGLISH_FLAG_RE = /🇬🇧|🇺🇸/u;
 const SPANISH_RE = /\b(espa(?:n|ñ)ol|spanish|castellano|spa|esp)\b/i;
 const ENGLISH_RE = /\b(english|eng)\b/i;
 
@@ -23,14 +25,15 @@ function parseResolution(text) {
 function languageTags(text) {
   const tags = [];
   if (LATIN_LABEL_RE.test(text) || LATIN_FLAG_RE.test(text)) tags.push("latin");
-  if (SPANISH_RE.test(text)) tags.push("spanish");
-  if (ENGLISH_RE.test(text)) tags.push("english");
+  if (SPANISH_RE.test(text) || SPAIN_FLAG_RE.test(text)) tags.push("spanish");
+  if (ENGLISH_RE.test(text) || ENGLISH_FLAG_RE.test(text)) tags.push("english");
   return [...new Set(tags)];
 }
 
 function latinPreference(text) {
-  if (MEXICO_FLAG_RE.test(text)) return { priority: 2, signal: "mexico_flag" };
-  if (LATIN_LABEL_RE.test(text)) return { priority: 1, signal: "latin_label" };
+  if (MEXICO_FLAG_RE.test(text)) return { priority: 3, signal: "mexico_flag" };
+  if (LATIN_LABEL_RE.test(text)) return { priority: 2, signal: "latin_label" };
+  if (LATIN_FLAG_RE.test(text)) return { priority: 1, signal: "latin_flag" };
   return { priority: 0, signal: null };
 }
 

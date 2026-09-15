@@ -9,6 +9,30 @@ test("inspects only fields used by native stream selection", () => {
   assert.equal(details.badSource, true);
 });
 
+test("detects Stremio multi-audio flags such as the Spain flag from provider text", () => {
+  const details = inspectStream({ title: "Multi Audio / 🇬🇧 / 🇪🇸 / 🇫🇷" });
+  assert.deepEqual(details.languages, ["spanish", "english"]);
+  assert.equal(details.latinPriority, 0);
+  assert.equal(details.latinSignal, null);
+});
+
+test("keeps Latino ranking signals ordered Mexico, explicit Latino, other Latin flags", () => {
+  const mexico = inspectStream({ title: "Movie 1080p 🇲🇽" });
+  const explicitLatino = inspectStream({ title: "Movie 1080p LATAM" });
+  const argentina = inspectStream({ title: "Movie 1080p 🇦🇷" });
+  const spain = inspectStream({ title: "Movie 1080p 🇪🇸" });
+
+  assert.deepEqual(mexico.languages, ["latin"]);
+  assert.equal(mexico.latinPriority, 3);
+  assert.equal(mexico.latinSignal, "mexico_flag");
+  assert.equal(explicitLatino.latinPriority, 2);
+  assert.equal(explicitLatino.latinSignal, "latin_label");
+  assert.equal(argentina.latinPriority, 1);
+  assert.equal(argentina.latinSignal, "latin_flag");
+  assert.deepEqual(spain.languages, ["spanish"]);
+  assert.equal(spain.latinPriority, 0);
+});
+
 test("summarizes native provider identity without ranking machinery", () => {
   const summary = summarizeRankedStream({
     addon: { id: "torrentio", name: "Torrentio" },
