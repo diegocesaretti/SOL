@@ -34,6 +34,21 @@ function numberEnv(env, name, fallback, min, max) {
   return Math.max(min, Math.min(max, Math.trunc(value)));
 }
 
+function playbackRequestKey(args = {}, defaults = {}) {
+  const key = {
+    query: clean(args.query).toLowerCase(),
+    id: clean(args.id),
+    mediaType: clean(args.mediaType || "auto").toLowerCase(),
+    year: args.year ?? null,
+    season: args.season ?? null,
+    episode: args.episode ?? null,
+    quality: clean(args.quality || defaults.quality || "auto").toLowerCase(),
+    language: clean(args.language || defaults.language || "any").toLowerCase(),
+    autoPlay: args.autoPlay !== false
+  };
+  return JSON.stringify(key);
+}
+
 const CONTENT_PROPERTIES = {
   query: { type: "string", minLength: 1, maxLength: 300 },
   id: { type: "string", minLength: 1, maxLength: 300 },
@@ -81,13 +96,13 @@ export const STREMIO_MCP_TOOLS = [
   },
   {
     name: "home_assistant_stremio_play_best",
-    description: "Resolve content, query every linked-account stream addon in native order, prove the absolute stream index, open official Stremio, wait, navigate one key at a time and send one final select key.",
+    description: "Exclusive playback action. Call exactly once for a play request: resolve content, query linked-account stream addons in native order, prove the absolute stream index, open official Stremio once, wait, navigate one key at a time and send one final select key. Do not pair with open-page or open-search actions.",
     inputSchema: { type: "object", properties: PLAYBACK_PROPERTIES, additionalProperties: false },
     requiredScope: "actions"
   },
   {
     name: "home_assistant_stremio_open_page",
-    description: "Open the official Stremio Board, Discover or Library page.",
+    description: "Standalone navigation action: open the official Stremio Board, Discover or Library page. Do not use as part of a play_best request.",
     inputSchema: {
       type: "object",
       properties: { page: { type: "string", enum: ["board", "discover", "library"] } },
@@ -98,26 +113,11 @@ export const STREMIO_MCP_TOOLS = [
   },
   {
     name: "home_assistant_stremio_open_search",
-    description: "Open the official Stremio search page with a query.",
+    description: "Standalone navigation action: open the official Stremio search page with a query. Do not use as part of a play_best request.",
     inputSchema: {
       type: "object",
       properties: { query: { type: "string", minLength: 1, maxLength: 300 } },
       required: ["query"],
-      additionalProperties: false
-    },
-    requiredScope: "actions"
-  },
-  {
-    name: "home_assistant_stremio_open_detail",
-    description: "Open an exact official Stremio detail page without indexed stream selection.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        mediaType: { type: "string", enum: ["movie", "series"] },
-        id: { type: "string", minLength: 1, maxLength: 300 },
-        videoId: { type: "string", minLength: 1, maxLength: 300 }
-      },
-      required: ["mediaType", "id"],
       additionalProperties: false
     },
     requiredScope: "actions"
@@ -182,6 +182,9 @@ export class SolPluginClient extends SolPluginClientCore {
     this.stremioTimeoutMs = 8000;
     this.stremioAddonTimeoutMs = numberEnv(env, "HA_SOL_STREMIO_ADDON_TIMEOUT_MS", 20000, 1000, 120000);
     this.stremioAddonRetries = 1;
+    this.stremioPlaybackDedupeMs = numberEnv(env, "HA_SOL_STREMIO_PLAYBACK_DEDUPE_MS", 30000, 0, 120000);
+    this.stremioPlaybackInFlight = new Map();
+    this.stremioPlaybackRecent = new Map();
     this.haUrl = clean(env.HA_URL).replace(/\/$/, "");
     this.haToken = clean(env.HA_TOKEN);
     this.cinemeta = new CinemetaClient({ timeoutMs: this.stremioTimeoutMs });
@@ -315,7 +318,8 @@ export class SolPluginClient extends SolPluginClientCore {
       remoteEntityId: this.stremioRemoteEntityId || null,
       account: this.account.snapshot(),
       defaults: this.defaultPreferences,
-      timing: indexedNavigationTiming(this.env)
+      timing: indexedNavigationTiming(this.env),
+      playbackDedupeMs: this.stremioPlaybackDedupeMs
     };
   }
 
@@ -395,6 +399,37 @@ export class SolPluginClient extends SolPluginClientCore {
     };
   }
 
+  async playBestDeduped(args = {}) {
+    const key = playbackRequestKey(args, this.defaultPreferences);
+    const now = Date.now();
+    for (const [recentKey, entry] of this.stremioPlaybackRecent) {
+      if (now - entry.completedAt > this.stremioPlaybackDedupeMs) this.stremioPlaybackRecent.delete(recentKey);
+    }
+
+    const inFlight = this.stremioPlaybackInFlight.get(key);
+    if (inFlight) {
+      const result = await inFlight;
+      return { ...result, deduplicated: true, dedupeReason: "identical_playback_in_flight" };
+    }
+
+    const recent = this.stremioPlaybackRecent.get(key);
+    if (recent && this.stremioPlaybackDedupeMs > 0 && now - recent.completedAt <= this.stremioPlaybackDedupeMs) {
+      return { ...recent.result, deduplicated: true, dedupeReason: "identical_playback_recently_completed" };
+    }
+
+    const run = this.playBest(args);
+    this.stremioPlaybackInFlight.set(key, run);
+    try {
+      const result = await run;
+      if (this.stremioPlaybackDedupeMs > 0) {
+        this.stremioPlaybackRecent.set(key, { completedAt: Date.now(), result });
+      }
+      return result;
+    } finally {
+      this.stremioPlaybackInFlight.delete(key);
+    }
+  }
+
   async handleStremioTool(tool, args = {}) {
     if (tool === "home_assistant_stremio_status") return this.stremioStatus();
     if (tool === "home_assistant_stremio_search") {
@@ -411,7 +446,7 @@ export class SolPluginClient extends SolPluginClientCore {
       const result = await this.resolveForStream(args);
       return { ...result.resolved, episodeDecision: result.episodeDecision };
     }
-    if (tool === "home_assistant_stremio_play_best") return this.playBest(args);
+    if (tool === "home_assistant_stremio_play_best") return this.playBestDeduped(args);
     if (tool === "home_assistant_stremio_account_status") {
       if (args.refresh && this.account.configured) await this.refreshAccount(true);
       return this.account.snapshot();
@@ -452,9 +487,6 @@ export class SolPluginClient extends SolPluginClientCore {
       return this.launchStremio(uri);
     }
     if (tool === "home_assistant_stremio_open_search") return this.launchStremio(searchDeepLink(args.query));
-    if (tool === "home_assistant_stremio_open_detail") {
-      return this.launchStremio(detailDeepLink({ type: args.mediaType, id: args.id, videoId: args.videoId || null, autoPlay: false }));
-    }
     throw new Error("stremio_tool_not_found");
   }
 }

@@ -20,7 +20,7 @@ export function indexedNavigationTiming(env = process.env) {
   return {
     openToKeysDelayMs: numberEnv(env, "HA_SOL_STREMIO_OPEN_TO_KEYS_DELAY_MS", 1500, 0, 60000),
     keyDelayMs,
-    initialFocusIndex: numberEnv(env, "HA_SOL_STREMIO_INDEXED_INITIAL_FOCUS_INDEX", 1, 0, 5),
+    initialFocusIndex: 0,
     centerDelayMs: numberEnv(env, "HA_SOL_STREMIO_INDEXED_CENTER_DELAY_MS", keyDelayMs, 0, 10000),
     centerCommand: ["DPAD_CENTER", "ENTER"].includes(clean(env?.HA_SOL_STREMIO_INDEXED_CENTER_COMMAND).toUpperCase())
       ? clean(env.HA_SOL_STREMIO_INDEXED_CENTER_COMMAND).toUpperCase()
@@ -239,7 +239,7 @@ async function sendMovementKey(client, command) {
   if (!client?.stremioRemoteEntityId) throw new Error("stremio_remote_entity_id_required");
   return client.haService("remote", "send_command", {
     entity_id: client.stremioRemoteEntityId,
-    command: [command]
+    command
   });
 }
 
@@ -252,7 +252,7 @@ async function sendSelectKey(client, command, holdMs) {
 
 export async function executeIndexedSelection(client, plan, {
   keyDelayMs = 250,
-  initialFocusIndex = 1,
+  initialFocusIndex = 0,
   centerDelayMs = keyDelayMs,
   centerCommand = "DPAD_CENTER",
   centerHoldMs = 120

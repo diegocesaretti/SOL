@@ -4,6 +4,7 @@ import type { SolPluginRuntimePrincipal } from "./types.js";
 
 const TOOL_RE = /^[a-z][a-z0-9_]{1,79}$/;
 const MCP_SCOPES = new Set(["read", "submit", "actions"]);
+const STREMIO_PLAYBACK_TOOL = "home_assistant_stremio_play_best";
 const RESERVED_TOOL_NAMES = new Set([
   "nexo_status",
   "get_timeline",
@@ -51,6 +52,11 @@ function toolPrefix(pluginId: string): string {
 
 function requiredScope(value: unknown): "read" | "submit" | "actions" {
   return typeof value === "string" && MCP_SCOPES.has(value) ? value as "read" | "submit" | "actions" : "read";
+}
+
+function pluginToolTimeoutMs(tool: PluginMcpTool): number {
+  if (tool.requiredScope === "actions" && tool.name === STREMIO_PLAYBACK_TOOL) return 120_000;
+  return 15_000;
 }
 
 export interface PluginMcpTool {
@@ -224,7 +230,7 @@ export async function invokePluginMcpTool(
         role: principal.role,
       },
     }),
-    signal: AbortSignal.timeout(15_000),
+    signal: AbortSignal.timeout(pluginToolTimeoutMs(tool)),
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {

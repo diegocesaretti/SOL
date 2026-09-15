@@ -2,6 +2,7 @@ import { db } from "../../database/client.js";
 import type { SolPluginRuntimePrincipal } from "./types.js";
 
 const TOOL_RE = /^[a-z][a-z0-9_]{1,79}$/;
+const STREMIO_PLAYBACK_TOOL = "home_assistant_stremio_play_best";
 export type RuntimeMcpScope = "read" | "actions";
 
 export interface RuntimeMcpToolDescriptor {
@@ -35,6 +36,11 @@ function toolArguments(value: unknown): Record<string, unknown> {
   const encoded = JSON.stringify(value);
   if (Buffer.byteLength(encoded, "utf8") > 64 * 1024) throw new Error("plugin_tool_arguments_too_large");
   return value as Record<string, unknown>;
+}
+
+function toolTimeoutMs(scope: RuntimeMcpScope, name: string): number {
+  if (scope === "actions" && name === STREMIO_PLAYBACK_TOOL) return 120_000;
+  return scope === "actions" ? 15_000 : 10_000;
 }
 
 export async function listPluginRuntimeTools(principal: SolPluginRuntimePrincipal, scopes: RuntimeMcpScope[]): Promise<RuntimeMcpToolDescriptor[]> {
@@ -98,7 +104,7 @@ export async function invokePluginRuntimeTool(principal: SolPluginRuntimePrincip
         memberId: principal.memberId,
       },
     }),
-    signal: AbortSignal.timeout(scope === "actions" ? 15_000 : 10_000),
+    signal: AbortSignal.timeout(toolTimeoutMs(scope, name)),
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
