@@ -47,10 +47,10 @@ test("default quality selects 1080p without changing native index", () => {
   assert.equal(choice.selected.resolution, 1080);
 });
 
-test("Spanish accepts Spanish or Latin while Latin remains strict", () => {
+test("Spanish accepts Spanish or Latin and prefers Latino while Latin remains strict", () => {
   const slices = [{ addonId: "mixed.provider", addonName: "Mixed", streams: [stream(0, "Movie Spanish Castellano"), stream(1, "Movie Latino")] }];
   assert.equal(chooseNativeStream(slices, { language: "latin" }).nativeIndex, 1);
-  assert.equal(chooseNativeStream(slices, { language: "spanish" }).nativeIndex, 0);
+  assert.equal(chooseNativeStream(slices, { language: "spanish" }).nativeIndex, 1);
 });
 
 test("any language still uses the single native-index path", () => {
