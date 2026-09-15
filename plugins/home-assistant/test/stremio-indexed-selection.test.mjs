@@ -76,22 +76,43 @@ test("sends every movement in its own HA call and the final select atomically", 
     async haService(domain, service, payload) { seen.push({ domain, service, payload }); return { ok: true }; }
   };
   const result = await executeIndexedSelection(client, { ok: true, index: 3, addonId: "latino.provider", providerIndex: 1 }, {
-    keyDelayMs: 0, initialFocusIndex: 1, centerDelayMs: 0, centerCommand: "DPAD_CENTER", centerHoldMs: 120
+    keyDelayMs: 0, initialFocusIndex: 0, centerDelayMs: 0, centerCommand: "DPAD_CENTER", centerHoldMs: 120
   });
   assert.equal(result.ok, true);
-  assert.equal(result.movementCount, 2);
+  assert.equal(result.movementCount, 3);
   assert.equal(result.centerSent, true);
-  assert.deepEqual(result.commands, ["DPAD_RIGHT", "DPAD_RIGHT", "DPAD_CENTER"]);
-  assert.deepEqual(seen.map((entry) => entry.payload.command), [["DPAD_RIGHT"], ["DPAD_RIGHT"], "DPAD_CENTER"]);
-  assert.equal(seen[2].payload.hold_secs, 0.12);
+  assert.deepEqual(result.commands, ["DPAD_RIGHT", "DPAD_RIGHT", "DPAD_RIGHT", "DPAD_CENTER"]);
+  assert.deepEqual(seen.map((entry) => entry.payload.command), ["DPAD_RIGHT", "DPAD_RIGHT", "DPAD_RIGHT", "DPAD_CENTER"]);
+  assert.equal(seen[3].payload.hold_secs, 0.12);
 });
 
-test("moves left when target is before initial focus", async () => {
+test("visual position 17 means native index 16 and exactly 16 RIGHT commands from first-stream focus", async () => {
+  const seen = [];
+  const client = {
+    stremioRemoteEntityId: "remote.tv_cocina",
+    async haService(_domain, _service, payload) { seen.push(payload.command); return { ok: true }; }
+  };
+  const result = await executeIndexedSelection(client, { ok: true, index: 16 }, {
+    keyDelayMs: 0, initialFocusIndex: 0, centerDelayMs: 0, centerCommand: "DPAD_CENTER", centerHoldMs: 0
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.targetIndex, 16);
+  assert.equal(result.initialFocusIndex, 0);
+  assert.equal(result.movementCount, 16);
+  assert.deepEqual(seen, [...Array(16).fill("DPAD_RIGHT"), "DPAD_CENTER"]);
+});
+
+test("moves left when target is before a configured nonzero initial focus", async () => {
   const seen = [];
   const client = { stremioRemoteEntityId: "remote.tv_cocina", async haService(_domain, _service, payload) { seen.push(payload.command); return { ok: true }; } };
   const result = await executeIndexedSelection(client, { ok: true, index: 0 }, { keyDelayMs: 0, initialFocusIndex: 1, centerDelayMs: 0, centerCommand: "DPAD_CENTER", centerHoldMs: 120 });
   assert.equal(result.ok, true);
-  assert.deepEqual(seen, [["DPAD_LEFT"], "DPAD_CENTER"]);
+  assert.deepEqual(seen, ["DPAD_LEFT", "DPAD_CENTER"]);
+});
+
+test("default timing starts at the first stream", () => {
+  const timing = indexedNavigationTiming({});
+  assert.equal(timing.initialFocusIndex, 0);
 });
 
 test("timing supports long startup delay and independent select timing", () => {
