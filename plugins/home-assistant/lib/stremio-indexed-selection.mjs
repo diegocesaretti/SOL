@@ -59,6 +59,13 @@ function preferSubset(candidates, predicate) {
   return subset.length ? subset : candidates;
 }
 
+function preferLatinSignal(candidates, language) {
+  if (!["latin", "spanish"].includes(language) || !candidates.length) return candidates;
+  const highest = Math.max(...candidates.map((candidate) => Number(candidate?.details?.latinPriority) || 0));
+  if (highest <= 0) return candidates;
+  return candidates.filter((candidate) => (Number(candidate?.details?.latinPriority) || 0) === highest);
+}
+
 export function chooseNativeStream(slices, preferences = {}) {
   const candidates = [];
   let nativeIndex = 0;
@@ -93,6 +100,7 @@ export function chooseNativeStream(slices, preferences = {}) {
     };
   }
 
+  preferred = preferLatinSignal(preferred, language);
   const resolution = requestedResolution(preferences.quality);
   if (resolution) preferred = preferSubset(preferred, (candidate) => candidate.details.quality === resolution);
   preferred = preferSubset(preferred, (candidate) => candidate.details.badSource !== true);
