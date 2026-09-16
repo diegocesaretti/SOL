@@ -6,22 +6,32 @@ const SPANISH_RE = /\b(espa(?:n|ñ)ol|spanish|castellano|spa|esp)\b/i;
 const ENGLISH_RE = /\b(english|eng)\b/i;
 const FRENCH_RE = /\b(french|fran(?:c|ç)ais|fre|fra)\b/i;
 const PORTUGUESE_RE = /\b(portuguese|portugu[eê]s|por|pt-br|pt)\b/i;
+const FLAG_SEQUENCE_RE = /[\u{1F1E6}-\u{1F1FF}]{2}/gu;
+const UNICODE_ESCAPE_RE = /\\u([0-9a-fA-F]{4})/g;
 
-const FLAG_RULES = [
-  { token: "🇲🇽", language: "spanish", spanishVariant: "latin", latinPriority: 3, latinSignal: "mexico_flag" },
-  { token: "🇦🇷", language: "spanish", spanishVariant: "latin", latinPriority: 1, latinSignal: "latin_flag" },
-  { token: "🇨🇴", language: "spanish", spanishVariant: "latin", latinPriority: 1, latinSignal: "latin_flag" },
-  { token: "🇨🇱", language: "spanish", spanishVariant: "latin", latinPriority: 1, latinSignal: "latin_flag" },
-  { token: "🇺🇾", language: "spanish", spanishVariant: "latin", latinPriority: 1, latinSignal: "latin_flag" },
-  { token: "🇵🇪", language: "spanish", spanishVariant: "latin", latinPriority: 1, latinSignal: "latin_flag" },
-  { token: "🇻🇪", language: "spanish", spanishVariant: "latin", latinPriority: 1, latinSignal: "latin_flag" },
-  { token: "🇪🇸", language: "spanish" },
-  { token: "🇬🇧", language: "english" },
-  { token: "🇺🇸", language: "english" },
-  { token: "🇫🇷", language: "french" },
-  { token: "🇵🇹", language: "portuguese" },
-  { token: "🇧🇷", language: "portuguese" }
-];
+const LATIN_SPANISH_COUNTRIES = new Set([
+  "AR", "BO", "CL", "CO", "CR", "CU", "DO", "EC", "GT", "HN", "NI", "PA", "PE", "PR", "PY", "SV", "UY", "VE"
+]);
+
+const COUNTRY_RULES = new Map([
+  ["MX", { language: "spanish", spanishVariant: "latin", latinPriority: 3, latinSignal: "mexico_flag" }],
+  ["ES", { language: "spanish" }],
+  ["GQ", { language: "spanish" }],
+  ["GB", { language: "english" }],
+  ["US", { language: "english" }],
+  ["FR", { language: "french" }],
+  ["PT", { language: "portuguese" }],
+  ["BR", { language: "portuguese" }]
+]);
+
+for (const countryCode of LATIN_SPANISH_COUNTRIES) {
+  COUNTRY_RULES.set(countryCode, {
+    language: "spanish",
+    spanishVariant: "latin",
+    latinPriority: 1,
+    latinSignal: "latin_flag"
+  });
+}
 
 const TEXT_RULES = [
   { regex: LATIN_LABEL_RE, language: "spanish", spanishVariant: "latin", latinPriority: 2, latinSignal: "latin_label" },
@@ -50,21 +60,48 @@ function firstRegexIndex(text, regex) {
   return match ? match.index : -1;
 }
 
-function audioMetadata(text) {
-  const signals = [];
+function decodeUnicodeEscapes(value) {
+  const text = String(value ?? "");
+  if (!text.includes("\\u")) return text;
+  return text.replace(UNICODE_ESCAPE_RE, (_match, hex) => String.fromCharCode(Number.parseInt(hex, 16)));
+}
 
-  for (const rule of FLAG_RULES) {
-    let fromIndex = 0;
-    while (fromIndex < text.length) {
-      const index = text.indexOf(rule.token, fromIndex);
-      if (index < 0) break;
-      signals.push({ ...rule, index, source: "flag" });
-      fromIndex = index + rule.token.length;
-    }
+function flagToCountryCode(flag) {
+  const points = [...String(flag ?? "")];
+  if (points.length !== 2) return null;
+  const letters = points.map((character) => {
+    const codePoint = character.codePointAt(0);
+    if (codePoint < 0x1F1E6 || codePoint > 0x1F1FF) return null;
+    return String.fromCharCode(65 + (codePoint - 0x1F1E6));
+  });
+  return letters.every(Boolean) ? letters.join("") : null;
+}
+
+function extractFlagSignals(text) {
+  const signals = [];
+  const detectedFlags = [];
+  const detectedCountryCodes = [];
+
+  for (const match of text.matchAll(FLAG_SEQUENCE_RE)) {
+    const token = match[0];
+    const countryCode = flagToCountryCode(token);
+    if (!countryCode) continue;
+    detectedFlags.push(token);
+    detectedCountryCodes.push(countryCode);
+    const rule = COUNTRY_RULES.get(countryCode);
+    if (rule) signals.push({ ...rule, token, countryCode, index: match.index ?? 0, source: "flag" });
   }
 
+  return { signals, detectedFlags, detectedCountryCodes };
+}
+
+function audioMetadata(text) {
+  const scanText = decodeUnicodeEscapes(text);
+  const { signals: flagSignals, detectedFlags, detectedCountryCodes } = extractFlagSignals(scanText);
+  const signals = [...flagSignals];
+
   for (const rule of TEXT_RULES) {
-    const index = firstRegexIndex(text, rule.regex);
+    const index = firstRegexIndex(scanText, rule.regex);
     if (index >= 0) signals.push({ ...rule, index, source: "label" });
   }
 
@@ -80,15 +117,13 @@ function audioMetadata(text) {
     .sort((a, b) => Number(b.latinPriority || 0) - Number(a.latinPriority || 0) || a.index - b.index);
   const strongestLatin = latinSignals[0] || null;
   const spanishVariant = signals.some((signal) => signal.spanishVariant === "latin") ? "latin" : null;
-  const explicitMulti = MULTI_AUDIO_RE.test(text);
+  const explicitMulti = MULTI_AUDIO_RE.test(scanText);
   const audioType = explicitMulti || audioLanguages.length > 1
     ? "multi"
     : audioLanguages.length === 1
       ? "single"
       : "unknown";
 
-  // The selector consumes these normalized tags. "latin" is a Spanish variant,
-  // while audioLanguages keeps the canonical audio-language list and display order.
   const languages = [];
   if (spanishVariant === "latin") languages.push("latin");
   for (const language of audioLanguages) {
@@ -101,7 +136,9 @@ function audioMetadata(text) {
     spanishVariant,
     languages,
     latinPriority: Number(strongestLatin?.latinPriority || 0),
-    latinSignal: strongestLatin?.latinSignal || null
+    latinSignal: strongestLatin?.latinSignal || null,
+    detectedFlags,
+    detectedCountryCodes
   };
 }
 
@@ -117,6 +154,8 @@ export function inspectStream(stream) {
     languages: audio.languages,
     latinPriority: audio.latinPriority,
     latinSignal: audio.latinSignal,
+    detectedFlags: audio.detectedFlags,
+    detectedCountryCodes: audio.detectedCountryCodes,
     badSource: BAD_SOURCE_RE.test(text)
   };
 }
@@ -138,8 +177,10 @@ export function summarizeRankedStream(entry, index = null) {
     languages: details.languages,
     latinPriority: Number(details.latinPriority || 0),
     latinSignal: details.latinSignal || null,
+    detectedFlags: Array.isArray(details.detectedFlags) ? details.detectedFlags : [],
+    detectedCountryCodes: Array.isArray(details.detectedCountryCodes) ? details.detectedCountryCodes : [],
     badSource: details.badSource === true
   };
 }
 
-export const __test = { streamText, parseResolution, audioMetadata };
+export const __test = { streamText, parseResolution, audioMetadata, decodeUnicodeEscapes, flagToCountryCode, extractFlagSignals };
