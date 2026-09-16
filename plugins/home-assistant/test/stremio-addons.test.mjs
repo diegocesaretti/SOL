@@ -18,14 +18,44 @@ test("normalizes Stremio Multi Audio flags preserving provider display order", (
   assert.deepEqual(details.audioLanguages, ["english", "spanish", "french"]);
   assert.equal(details.spanishVariant, null);
   assert.deepEqual(details.languages, ["english", "spanish", "french"]);
+  assert.deepEqual(details.detectedFlags, ["🇬🇧", "🇪🇸", "🇫🇷"]);
+  assert.deepEqual(details.detectedCountryCodes, ["GB", "ES", "FR"]);
   assert.equal(details.latinPriority, 0);
   assert.equal(details.latinSignal, null);
+});
+
+test("detects flags after the same JSON unicode escaping used on the wire", () => {
+  const stream = JSON.parse('{"title":"Multi Audio / \\ud83c\\uddec\\ud83c\\udde7 / \\ud83c\\uddea\\ud83c\\uddf8 / \\ud83c\\uddeB\\ud83c\\uddf7"}');
+  const details = inspectStream(stream);
+  assert.deepEqual(details.audioLanguages, ["english", "spanish", "french"]);
+  assert.deepEqual(details.detectedCountryCodes, ["GB", "ES", "FR"]);
+});
+
+test("detects double-escaped regional indicators instead of relying on visible emoji glyphs", () => {
+  const details = inspectStream({
+    title: String.raw`Multi Audio / \uD83C\uDDF2\uD83C\uDDFD / \uD83C\uDDEA\uD83C\uDDF8`
+  });
+  assert.deepEqual(details.audioLanguages, ["spanish"]);
+  assert.deepEqual(details.languages, ["latin", "spanish"]);
+  assert.deepEqual(details.detectedCountryCodes, ["MX", "ES"]);
+  assert.equal(details.latinPriority, 3);
+  assert.equal(details.latinSignal, "mexico_flag");
 });
 
 test("infers multi audio from multiple language flags even without a Multi Audio label", () => {
   const details = inspectStream({ title: "Movie 1080p 🇺🇸 / 🇪🇸" });
   assert.equal(details.audioType, "multi");
   assert.deepEqual(details.audioLanguages, ["english", "spanish"]);
+});
+
+test("recognizes Spanish-speaking Latin American flags generically", () => {
+  const ecuador = inspectStream({ title: "Movie 1080p 🇪🇨" });
+  const dominicanRepublic = inspectStream({ title: "Movie 1080p 🇩🇴" });
+  assert.deepEqual(ecuador.languages, ["latin", "spanish"]);
+  assert.deepEqual(ecuador.detectedCountryCodes, ["EC"]);
+  assert.equal(ecuador.latinPriority, 1);
+  assert.deepEqual(dominicanRepublic.languages, ["latin", "spanish"]);
+  assert.deepEqual(dominicanRepublic.detectedCountryCodes, ["DO"]);
 });
 
 test("keeps Latino ranking signals ordered Mexico, explicit Latino, other Latin flags", () => {
@@ -60,5 +90,6 @@ test("summarizes structured audio metadata with native provider identity", () =>
   assert.equal(summary.resolution, 2160);
   assert.equal(summary.audioType, "multi");
   assert.deepEqual(summary.audioLanguages, ["english", "spanish", "french"]);
+  assert.deepEqual(summary.detectedCountryCodes, ["GB", "ES", "FR"]);
   assert.equal(summary.spanishVariant, null);
 });
