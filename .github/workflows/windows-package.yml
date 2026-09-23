@@ -53,7 +53,7 @@ jobs:
 
       - name: Test local-first PostgreSQL runtime
         shell: pwsh
-        run: pnpm --filter @sol/server exec tsx --test src/database/local-first.test.ts src/database/cloud-sync.integration.test.ts
+        run: pnpm --filter @sol/server exec tsx --test --test-concurrency=1 src/database/local-first.test.ts src/database/cloud-sync.integration.test.ts
 
       - name: Build SOL server
         shell: pwsh
