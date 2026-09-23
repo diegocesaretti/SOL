@@ -168,7 +168,16 @@ async function startManagedLocalPostgres(): Promise<LocalPostgresRuntime> {
     await postgres.initialise();
   }
 
-  await postgres.start();
+  try {
+    await postgres.start();
+  } catch (error) {
+    const hint = process.platform === "win32"
+      ? " On Windows, launch SOL normally; PostgreSQL refuses to run from an elevated 'Run as administrator' process."
+      : "";
+    throw new Error(`SOL local PostgreSQL could not start.${hint}`, {
+      cause: error instanceof Error ? error : undefined,
+    });
+  }
   await ensureDatabase(postgres, credentials.database);
 
   const connectionString = localConnectionString(credentials);
