@@ -9,6 +9,7 @@ type CloudSyncStateName =
   | "disabled"
   | "ready"
   | "unseeded_offline"
+  | "reconcile_required"
   | "seeding"
   | "syncing"
   | "offline"
@@ -16,6 +17,7 @@ type CloudSyncStateName =
 
 interface PersistedCloudSyncState {
   seeded: boolean;
+  requiresReconcile?: boolean;
   lastPullAt?: string;
   lastPushAt?: string;
   lastError?: string;
@@ -56,6 +58,7 @@ async function saveState(): Promise<void> {
   await mkdir(stateDir, { recursive: true });
   const persisted: PersistedCloudSyncState = {
     seeded: state.seeded,
+    requiresReconcile: state.requiresReconcile,
     lastPullAt: state.lastPullAt,
     lastPushAt: state.lastPushAt,
     lastError: state.lastError,
@@ -209,9 +212,20 @@ export async function initializeCloudSync(): Promise<void> {
     return;
   }
 
+  if (state.requiresReconcile) {
+    state.state = "reconcile_required";
+    state.lastError =
+      "Local and cloud history may have diverged. Owner reconciliation is required before cloud sync can resume.";
+    await saveState();
+    console.warn("[database] Cloud reconciliation required; automatic seed is blocked");
+    return;
+  }
+
   if (!(await cloudReachable())) {
     state.state = "unseeded_offline";
-    state.lastError = "Cloud database is unavailable and the local replica has not been seeded yet.";
+    state.requiresReconcile = true;
+    state.lastError =
+      "Cloud database is unavailable before the first seed. SOL is local-only until the owner reconciles local and cloud history.";
     await saveState();
     console.warn("[database] Neon unavailable before local seed; SOL will run locally without cloud history");
     return;
@@ -224,6 +238,7 @@ export async function initializeCloudSync(): Promise<void> {
     await migrateDatabase(cloudDb);
     await replaceDatabaseContents(cloudDb, db);
     state.seeded = true;
+    state.requiresReconcile = false;
     state.lastPullAt = new Date().toISOString();
     state.state = "ready";
     console.log("[database] Local PostgreSQL seeded from Neon");
@@ -237,7 +252,13 @@ export async function initializeCloudSync(): Promise<void> {
 }
 
 export async function syncLocalToCloud(): Promise<boolean> {
-  if (busy || databaseRuntimeMode !== "hybrid" || !cloudDb || !state.seeded) return false;
+  if (
+    busy ||
+    databaseRuntimeMode !== "hybrid" ||
+    !cloudDb ||
+    !state.seeded ||
+    state.requiresReconcile
+  ) return false;
   busy = true;
   try {
     if (!(await cloudReachable())) {
@@ -258,6 +279,44 @@ export async function syncLocalToCloud(): Promise<boolean> {
     state.lastError = error instanceof Error ? error.message : String(error);
     console.error("[database] Cloud synchronization failed", error);
     return false;
+  } finally {
+    busy = false;
+    await saveState();
+  }
+}
+
+
+export type ReconcileDirection = "cloud_to_local" | "local_to_cloud";
+
+export async function reconcileCloud(direction: ReconcileDirection): Promise<CloudSyncStatus> {
+  if (databaseRuntimeMode !== "hybrid" || !cloudDb) {
+    throw new Error("Cloud reconciliation is only available in hybrid database mode");
+  }
+  if (busy) throw new Error("Cloud synchronization is already running");
+  if (!(await cloudReachable())) throw new Error("Cloud database is unavailable");
+
+  busy = true;
+  state.state = "syncing";
+  state.lastError = undefined;
+  await saveState();
+  try {
+    await migrateDatabase(cloudDb);
+    if (direction === "cloud_to_local") {
+      await replaceDatabaseContents(cloudDb, db);
+      state.lastPullAt = new Date().toISOString();
+    } else {
+      await replaceDatabaseContents(db, cloudDb);
+      state.lastPushAt = new Date().toISOString();
+    }
+    state.seeded = true;
+    state.requiresReconcile = false;
+    state.state = "ready";
+    console.log(`[database] Owner reconciled database ${direction}`);
+    return { ...state };
+  } catch (error) {
+    state.state = "error";
+    state.lastError = error instanceof Error ? error.message : String(error);
+    throw error;
   } finally {
     busy = false;
     await saveState();

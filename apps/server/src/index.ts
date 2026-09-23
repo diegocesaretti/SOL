@@ -5,7 +5,13 @@ import "./database/auto-migrate.js";
 import { InMemoryEventBus } from "./core/event-bus.js";
 import { OutboxDispatcher } from "./core/outbox-dispatcher.js";
 import { checkCloudDatabase, checkDatabase, closeDatabase, databaseRuntimeMode } from "./database/client.js";
-import { cloudSyncStatus, startCloudSync, stopCloudSync } from "./database/cloud-sync.js";
+import {
+  cloudSyncStatus,
+  reconcileCloud,
+  startCloudSync,
+  stopCloudSync,
+  type ReconcileDirection,
+} from "./database/cloud-sync.js";
 import { readJsonBody, sendHtml, sendJson } from "./http.js";
 import {
   authenticateRequest,
@@ -216,6 +222,33 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
       interfaces: ["mcp_stdio", "web", "plugin_runtime", "windows_tray"],
       views: ["inputs", "outputs", "life_timeline", "people", "projects", "mcp_access"],
     });
+    return;
+  }
+
+  if (request.method === "POST" && path === "/v1/database/reconcile") {
+    const principal = await principalFor(request, response);
+    if (!principal) return;
+    if (principal.role !== "owner") {
+      sendJson(response, 403, { error: "owner_required" });
+      return;
+    }
+    const input = await jsonBody<{ direction?: ReconcileDirection }>(request, response);
+    if (!input) return;
+    if (input.direction !== "cloud_to_local" && input.direction !== "local_to_cloud") {
+      sendJson(response, 400, { error: "direction must be cloud_to_local or local_to_cloud" });
+      return;
+    }
+    try {
+      sendJson(response, 200, {
+        ok: true,
+        cloudSync: await reconcileCloud(input.direction),
+      });
+    } catch (error) {
+      sendJson(response, 409, {
+        error: error instanceof Error ? error.message : String(error),
+        cloudSync: cloudSyncStatus(),
+      });
+    }
     return;
   }
 
