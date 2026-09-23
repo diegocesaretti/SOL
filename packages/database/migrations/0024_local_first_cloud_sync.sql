@@ -49,7 +49,10 @@ DECLARE
   captured_key jsonb;
 BEGIN
   IF current_setting('sol.sync_apply', true) = '1' THEN
-    RETURN COALESCE(NEW, OLD);
+    IF TG_OP = 'DELETE' THEN
+      RETURN OLD;
+    END IF;
+    RETURN NEW;
   END IF;
 
   captured_row := CASE
@@ -59,7 +62,10 @@ BEGIN
   captured_key := sol_sync_primary_key(TG_RELID, captured_row);
 
   IF captured_key = '{}'::jsonb THEN
-    RETURN COALESCE(NEW, OLD);
+    IF TG_OP = 'DELETE' THEN
+      RETURN OLD;
+    END IF;
+    RETURN NEW;
   END IF;
 
   INSERT INTO sol_sync_changes(table_name, operation, primary_key, row_data)
@@ -70,7 +76,10 @@ BEGIN
     CASE WHEN TG_OP = 'DELETE' THEN NULL ELSE captured_row END
   );
 
-  RETURN COALESCE(NEW, OLD);
+  IF TG_OP = 'DELETE' THEN
+    RETURN OLD;
+  END IF;
+  RETURN NEW;
 END;
 $$;
 
