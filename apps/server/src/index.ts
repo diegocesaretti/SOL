@@ -4,7 +4,8 @@ import { config } from "./config.js";
 import "./database/auto-migrate.js";
 import { InMemoryEventBus } from "./core/event-bus.js";
 import { OutboxDispatcher } from "./core/outbox-dispatcher.js";
-import { checkDatabase, closeDatabase } from "./database/client.js";
+import { checkCloudDatabase, checkDatabase, closeDatabase, databaseRuntimeMode } from "./database/client.js";
+import { cloudSyncStatus, startCloudSync, stopCloudSync } from "./database/cloud-sync.js";
 import { readJsonBody, sendHtml, sendJson } from "./http.js";
 import {
   authenticateRequest,
@@ -185,10 +186,14 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
 
   if (request.method === "GET" && path === "/health") {
     const database = await checkDatabase();
+    const cloudDatabase = await checkCloudDatabase();
     sendJson(response, database ? 200 : 503, {
       ok: database,
       service: "sol-core",
       database,
+      databaseMode: databaseRuntimeMode,
+      cloudDatabase,
+      cloudSync: cloudSyncStatus(),
     });
     return;
   }
@@ -200,6 +205,9 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
       architecture: "family-first data/knowledge OS + MCP",
       version: solVersion,
       database,
+      databaseMode: databaseRuntimeMode,
+      cloudDatabase: await checkCloudDatabase(),
+      cloudSync: cloudSyncStatus(),
       reasoningInterface: "mcp",
       aiProviderMode: config.aiProvider,
       optionalAiProviders: ["openai", "codex"],
@@ -385,6 +393,7 @@ server.listen(config.port, config.host, () => {
   console.log(`SOL Core listening on http://${config.host}:${config.port}`);
   startWindowsTray();
   outboxDispatcher.start();
+  startCloudSync();
   console.log("External sources are plugin-only; install providers from Services.");
   if (config.host !== "127.0.0.1" && config.host !== "localhost") {
     console.warn(
@@ -397,6 +406,7 @@ async function shutdown(signal: string): Promise<void> {
   console.log(`Received ${signal}; shutting down SOL Core`);
   stopWindowsTray();
   outboxDispatcher.stop();
+  stopCloudSync();
   unregisterCandidateProcessor();
   await codexAppServer.stop().catch(() => undefined);
   server.close(async () => {

@@ -2,6 +2,7 @@ packages:
   - "apps/*"
   - "packages/*"
 allowBuilds:
+  embedded-postgres: true
   baileys: true
   esbuild: true
   protobufjs: true

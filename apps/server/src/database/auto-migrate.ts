@@ -1,6 +1,8 @@
+import { initializeCloudSync } from "./cloud-sync.js";
 import { migrateDatabase } from "./migration-runner.js";
 
 // Core features and plugins may depend on schema introduced by a newer SOL build.
-// ESM waits for this top-level await before evaluating the rest of index.ts, so SOL
-// never starts against a partially upgraded database.
+// In hybrid mode the active database is the embedded local PostgreSQL instance.
+// It is migrated first, then safely seeded from Neon when a cloud copy is available.
 await migrateDatabase();
+await initializeCloudSync();

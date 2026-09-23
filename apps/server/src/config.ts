@@ -54,6 +54,21 @@ const codexHome = optionalEnv("SOL_CODEX_HOME") ?? resolve(dataDir, "codex");
 const host = process.env.SOL_HOST ?? "127.0.0.1";
 const port = integerEnv("SOL_PORT", 3000);
 
+const configuredDatabaseUrl =
+  process.env.DATABASE_URL ??
+  "postgresql://sol:sol_dev_only@127.0.0.1:5432/sol";
+
+function looksLikeNeon(connectionString: string): boolean {
+  try {
+    const url = new URL(connectionString);
+    return url.hostname.endsWith(".neon.tech");
+  } catch {
+    return false;
+  }
+}
+
+const defaultDatabaseMode = looksLikeNeon(configuredDatabaseUrl) ? "hybrid" : "remote";
+
 export const config = {
   repoRoot,
   dataDir,
@@ -61,13 +76,14 @@ export const config = {
   host,
   port,
   logLevel: process.env.SOL_LOG_LEVEL ?? "info",
-  databaseUrl:
-    process.env.DATABASE_URL ??
-    "postgresql://sol:sol_dev_only@127.0.0.1:5432/sol",
+  databaseUrl: configuredDatabaseUrl,
+  databaseMode: enumEnv("SOL_DB_MODE", ["remote", "hybrid"] as const, defaultDatabaseMode),
   databaseListenUrl: optionalEnv("SOL_DB_LISTEN_URL"),
   databasePoolMax: integerEnv("SOL_DB_POOL_MAX", 4),
   databaseIdleTimeoutMs: integerEnv("SOL_DB_IDLE_TIMEOUT_MS", 15_000),
   databaseConnectionTimeoutMs: integerEnv("SOL_DB_CONNECT_TIMEOUT_MS", 15_000),
+  localPostgresPort: integerEnv("SOL_LOCAL_POSTGRES_PORT", 55432),
+  cloudSyncMs: integerEnv("SOL_CLOUD_SYNC_MS", 6 * 60 * 60 * 1000),
   sessionDays: integerEnv("SOL_SESSION_DAYS", 30),
   cookieSecure: booleanEnv("SOL_COOKIE_SECURE", false),
 

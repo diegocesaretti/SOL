@@ -1,6 +1,6 @@
 import { readdir, readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import type { PoolClient } from "pg";
+import type { Pool, PoolClient } from "pg";
 import { db } from "./client.js";
 
 const migrationsDir = fileURLToPath(
@@ -82,8 +82,8 @@ function stripOuterTransaction(sql: string): string {
     .replace(/\s*COMMIT;\s*$/i, "");
 }
 
-export async function migrateDatabase(): Promise<void> {
-  const client = await db.connect();
+export async function migrateDatabase(targetDb: Pool = db): Promise<void> {
+  const client = await targetDb.connect();
   let locked = false;
   try {
     await client.query("SELECT pg_advisory_lock($1, $2)", [
