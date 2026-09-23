@@ -20,7 +20,10 @@ async function freePort(): Promise<number> {
   return port;
 }
 
-test("local-first sync journal captures local writes and ignores replica writes", async () => {
+test(
+  "local-first sync journal captures local writes and ignores replica writes",
+  { skip: process.platform !== "win32" ? "SOL Full embedded PostgreSQL integration is Windows-targeted" : false },
+  async () => {
   const root = await mkdtemp(join(tmpdir(), "sol-local-first-"));
   const port = await freePort();
   const postgres = new EmbeddedPostgres({
@@ -96,4 +99,5 @@ test("local-first sync journal captures local writes and ignores replica writes"
     await postgres.stop().catch(() => undefined);
     await rm(root, { recursive: true, force: true });
   }
-});
+  },
+);
