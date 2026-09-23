@@ -65,7 +65,7 @@ jobs:
           Copy-Item apps/server/package.json "$server/package.json" -Force
           Push-Location $server
           try {
-            npm install --omit=dev --ignore-scripts --no-package-lock --no-audit --no-fund
+            npm install --omit=dev --no-package-lock --no-audit --no-fund
           } finally {
             Pop-Location
           }
@@ -112,10 +112,13 @@ jobs:
           $node = (Resolve-Path 'dist/windows/SOL/runtime/node.exe').Path
           Push-Location 'dist/windows/SOL/apps/server'
           try {
-            & $node --input-type=module -e "await import('pg'); await import('zod'); await import('@modelcontextprotocol/server'); console.log('portable SOL Core dependencies resolve')"
+            & $node --input-type=module -e "await import('pg'); await import('zod'); await import('@modelcontextprotocol/server'); await import('embedded-postgres'); console.log('portable SOL Core dependencies resolve')"
             if ($LASTEXITCODE -ne 0) { throw 'Portable Node dependency resolution failed' }
             & $node --input-type=module -e "await import('./dist/database/client.js'); await import('./dist/modules/plugins/bundled.js'); console.log('database and bundled-plugin runtimes import successfully')"
             if ($LASTEXITCODE -ne 0) { throw 'Portable SOL runtime import failed' }
+            if (-not (Test-Path 'node_modules/@embedded-postgres/windows-x64/native/bin/postgres.exe')) { throw 'Embedded PostgreSQL postgres.exe missing from portable package' }
+            if (-not (Test-Path 'node_modules/@embedded-postgres/windows-x64/native/bin/initdb.exe')) { throw 'Embedded PostgreSQL initdb.exe missing from portable package' }
+            Write-Host 'Embedded PostgreSQL Windows runtime present'
           } finally {
             Pop-Location
           }
@@ -133,7 +136,10 @@ jobs:
             'dist/windows/SOL/apps/server/dist/modules/plugins/bundled.js',
             'dist/windows/SOL/apps/server/node_modules/pg/package.json',
             'dist/windows/SOL/apps/server/node_modules/zod/package.json',
+            'dist/windows/SOL/apps/server/node_modules/embedded-postgres/package.json',
+            'dist/windows/SOL/apps/server/node_modules/@embedded-postgres/windows-x64/native/bin/postgres.exe',
             'dist/windows/SOL/packages/database/migrations/0021_connections.sql',
+            'dist/windows/SOL/packages/database/migrations/0024_local_first_cloud_sync.sql',
             'dist/windows/SOL/scripts/windows/sol-tray.ps1',
             'dist/windows/SOL/.env.example'
           )
