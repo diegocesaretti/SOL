@@ -61,10 +61,18 @@ export const config = {
   host,
   port,
   logLevel: process.env.SOL_LOG_LEVEL ?? "info",
+
+  // DATABASE_URL is the optional Neon/cloud replica. SOL Full runs against
+  // local PostgreSQL and only contacts this endpoint during bootstrap/sync.
   databaseUrl:
     process.env.DATABASE_URL ??
     "postgresql://sol:sol_dev_only@127.0.0.1:5432/sol",
-  databaseListenUrl: optionalEnv("SOL_DB_LISTEN_URL"),
+  localDatabaseUrl: optionalEnv("SOL_LOCAL_DATABASE_URL"),
+  localDatabaseDir: optionalEnv("SOL_LOCAL_DB_DIR") ?? resolve(dataDir, "postgres"),
+  localDatabasePort: integerEnv("SOL_LOCAL_DB_PORT", 55432),
+  cloudSyncEnabled: booleanEnv("SOL_CLOUD_SYNC", true),
+  cloudSyncIntervalMs: integerEnv("SOL_CLOUD_SYNC_MS", 5 * 60 * 1000),
+  cloudSyncBatchSize: integerEnv("SOL_CLOUD_SYNC_BATCH_SIZE", 200),
   databasePoolMax: integerEnv("SOL_DB_POOL_MAX", 4),
   databaseIdleTimeoutMs: integerEnv("SOL_DB_IDLE_TIMEOUT_MS", 15_000),
   databaseConnectionTimeoutMs: integerEnv("SOL_DB_CONNECT_TIMEOUT_MS", 15_000),
