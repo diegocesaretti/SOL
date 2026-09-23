@@ -29,5 +29,8 @@
   },
   "allowScripts": {
     "@embedded-postgres/windows-x64@18.4.0-beta.17": true
+  },
+  "optionalDependencies": {
+    "@embedded-postgres/windows-x64": "18.4.0-beta.17"
   }
 }
