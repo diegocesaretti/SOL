@@ -1,108 +1,89 @@
-# SOL with Neon PostgreSQL
+# SOL Full with Neon cloud replication
 
-Neon is the preferred database profile for the current SOL prototype. SOL remains standard-PostgreSQL compatible, so a local Windows PostgreSQL service can still be used without changing application code.
+Starting with SOL Full 0.16, Neon is the cloud replica and bootstrap source, not the database on SOL's critical runtime path.
 
-## Why this profile
+## Architecture
 
 ```text
 Windows host
-├── SOL Core / Node.js
-├── Codex CLI / App Server
-├── WhatsApp linked-device sessions
-├── Google Calendar
-└── Neon PostgreSQL over TLS
+├── SOL Core
+├── embedded PostgreSQL  ← runtime authority
+│        │
+│        └── durable change journal
+│                 │
+│                 └── batched push
+│                          ↓
+└────────────────────── Neon PostgreSQL
 ```
 
-This keeps the SOL host free of Docker, WSL, Hyper-V, Redis and a local PostgreSQL server.
+The permanent SOL `LISTEN/NOTIFY` connection is local. Neon is contacted only for the initial seed, pending replication batches, explicit manual sync, or recovery probes after a cloud failure.
 
-## Configure the connection
+## First seed
 
-Never place a real connection string in Git, README files, issues or source code. From the repository root run:
-
-```powershell
-pnpm db:configure
-```
-
-Paste the Neon PostgreSQL connection string into the hidden prompt. The helper writes it only to `.env`, which is ignored by Git.
-
-Then verify and initialize:
-
-```powershell
-pnpm db:check
-pnpm db:migrate
-pnpm dev
-```
-
-`db:check` uses SOL's Node `pg` driver, so PostgreSQL client tools such as `psql.exe` are not required for Neon.
-
-## Direct vs pooled connection
-
-SOL currently runs as one long-lived Node process with a small connection pool. A direct Neon connection is appropriate for this profile and is preferred for schema migrations.
-
-If SOL later grows into several stateless workers or many concurrent server processes, a pooled Neon connection can be introduced for application traffic while keeping a direct URL for migrations.
-
-## Scale-to-zero behavior
-
-The Free plan suspends an inactive compute after roughly five minutes. SOL therefore avoids rapid database polling:
-
-- `event_outbox` inserts emit a PostgreSQL `NOTIFY` signal;
-- short-lived pool connections `LISTEN` while they are active;
-- notifications wake the in-memory outbox dispatcher immediately after commit;
-- idle pool clients are released quickly;
-- a slow recovery sweep catches missed notifications after crashes/restarts;
-- Calendar and executive reconciliation use sparse schedules rather than constant polling.
-
-`LISTEN` state is deliberately treated as ephemeral. If Neon suspends the compute, session state disappears; a fresh physical pool connection reinstalls `LISTEN` automatically. Durable truth remains in `event_outbox`, not in the notification itself.
-
-Default cloud-friendly settings:
+Keep the existing Neon connection string in the persistent SOL `.env`:
 
 ```dotenv
-SOL_DB_POOL_MAX=4
-SOL_DB_IDLE_TIMEOUT_MS=15000
-SOL_DB_CONNECT_TIMEOUT_MS=15000
-SOL_OUTBOX_RECOVERY_MS=1800000
-SOL_CALENDAR_SYNC_MS=3600000
-SOL_EXECUTIVE_POLL_MS=1800000
+DATABASE_URL=postgresql://...
+SOL_CLOUD_SYNC=true
 ```
 
-These are tunable but should not be reduced aggressively on a scale-to-zero database without a concrete reason.
+On the first 0.16+ start SOL:
+
+1. initializes its embedded PostgreSQL database;
+2. applies the same SOL migrations locally and in Neon;
+3. copies a consistent Neon snapshot to local PostgreSQL;
+4. pairs both stores with a shared authority id;
+5. starts SOL against the local database.
+
+A fresh local database deliberately refuses to create a competing blank SOL household when Neon is unreachable. The first seed therefore needs one successful Neon connection.
+
+## Normal operation
+
+After the seed, SOL starts and accepts writes even when:
+
+- the internet is down;
+- Neon is suspended;
+- Neon is experiencing an outage;
+- the Neon project has exhausted its compute allowance.
+
+Local changes are recorded in `sol_sync_changes`. The default recovery/batch interval is 30 minutes, but SOL does not wake Neon on that interval when the replica is already caught up.
+
+```dotenv
+SOL_CLOUD_SYNC_MS=1800000
+SOL_CLOUD_SYNC_BATCH_SIZE=200
+```
+
+A manual authenticated sync is available through `POST /v1/system/cloud-sync`.
+
+## Conflict policy
+
+Replication is intentionally conservative. If Neon receives application-row writes outside SOL's cloud replicator, or if the cloud database is paired with a different local authority, automatic push stops with a `conflict` status.
+
+SOL never resolves that condition by silently overwriting one side.
+
+## Status
+
+`GET /health` and `GET /v1/system` expose:
+
+- local database health;
+- `databaseMode: "local-first"`;
+- cloud availability;
+- pending change count;
+- last successful sync;
+- the last cloud error/conflict.
+
+Local database health determines whether SOL itself is healthy. A Neon outage alone does not make SOL unhealthy.
+
+## Compute usage
+
+The old remote `LISTEN/NOTIFY` session could keep a scale-to-zero compute active. In 0.16+, that listener exists only on local PostgreSQL.
+
+Cloud replication is batched and skipped entirely when there are no pending changes and the last cloud state is synchronized. This is designed to let Neon return to scale-to-zero between actual replica updates.
 
 ## Security
 
-The Neon `DATABASE_URL` is a password-bearing credential. Treat it like any other secret.
+`DATABASE_URL` remains a password-bearing cloud credential and must never be committed.
 
-Provider credentials with especially high impact are additionally encrypted by SOL before PostgreSQL persistence:
+The embedded PostgreSQL server binds to `127.0.0.1`, uses a generated local password, and stores its persistent cluster under the SOL data directory (normally `%LOCALAPPDATA%\\SOL\\postgres` on Windows).
 
-- WhatsApp linked-device credentials / Signal keys;
-- Google OAuth credentials.
-
-Their encryption keys stay on the SOL host under `.sol/secrets/` and are never stored in Neon or Git.
-
-For long-term use, rotate a database password if it has ever been pasted into a chat, ticket, terminal transcript or other place where it did not need to be retained.
-
-## Storage policy
-
-Neon should hold structured SOL state: messages/text, events, metadata, identities, tasks, proposals, knowledge and connector state.
-
-Large blobs should remain outside PostgreSQL:
-
-```text
-Neon
-├── structured records
-├── text
-├── metadata
-└── references
-
-Local/object storage later
-├── photos
-├── audio
-├── videos
-├── PDFs
-└── attachments
-```
-
-This keeps database growth predictable and preserves the option to use inexpensive blob storage later.
-
-## Local PostgreSQL fallback
-
-If cloud storage is not desired, `pnpm db:setup` still provisions a native Windows PostgreSQL database and writes a local `DATABASE_URL`. The rest of SOL is unchanged.
+Plugins never receive either local or Neon database credentials.
