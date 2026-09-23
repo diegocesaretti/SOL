@@ -51,6 +51,10 @@ jobs:
           }
           Write-Host "SOL version: $rootVersion"
 
+      - name: Test local-first PostgreSQL runtime
+        shell: pwsh
+        run: pnpm --filter @sol/server exec tsx --test src/database/local-first.test.ts
+
       - name: Build SOL server
         shell: pwsh
         run: pnpm build
