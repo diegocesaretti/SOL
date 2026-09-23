@@ -54,7 +54,8 @@ test(
   async () => {
     const root = await mkdtemp(join(tmpdir(), "sol-cloud-sync-"));
     const localPort = await freePort();
-    const cloudPort = await freePort();
+    let cloudPort = await freePort();
+    while (cloudPort === localPort) cloudPort = await freePort();
     const localUser = "sol_local_test";
     const cloudUser = "sol_cloud_test";
     const password = "SolCloudSyncTestPassword2026";
