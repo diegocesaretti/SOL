@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -23,6 +23,7 @@ async function freePort(): Promise<number> {
 }
 
 async function startDatabase(root: string, port: number, user: string, password: string): Promise<EmbeddedPostgres> {
+  await mkdir(root, { recursive: true });
   const postgres = new EmbeddedPostgres({
     databaseDir: join(root, "data"),
     port,
@@ -30,8 +31,11 @@ async function startDatabase(root: string, port: number, user: string, password:
     password,
     persistent: true,
     authMethod: "scram-sha-256",
-    onLog: () => undefined,
-    onError: () => undefined,
+    onLog: (message) => {
+      const line = String(message).trim();
+      if (line) console.log(`[test-postgres:${port}] ${line}`);
+    },
+    onError: (error) => console.error(`[test-postgres:${port}]`, error),
   });
   await postgres.initialise();
   await postgres.start();
