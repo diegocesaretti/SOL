@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -18,33 +18,19 @@ async function freePort(): Promise<number> {
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("Could not reserve test port");
   const port = address.port;
-  await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  await new Promise<void>((resolve, reject) =>
+    server.close((error) => error ? reject(error) : resolve()),
+  );
   return port;
 }
 
-async function startDatabase(root: string, port: number, user: string, password: string): Promise<EmbeddedPostgres> {
-  await mkdir(root, { recursive: true });
-  const postgres = new EmbeddedPostgres({
-    databaseDir: join(root, "data"),
-    port,
-    user,
-    password,
-    persistent: true,
-    authMethod: "scram-sha-256",
-    onLog: (message) => {
-      const line = String(message).trim();
-      if (line) console.log(`[test-postgres:${port}] ${line}`);
-    },
-    onError: (error) => console.error(`[test-postgres:${port}]`, error),
-  });
-  await postgres.initialise();
-  await postgres.start();
-  await postgres.createDatabase("sol");
-  return postgres;
-}
-
-function connectionString(port: number, user: string, password: string): string {
-  const url = new URL("postgresql://127.0.0.1/sol");
+function connectionString(
+  port: number,
+  database: string,
+  user: string,
+  password: string,
+): string {
+  const url = new URL(`postgresql://127.0.0.1/${database}`);
   url.port = String(port);
   url.username = user;
   url.password = password;
@@ -57,23 +43,30 @@ test(
   { skip: process.platform !== "win32" ? "SOL Full embedded PostgreSQL integration is Windows-targeted" : false },
   async () => {
     const root = await mkdtemp(join(tmpdir(), "sol-cloud-sync-"));
-    const localPort = await freePort();
-    let cloudPort = await freePort();
-    while (cloudPort === localPort) cloudPort = await freePort();
-    const localUser = "sol_local_test";
-    const cloudUser = "sol_cloud_test";
-    const password = "SolCloudSyncTestPassword2026";
+    const port = await freePort();
+    const user = "sol_test";
+    const password = "sol_test_password";
+    const postgres = new EmbeddedPostgres({
+      databaseDir: join(root, "data"),
+      port,
+      user,
+      password,
+      persistent: true,
+      authMethod: "scram-sha-256",
+      onLog: () => undefined,
+      onError: () => undefined,
+    });
 
-    let localPostgres: EmbeddedPostgres | undefined;
-    let cloudPostgres: EmbeddedPostgres | undefined;
     let cloudSeedPool: InstanceType<typeof Pool> | undefined;
 
     try {
-      localPostgres = await startDatabase(join(root, "local"), localPort, localUser, password);
-      cloudPostgres = await startDatabase(join(root, "cloud"), cloudPort, cloudUser, password);
+      await postgres.initialise();
+      await postgres.start();
+      await postgres.createDatabase("sol_local");
+      await postgres.createDatabase("sol_cloud");
 
-      const localUrl = connectionString(localPort, localUser, password);
-      const cloudUrl = connectionString(cloudPort, cloudUser, password);
+      const localUrl = connectionString(port, "sol_local", user, password);
+      const cloudUrl = connectionString(port, "sol_cloud", user, password);
       process.env.SOL_LOCAL_DATABASE_URL = localUrl;
       process.env.DATABASE_URL = cloudUrl;
       process.env.SOL_CLOUD_SYNC = "true";
@@ -141,8 +134,7 @@ test(
       await closeDatabase();
     } finally {
       await cloudSeedPool?.end().catch(() => undefined);
-      await localPostgres?.stop().catch(() => undefined);
-      await cloudPostgres?.stop().catch(() => undefined);
+      await postgres.stop().catch(() => undefined);
       delete process.env.SOL_LOCAL_DATABASE_URL;
       delete process.env.DATABASE_URL;
       delete process.env.SOL_CLOUD_SYNC;
