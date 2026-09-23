@@ -138,7 +138,7 @@ internal static class Program
             child.BeginOutputReadLine();
             child.BeginErrorReadLine();
 
-            var ready = await WaitForHealth(baseUrl, TimeSpan.FromSeconds(30));
+            var ready = await WaitForHealth(baseUrl, TimeSpan.FromMinutes(3));
             if (ready) OpenBrowser(baseUrl + "/v1/inputs/plugins/ui");
             else MessageBox(IntPtr.Zero, $"SOL no respondió a tiempo. Revisá el log:\n{logPath}", "SOL · error de inicio", 0x10);
 
