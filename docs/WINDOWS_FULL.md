@@ -35,3 +35,26 @@ The Windows workflow downloads the rolling stable releases for the three officia
 At runtime SOL verifies each bundled package against the catalog digest before installing or upgrading it.
 
 Real `.env` files, plugin credentials, WhatsApp sessions, Home Assistant tokens and Codex credentials are never included in either Windows ZIP.
+
+
+## Local-first database resilience
+
+SOL Full 0.16+ runs its operational database from a bundled PostgreSQL instance under the persistent SOL data directory (normally `%LOCALAPPDATA%\\SOL\\postgres`).
+
+`DATABASE_URL` now identifies the Neon cloud replica rather than the database on SOL's critical path.
+
+On the first start after upgrading an existing Neon-backed installation:
+
+1. SOL initializes the local PostgreSQL cluster.
+2. Core migrations are applied locally and to Neon.
+3. SOL takes a consistent snapshot from Neon and imports it locally.
+4. The local database becomes the runtime authority.
+5. New local changes are journaled and pushed to Neon periodically.
+
+After that initial seed, quota exhaustion, internet loss, Neon suspension or a Neon outage does not prevent SOL from starting or accepting local writes. Pending changes remain in the local journal and are retried when Neon is reachable.
+
+The permanent `LISTEN/NOTIFY` outbox connection is local-only, so normal SOL background activity no longer keeps a Neon compute awake.
+
+To avoid silent data loss, cloud writes made outside SOL's replicator are treated as a synchronization conflict instead of being overwritten automatically.
+
+The first local seed deliberately requires one successful Neon connection when no local SOL data exists. SOL will not create a blank competing household while an existing cloud database may contain the authoritative history.
