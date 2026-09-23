@@ -65,6 +65,9 @@ async function hydratePortableWindowsPostgresFiles(): Promise<void> {
     } else {
       await copyFile(source, target);
     }
+    if (config.logLevel === "debug") {
+      console.log(`[database:local] hydrated portable PostgreSQL file ${link.target}`);
+    }
   }
 }
 
