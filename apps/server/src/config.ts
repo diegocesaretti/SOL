@@ -71,7 +71,7 @@ export const config = {
   localDatabaseDir: optionalEnv("SOL_LOCAL_DB_DIR") ?? resolve(dataDir, "postgres"),
   localDatabasePort: integerEnv("SOL_LOCAL_DB_PORT", 55432),
   cloudSyncEnabled: booleanEnv("SOL_CLOUD_SYNC", true),
-  cloudSyncIntervalMs: integerEnv("SOL_CLOUD_SYNC_MS", 5 * 60 * 1000),
+  cloudSyncIntervalMs: integerEnv("SOL_CLOUD_SYNC_MS", 30 * 60 * 1000),
   cloudSyncBatchSize: integerEnv("SOL_CLOUD_SYNC_BATCH_SIZE", 200),
   databasePoolMax: integerEnv("SOL_DB_POOL_MAX", 4),
   databaseIdleTimeoutMs: integerEnv("SOL_DB_IDLE_TIMEOUT_MS", 15_000),
