@@ -5,6 +5,12 @@ import "./database/auto-migrate.js";
 import { InMemoryEventBus } from "./core/event-bus.js";
 import { OutboxDispatcher } from "./core/outbox-dispatcher.js";
 import { checkDatabase, closeDatabase } from "./database/client.js";
+import {
+  getCloudSyncStatus,
+  startCloudSync,
+  stopCloudSync,
+  syncCloudNow,
+} from "./database/cloud-sync.js";
 import { readJsonBody, sendHtml, sendJson } from "./http.js";
 import {
   authenticateRequest,
@@ -189,6 +195,8 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
       ok: database,
       service: "sol-core",
       database,
+      databaseMode: "local-first",
+      cloudSync: await getCloudSyncStatus(),
     });
     return;
   }
@@ -200,6 +208,8 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
       architecture: "family-first data/knowledge OS + MCP",
       version: solVersion,
       database,
+      databaseMode: "local-first",
+      cloudSync: await getCloudSyncStatus(),
       reasoningInterface: "mcp",
       aiProviderMode: config.aiProvider,
       optionalAiProviders: ["openai", "codex"],
@@ -208,6 +218,18 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
       interfaces: ["mcp_stdio", "web", "plugin_runtime", "windows_tray"],
       views: ["inputs", "outputs", "life_timeline", "people", "projects", "mcp_access"],
     });
+    return;
+  }
+
+  if (request.method === "POST" && path === "/v1/system/cloud-sync") {
+    const principal = await principalFor(request, response);
+    if (!principal) return;
+    if (!canManageMembers(principal)) {
+      sendJson(response, 403, { error: "forbidden" });
+      return;
+    }
+    await syncCloudNow();
+    sendJson(response, 200, { cloudSync: await getCloudSyncStatus() });
     return;
   }
 
@@ -385,6 +407,7 @@ server.listen(config.port, config.host, () => {
   console.log(`SOL Core listening on http://${config.host}:${config.port}`);
   startWindowsTray();
   outboxDispatcher.start();
+  startCloudSync();
   console.log("External sources are plugin-only; install providers from Services.");
   if (config.host !== "127.0.0.1" && config.host !== "localhost") {
     console.warn(
@@ -400,6 +423,7 @@ async function shutdown(signal: string): Promise<void> {
   unregisterCandidateProcessor();
   await codexAppServer.stop().catch(() => undefined);
   server.close(async () => {
+    await stopCloudSync();
     await closeDatabase();
     process.exit(0);
   });
