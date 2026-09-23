@@ -599,12 +599,18 @@ async function recordLocalSyncError(message: string): Promise<void> {
 }
 
 async function performCloudSync(): Promise<void> {
-  if (!config.cloudSyncEnabled || stopped) return;
+  if (!config.cloudSyncEnabled || stopped || status.state === "conflict") return;
+
+  const pendingBefore = await pendingChangeCount();
+  if (pendingBefore === 0 && status.state === "synchronized") {
+    status = { ...status, pendingChanges: 0 };
+    return;
+  }
 
   status = {
     ...status,
     state: "syncing",
-    pendingChanges: await pendingChangeCount(),
+    pendingChanges: pendingBefore,
   };
 
   try {
