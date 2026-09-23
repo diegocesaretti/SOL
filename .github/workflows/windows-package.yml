@@ -137,21 +137,21 @@ jobs:
           $env:SOL_LOG_LEVEL = 'debug'
           Push-Location 'dist/windows/SOL/apps/server'
           try {
-            $smokeTest = @'
-import test from "node:test";
-import pg from "pg";
-import { localPostgres } from "./dist/database/local-postgres.js";
-test("packaged local PostgreSQL starts", async () => {
-  const runtime = await localPostgres();
-  const client = new pg.Client({ connectionString: runtime.connectionString });
-  await client.connect();
-  const result = await client.query("SELECT current_database() AS database");
-  console.log("packaged local PostgreSQL ready:", result.rows[0].database);
-  await client.end();
-  await runtime.stop();
-});
-'@
-            [System.IO.File]::WriteAllText((Join-Path $PWD 'smoke-local-pg.mjs'), $smokeTest, [System.Text.UTF8Encoding]::new($false))
+            $smokeTest = @(
+              'import test from "node:test";',
+              'import pg from "pg";',
+              'import { localPostgres } from "./dist/database/local-postgres.js";',
+              'test("packaged local PostgreSQL starts", async () => {',
+              '  const runtime = await localPostgres();',
+              '  const client = new pg.Client({ connectionString: runtime.connectionString });',
+              '  await client.connect();',
+              '  const result = await client.query("SELECT current_database() AS database");',
+              '  console.log("packaged local PostgreSQL ready:", result.rows[0].database);',
+              '  await client.end();',
+              '  await runtime.stop();',
+              '});'
+            )
+            [System.IO.File]::WriteAllLines((Join-Path $PWD 'smoke-local-pg.mjs'), $smokeTest, [System.Text.UTF8Encoding]::new($false))
             & $node --test --test-concurrency=1 smoke-local-pg.mjs
             if ($LASTEXITCODE -ne 0) { throw 'Packaged local PostgreSQL smoke test failed' }
             Remove-Item smoke-local-pg.mjs -Force
@@ -211,21 +211,21 @@ test("packaged local PostgreSQL starts", async () => {
           $env:SOL_LOG_LEVEL = 'debug'
           Push-Location (Join-Path $root 'apps/server')
           try {
-            $smokeTest = @'
-import test from "node:test";
-import pg from "pg";
-import { localPostgres } from "./dist/database/local-postgres.js";
-test("ZIP round-trip PostgreSQL starts", async () => {
-  const runtime = await localPostgres();
-  const client = new pg.Client({ connectionString: runtime.connectionString });
-  await client.connect();
-  await client.query("SELECT 1");
-  await client.end();
-  await runtime.stop();
-  console.log("ZIP round-trip PostgreSQL ready");
-});
-'@
-            [System.IO.File]::WriteAllText((Join-Path $PWD 'smoke-zip-pg.mjs'), $smokeTest, [System.Text.UTF8Encoding]::new($false))
+            $smokeTest = @(
+              'import test from "node:test";',
+              'import pg from "pg";',
+              'import { localPostgres } from "./dist/database/local-postgres.js";',
+              'test("ZIP round-trip PostgreSQL starts", async () => {',
+              '  const runtime = await localPostgres();',
+              '  const client = new pg.Client({ connectionString: runtime.connectionString });',
+              '  await client.connect();',
+              '  await client.query("SELECT 1");',
+              '  await client.end();',
+              '  await runtime.stop();',
+              '  console.log("ZIP round-trip PostgreSQL ready");',
+              '});'
+            )
+            [System.IO.File]::WriteAllLines((Join-Path $PWD 'smoke-zip-pg.mjs'), $smokeTest, [System.Text.UTF8Encoding]::new($false))
             & $node --test --test-concurrency=1 smoke-zip-pg.mjs
             if ($LASTEXITCODE -ne 0) { throw 'Extracted ZIP PostgreSQL smoke test failed' }
             Remove-Item smoke-zip-pg.mjs -Force
