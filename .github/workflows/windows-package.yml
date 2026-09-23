@@ -127,6 +127,24 @@ jobs:
             Pop-Location
           }
 
+      - name: Smoke-test packaged local PostgreSQL
+        shell: pwsh
+        run: |
+          $node = (Resolve-Path 'dist/windows/SOL/runtime/node.exe').Path
+          $smokeData = Join-Path $env:RUNNER_TEMP ('sol-pg-smoke-' + [guid]::NewGuid().ToString('N'))
+          $env:SOL_DATA_DIR = $smokeData
+          $env:SOL_LOCAL_DB_PORT = '55439'
+          Push-Location 'dist/windows/SOL/apps/server'
+          try {
+            & $node --input-type=module -e "const {localPostgres}=await import('./dist/database/local-postgres.js'); const pg=(await import('pg')).default; const runtime=await localPostgres(); const client=new pg.Client({connectionString:runtime.connectionString}); await client.connect(); const result=await client.query('SELECT current_database() AS database'); console.log('packaged local PostgreSQL ready:', result.rows[0].database); await client.end(); await runtime.stop();"
+            if ($LASTEXITCODE -ne 0) { throw 'Packaged local PostgreSQL smoke test failed' }
+          } finally {
+            Pop-Location
+            Remove-Item Env:SOL_DATA_DIR -ErrorAction SilentlyContinue
+            Remove-Item Env:SOL_LOCAL_DB_PORT -ErrorAction SilentlyContinue
+            Remove-Item $smokeData -Recurse -Force -ErrorAction SilentlyContinue
+          }
+
       - name: Verify core package structure
         shell: pwsh
         run: |
