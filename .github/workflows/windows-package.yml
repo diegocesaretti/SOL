@@ -318,7 +318,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $tag = 'sol-windows-latest'
-          $notes = 'SOL Windows 0.15+ Full: SOL Core + latest stable Nexo, Codex Audio Remote and Home Assistant plugins captured and verified at build time. SOL-Core-Windows.zip is the optional core-only package. Real credentials are never included.'
+          $notes = 'SOL Windows 0.16+ Full: local-first PostgreSQL SOL Core + Neon cloud replication + latest stable Nexo, Codex Audio Remote and Home Assistant plugins captured and verified at build time. SOL-Core-Windows.zip is the optional core-only package. Real credentials are never included.'
           gh release view $tag --repo $env:GITHUB_REPOSITORY 2>$null
           if ($LASTEXITCODE -ne 0) {
             gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'SOL Windows Full' --notes $notes --prerelease --target $env:GITHUB_SHA
