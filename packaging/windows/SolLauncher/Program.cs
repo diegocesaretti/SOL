@@ -138,7 +138,7 @@ internal static class Program
             child.BeginOutputReadLine();
             child.BeginErrorReadLine();
 
-            var ready = await WaitForHealth(baseUrl, TimeSpan.FromSeconds(30));
+            var ready = await WaitForHealth(baseUrl, TimeSpan.FromMinutes(3));
             if (ready) OpenBrowser(baseUrl + "/v1/inputs/plugins/ui");
             else MessageBox(IntPtr.Zero, $"SOL no respondió a tiempo. Revisá el log:\n{logPath}", "SOL · error de inicio", 0x10);
 
@@ -268,12 +268,12 @@ internal static class Program
     private static void ShowDatabaseConfiguration(string envPath, bool firstRun)
     {
         var prefix = firstRun
-            ? "Es el primer inicio de SOL. Se creó la configuración en la carpeta de datos persistentes de SOL."
+            ? "Es el primer inicio de SOL Full. Se creó la configuración en la carpeta de datos persistentes."
             : "SOL detectó que DATABASE_URL todavía contiene valores de ejemplo o está vacío.";
 
         MessageBox(IntPtr.Zero,
-            $"{prefix}\n\nPegá en DATABASE_URL la cadena de conexión real de Neon, guardá el archivo y volvé a abrir SOL.\n\nSOL no iniciará servicios hasta que la base esté configurada.\n\nArchivo: {envPath}",
-            "SOL · configurar Neon",
+            $"{prefix}\n\nPegá en DATABASE_URL la cadena de conexión real de Neon, guardá el archivo y volvé a abrir SOL.\n\nNeon se usa una vez para copiar tu SOL existente al PostgreSQL local y después queda como réplica cloud. Tras esa primera copia, SOL puede iniciar aunque Neon esté offline o sin cuota.\n\nArchivo: {envPath}",
+            "SOL Full · configurar réplica Neon",
             0x40);
 
         if (File.Exists(envPath))

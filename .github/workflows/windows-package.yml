@@ -51,6 +51,10 @@ jobs:
           }
           Write-Host "SOL version: $rootVersion"
 
+      - name: Test local-first PostgreSQL runtime
+        shell: pwsh
+        run: pnpm --filter @sol/server exec tsx --test --test-concurrency=1 src/database/local-first.test.ts src/database/cloud-sync.integration.test.ts
+
       - name: Build SOL server
         shell: pwsh
         run: pnpm build
@@ -65,7 +69,7 @@ jobs:
           Copy-Item apps/server/package.json "$server/package.json" -Force
           Push-Location $server
           try {
-            npm install --omit=dev --ignore-scripts --no-package-lock --no-audit --no-fund
+            npm install --omit=dev --no-package-lock --no-audit --no-fund
           } finally {
             Pop-Location
           }
@@ -112,12 +116,51 @@ jobs:
           $node = (Resolve-Path 'dist/windows/SOL/runtime/node.exe').Path
           Push-Location 'dist/windows/SOL/apps/server'
           try {
-            & $node --input-type=module -e "await import('pg'); await import('zod'); await import('@modelcontextprotocol/server'); console.log('portable SOL Core dependencies resolve')"
+            & $node --input-type=module -e "await import('pg'); await import('zod'); await import('@modelcontextprotocol/server'); await import('embedded-postgres'); console.log('portable SOL Core dependencies resolve')"
             if ($LASTEXITCODE -ne 0) { throw 'Portable Node dependency resolution failed' }
-            & $node --input-type=module -e "await import('./dist/database/client.js'); await import('./dist/modules/plugins/bundled.js'); console.log('database and bundled-plugin runtimes import successfully')"
+            & $node --input-type=module -e "await import('./dist/database/local-postgres.js'); console.log('local database runtime imports successfully')"
             if ($LASTEXITCODE -ne 0) { throw 'Portable SOL runtime import failed' }
+            if (-not (Test-Path 'node_modules/@embedded-postgres/windows-x64/native/bin/postgres.exe')) { throw 'Embedded PostgreSQL postgres.exe missing from portable package' }
+            if (-not (Test-Path 'node_modules/@embedded-postgres/windows-x64/native/bin/initdb.exe')) { throw 'Embedded PostgreSQL initdb.exe missing from portable package' }
+            Write-Host 'Embedded PostgreSQL Windows runtime present'
           } finally {
             Pop-Location
+          }
+
+      - name: Smoke-test packaged local PostgreSQL
+        shell: pwsh
+        run: |
+          $node = (Resolve-Path 'dist/windows/SOL/runtime/node.exe').Path
+          $smokeData = Join-Path $env:RUNNER_TEMP ('sol-pg-smoke-' + [guid]::NewGuid().ToString('N'))
+          $env:SOL_DATA_DIR = $smokeData
+          $env:SOL_LOCAL_DB_PORT = '55439'
+          $env:SOL_LOG_LEVEL = 'debug'
+          Push-Location 'dist/windows/SOL/apps/server'
+          try {
+            $smokeTest = @(
+              'import test from "node:test";',
+              'import pg from "pg";',
+              'import { localPostgres } from "./dist/database/local-postgres.js";',
+              'test("packaged local PostgreSQL starts", async () => {',
+              '  const runtime = await localPostgres();',
+              '  const client = new pg.Client({ connectionString: runtime.connectionString });',
+              '  await client.connect();',
+              '  const result = await client.query("SELECT current_database() AS database");',
+              '  console.log("packaged local PostgreSQL ready:", result.rows[0].database);',
+              '  await client.end();',
+              '  await runtime.stop();',
+              '});'
+            )
+            [System.IO.File]::WriteAllLines((Join-Path $PWD 'smoke-local-pg.mjs'), $smokeTest, [System.Text.UTF8Encoding]::new($false))
+            & $node --test --test-concurrency=1 smoke-local-pg.mjs
+            if ($LASTEXITCODE -ne 0) { throw 'Packaged local PostgreSQL smoke test failed' }
+            Remove-Item smoke-local-pg.mjs -Force
+          } finally {
+            Pop-Location
+            Remove-Item Env:SOL_DATA_DIR -ErrorAction SilentlyContinue
+            Remove-Item Env:SOL_LOCAL_DB_PORT -ErrorAction SilentlyContinue
+            Remove-Item Env:SOL_LOG_LEVEL -ErrorAction SilentlyContinue
+            Remove-Item $smokeData -Recurse -Force -ErrorAction SilentlyContinue
           }
 
       - name: Verify core package structure
@@ -133,7 +176,10 @@ jobs:
             'dist/windows/SOL/apps/server/dist/modules/plugins/bundled.js',
             'dist/windows/SOL/apps/server/node_modules/pg/package.json',
             'dist/windows/SOL/apps/server/node_modules/zod/package.json',
+            'dist/windows/SOL/apps/server/node_modules/embedded-postgres/package.json',
+            'dist/windows/SOL/apps/server/node_modules/@embedded-postgres/windows-x64/native/bin/postgres.exe',
             'dist/windows/SOL/packages/database/migrations/0021_connections.sql',
+            'dist/windows/SOL/packages/database/migrations/0024_local_first_cloud_sync.sql',
             'dist/windows/SOL/scripts/windows/sol-tray.ps1',
             'dist/windows/SOL/.env.example'
           )
@@ -151,6 +197,46 @@ jobs:
           if (Test-Path $zip) { Remove-Item $zip -Force }
           Compress-Archive -Path dist/windows/SOL -DestinationPath $zip -CompressionLevel Optimal
           Write-Host "SOL-Core-Windows.zip SHA256=$((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant())"
+
+      - name: Verify PostgreSQL survives portable ZIP round-trip
+        shell: pwsh
+        run: |
+          $extract = Join-Path $env:RUNNER_TEMP ('sol-core-extract-' + [guid]::NewGuid().ToString('N'))
+          $data = Join-Path $env:RUNNER_TEMP ('sol-core-db-' + [guid]::NewGuid().ToString('N'))
+          Expand-Archive -Path 'dist/SOL-Core-Windows.zip' -DestinationPath $extract -Force
+          $root = Join-Path $extract 'SOL'
+          $node = Join-Path $root 'runtime/node.exe'
+          $env:SOL_DATA_DIR = $data
+          $env:SOL_LOCAL_DB_PORT = '55440'
+          $env:SOL_LOG_LEVEL = 'debug'
+          Push-Location (Join-Path $root 'apps/server')
+          try {
+            $smokeTest = @(
+              'import test from "node:test";',
+              'import pg from "pg";',
+              'import { localPostgres } from "./dist/database/local-postgres.js";',
+              'test("ZIP round-trip PostgreSQL starts", async () => {',
+              '  const runtime = await localPostgres();',
+              '  const client = new pg.Client({ connectionString: runtime.connectionString });',
+              '  await client.connect();',
+              '  await client.query("SELECT 1");',
+              '  await client.end();',
+              '  await runtime.stop();',
+              '  console.log("ZIP round-trip PostgreSQL ready");',
+              '});'
+            )
+            [System.IO.File]::WriteAllLines((Join-Path $PWD 'smoke-zip-pg.mjs'), $smokeTest, [System.Text.UTF8Encoding]::new($false))
+            & $node --test --test-concurrency=1 smoke-zip-pg.mjs
+            if ($LASTEXITCODE -ne 0) { throw 'Extracted ZIP PostgreSQL smoke test failed' }
+            Remove-Item smoke-zip-pg.mjs -Force
+          } finally {
+            Pop-Location
+            Remove-Item Env:SOL_DATA_DIR -ErrorAction SilentlyContinue
+            Remove-Item Env:SOL_LOCAL_DB_PORT -ErrorAction SilentlyContinue
+            Remove-Item Env:SOL_LOG_LEVEL -ErrorAction SilentlyContinue
+            Remove-Item $extract -Recurse -Force -ErrorAction SilentlyContinue
+            Remove-Item $data -Recurse -Force -ErrorAction SilentlyContinue
+          }
 
       - name: Download and verify latest stable official plugins
         shell: pwsh
@@ -290,7 +376,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $tag = 'sol-windows-latest'
-          $notes = 'SOL Windows 0.15+ Full: SOL Core + latest stable Nexo, Codex Audio Remote and Home Assistant plugins captured and verified at build time. SOL-Core-Windows.zip is the optional core-only package. Real credentials are never included.'
+          $notes = 'SOL Windows 0.16+ Full: local-first PostgreSQL SOL Core + Neon cloud replication + latest stable Nexo, Codex Audio Remote and Home Assistant plugins captured and verified at build time. SOL-Core-Windows.zip is the optional core-only package. Real credentials are never included.'
           gh release view $tag --repo $env:GITHUB_REPOSITORY 2>$null
           if ($LASTEXITCODE -ne 0) {
             gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'SOL Windows Full' --notes $notes --prerelease --target $env:GITHUB_SHA

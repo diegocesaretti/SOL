@@ -1,31 +1,23 @@
 import pg from "pg";
 import { config } from "../config.js";
 import { wakeOutbox } from "../core/outbox-wakeup.js";
-import {
-  directPostgresConnectionString,
-  normalizePostgresConnectionString,
-} from "./postgres-url.js";
+import { localPostgres } from "./local-postgres.js";
+import { normalizePostgresConnectionString } from "./postgres-url.js";
 
 const { Client, Pool } = pg;
 
-const poolConnectionString = normalizePostgresConnectionString(config.databaseUrl);
-const listenerConnectionString = normalizePostgresConnectionString(
-  config.databaseListenUrl ?? directPostgresConnectionString(config.databaseUrl),
-);
+const localRuntime = await localPostgres();
+const localConnectionString = normalizePostgresConnectionString(localRuntime.connectionString);
 
 export const db = new Pool({
-  connectionString: poolConnectionString,
+  connectionString: localConnectionString,
   max: config.databasePoolMax,
   idleTimeoutMillis: config.databaseIdleTimeoutMs,
   connectionTimeoutMillis: config.databaseConnectionTimeoutMs,
 });
 
-// pg-pool emits errors when an idle physical connection is terminated by the
-// server/network. Without a listener Node treats the EventEmitter `error` as
-// fatal and terminates SOL. The broken client is discarded by pg-pool and a
-// future query will establish a fresh connection.
 db.on("error", (error) => {
-  console.error("[database] idle PostgreSQL pool connection failed", error);
+  console.error("[database] idle local PostgreSQL pool connection failed", error);
 });
 
 const LISTENER_RECONNECT_MIN_MS = 1_000;
@@ -56,7 +48,7 @@ async function connectOutboxListener(): Promise<void> {
   if (outboxListenerStopped || outboxListener) return;
 
   const client = new Client({
-    connectionString: listenerConnectionString,
+    connectionString: localConnectionString,
     connectionTimeoutMillis: config.databaseConnectionTimeoutMs,
   });
   outboxListener = client;
@@ -68,7 +60,7 @@ async function connectOutboxListener(): Promise<void> {
 
     if (outboxListener === client) outboxListener = undefined;
     if (error) {
-      console.error("[database] SOL outbox listener connection failed", error);
+      console.error("[database] SOL local outbox listener connection failed", error);
     }
 
     if (!outboxListenerStopped) scheduleOutboxListenerReconnect();
@@ -90,22 +82,16 @@ async function connectOutboxListener(): Promise<void> {
 
     await client.query("LISTEN sol_outbox");
     outboxListenerReconnectDelayMs = LISTENER_RECONNECT_MIN_MS;
-    console.log("[database] SOL outbox listener connected");
-
-    // Catch up immediately after startup/reconnect in case notifications were
-    // missed while the dedicated listener connection was unavailable.
+    console.log("[database] SOL local outbox listener connected");
     wakeOutbox();
   } catch (error) {
     if (outboxListener === client) outboxListener = undefined;
-    console.error("[database] Could not enable SOL outbox notifications", error);
+    console.error("[database] Could not enable local SOL outbox notifications", error);
     await client.end().catch(() => undefined);
     scheduleOutboxListenerReconnect();
   }
 }
 
-// LISTEN/NOTIFY is session-scoped, so it must not share the transaction-pooled
-// Neon URL used by ordinary SQL. SOL_DB_LISTEN_URL can override the listener
-// endpoint; otherwise a Neon `-pooler` hostname is converted to its direct peer.
 void connectOutboxListener();
 
 export async function checkDatabase(): Promise<boolean> {
@@ -130,4 +116,5 @@ export async function closeDatabase(): Promise<void> {
   if (listener) await listener.end().catch(() => undefined);
 
   await db.end();
+  await localRuntime.stop();
 }

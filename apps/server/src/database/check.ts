@@ -1,4 +1,3 @@
-import { config } from "../config.js";
 import { closeDatabase, db } from "./client.js";
 
 async function check(): Promise<void> {
@@ -7,23 +6,20 @@ async function check(): Promise<void> {
     database: string;
     username: string;
     version: string;
+    host: string | null;
+    port: number | null;
   }>(
     `SELECT current_database() AS database,
             current_user AS username,
-            version() AS version`,
+            version() AS version,
+            inet_server_addr()::text AS host,
+            inet_server_port() AS port`,
   );
   const row = result.rows[0];
   if (!row) throw new Error("PostgreSQL returned no status row");
 
-  let host = "configured PostgreSQL";
-  try {
-    host = new URL(config.databaseUrl).host || host;
-  } catch {
-    // Never print the full connection string if URL parsing fails.
-  }
-
-  console.log("SOL PostgreSQL is reachable.");
-  console.log(`Host:     ${host}`);
+  console.log("SOL local PostgreSQL is reachable.");
+  console.log(`Host:     ${row.host ?? "local socket"}${row.port ? `:${row.port}` : ""}`);
   console.log(`Database: ${row.database}`);
   console.log(`User:     ${row.username}`);
   console.log(`Latency:  ${Date.now() - started} ms`);
@@ -33,7 +29,7 @@ async function check(): Promise<void> {
 check()
   .then(() => closeDatabase())
   .catch(async (error) => {
-    console.error("SOL PostgreSQL check failed:", error instanceof Error ? error.message : error);
+    console.error("SOL local PostgreSQL check failed:", error instanceof Error ? error.message : error);
     await closeDatabase().catch(() => undefined);
     process.exitCode = 1;
   });

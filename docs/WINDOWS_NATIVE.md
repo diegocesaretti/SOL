@@ -1,101 +1,103 @@
 # SOL on Windows without Docker
 
-SOL's target host runs **natively on Windows**. Docker Desktop, WSL, Hyper-V, Redis and pgvector are not required.
+SOL Full runs natively on Windows. Docker Desktop, WSL, Hyper-V, Redis and pgvector are not required.
 
-The preferred prototype database is now Neon-managed PostgreSQL; this document covers the fully local PostgreSQL alternative for households that prefer to keep the database on the SOL machine.
+Starting with SOL Full 0.16, the standard Windows package includes its own PostgreSQL runtime. The database cluster is persistent under the SOL data directory and is not replaced by application updates.
 
-## Local runtime layout
+## Default SOL Full layout
 
 ```text
 Windows
+├── SOL.exe
 ├── SOL Core (Node.js / TypeScript)
-├── Codex CLI / App Server
-├── WhatsApp linked-device sessions
-├── Google OAuth / Calendar
-└── PostgreSQL Windows service
+├── embedded PostgreSQL
+│   └── %LOCALAPPDATA%\SOL\postgres
+├── Nexo / WhatsApp plugin
+├── Codex Audio Remote plugin
+├── Home Assistant plugin
+└── Neon PostgreSQL (optional cloud replica / initial seed)
 ```
 
-Future connectors such as SOL's own WhatsApp identity, Home Assistant and Mercado Libre use the same SOL Core process and PostgreSQL database; they do not require containers.
+The local PostgreSQL server binds only to `127.0.0.1`. SOL generates and stores a dedicated local database password in the persistent data directory.
 
-## Requirements for local PostgreSQL
+## Normal Windows setup
 
-- Windows 10/11 or comparable supported Windows host
-- Node.js 22+ (24 recommended)
-- pnpm
-- PostgreSQL 18/17/16 native Windows installation
-- Codex CLI only if the Codex reasoning engine is enabled
+Use the published `SOL-Windows.zip`. No separate PostgreSQL installation is required.
 
-Use the normal PostgreSQL Windows installer. The default port `5432` is fine. Remember the password chosen for the PostgreSQL administrator account (`postgres`). pgAdmin is optional.
+On first start, the launcher creates the persistent SOL configuration under `%LOCALAPPDATA%\SOL`. If you are upgrading an existing Neon-backed SOL installation, keep the real Neon URL in:
 
-The SOL setup helper looks for `psql.exe` in PATH and common PostgreSQL install directories, so adding PostgreSQL to PATH is optional.
+```dotenv
+DATABASE_URL=postgresql://...
+```
 
-## First setup
+SOL uses that connection once to seed the local database, then keeps Neon as a batched cloud replica. After the first successful seed, SOL can start while Neon or the internet is unavailable.
 
-From the repository root:
+## Development
+
+For a local-only checkout:
 
 ```powershell
 pnpm install
-pnpm db:setup
+$env:SOL_CLOUD_SYNC="false"
 pnpm db:check
 pnpm db:migrate
 pnpm dev
 ```
 
-`pnpm db:setup`:
-
-1. finds the native `psql.exe`;
-2. connects as the local PostgreSQL administrator;
-3. creates (or updates) the dedicated `sol` login;
-4. creates the `sol` database if needed;
-5. generates a random application database password;
-6. writes `DATABASE_URL` to the Git-ignored `.env` file.
-
-The administrator password is entered directly into `psql`; SOL does not store it.
-
-`pnpm db:check` itself does **not** require `psql`; it uses SOL's Node PostgreSQL driver and works identically with local PostgreSQL or Neon.
-
-## Daily startup
-
-PostgreSQL is expected to run as a normal Windows service. SOL itself remains a normal Node process during development:
-
-```powershell
-pnpm db:check
-pnpm dev
-```
-
-Later, for an always-on household installation, SOL Core can itself be registered as a Windows service without changing the database architecture.
-
-## Database configuration
-
-SOL depends only on a PostgreSQL connection string:
+The default embedded cluster uses port `55432`. It can be changed with:
 
 ```dotenv
-DATABASE_URL=postgresql://sol:<generated-password>@127.0.0.1:5432/sol
+SOL_LOCAL_DB_PORT=55432
 ```
 
-The application does not care whether PostgreSQL is Windows-native, Neon-managed, Linux-native or remote. Only `DATABASE_URL` changes.
+## External local PostgreSQL override
 
-For the managed Neon profile, see [NEON.md](NEON.md).
+The bundled database is the normal profile. Advanced installations may still use an already-installed PostgreSQL server instead.
 
-## Why Redis was removed
+Run:
 
-No current SOL module uses Redis. Durable events, scheduler state, sessions, synchronization cursors, proposals and source state already live in PostgreSQL. Adding Redis before a demonstrated need would add another service without providing current value.
+```powershell
+pnpm db:setup
+```
 
-If a future workload proves it useful, it can be introduced behind an internal abstraction without changing the domain model.
+The helper creates the `sol` role/database and writes:
 
-## Why pgvector is optional
+```dotenv
+SOL_LOCAL_DATABASE_URL=postgresql://sol:<generated-password>@127.0.0.1:5432/sol
+```
 
-Semantic embeddings are not canonical memory and no current SOL flow requires vector search. The original base schema reserved a pgvector table, but that made a fresh Windows installation depend on an external PostgreSQL extension for no current benefit.
+That setting disables the managed embedded cluster and makes the supplied PostgreSQL instance SOL's local runtime authority.
 
-The base schema now uses standard PostgreSQL only. When semantic retrieval is implemented, SOL can add pgvector through a dedicated optional migration/profile. Existing structured Life, Knowledge and Executive data does not depend on it.
+`DATABASE_URL` remains independently available for Neon cloud replication.
+
+## Database commands
+
+`pnpm db:check` verifies the local runtime database, not Neon.
+
+`pnpm db:migrate` applies SOL migrations to the local runtime database. Normal SOL startup also migrates the local database automatically.
+
+Cloud schema migrations are applied by the cloud replicator when Neon is reachable.
+
+## Updates and persistence
+
+The portable application files can be replaced by `SOL.Updater.exe`, but the following state remains under the persistent SOL data root:
+
+- embedded PostgreSQL cluster and local DB credentials;
+- plugin data and linked-device sessions;
+- Codex profile/workspace;
+- the persistent `.env`;
+- logs and update state.
+
+This lets the Full updater replace application binaries without replacing household data.
 
 ## Backups
 
-A useful SOL backup must eventually include:
+A complete local-first backup should include the persistent SOL data directory, especially:
 
-- the PostgreSQL database;
-- `.sol/secrets/whatsapp-auth.key` if WhatsApp linked-device credentials are to be restored;
-- `.sol/secrets/google-oauth.key` if Google credentials are to be restored;
-- the dedicated `.sol/codex` profile if preserving the SOL Codex login is desired.
+- `postgres\` for the local PostgreSQL authority;
+- plugin data/session directories;
+- credential/secrets files;
+- the persistent `.env`;
+- the dedicated Codex profile if its login/workspace must be preserved.
 
-Do not commit any of these secrets to Git.
+Neon is an additional cloud copy, not a substitute for validating local backups.

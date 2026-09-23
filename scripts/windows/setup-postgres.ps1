@@ -96,19 +96,19 @@ if (-not (Test-Path $envPath)) {
 }
 
 $envText = Get-Content $envPath -Raw
-if ($envText -match '(?m)^DATABASE_URL=.*$') {
-  $envText = [regex]::Replace($envText, '(?m)^DATABASE_URL=.*$', "DATABASE_URL=$databaseUrl")
+if ($envText -match '(?m)^SOL_LOCAL_DATABASE_URL=.*$') {
+  $envText = [regex]::Replace($envText, '(?m)^SOL_LOCAL_DATABASE_URL=.*$', "SOL_LOCAL_DATABASE_URL=$databaseUrl")
 } else {
-  $envText += "`r`nDATABASE_URL=$databaseUrl`r`n"
+  $envText += "`r`nSOL_LOCAL_DATABASE_URL=$databaseUrl`r`n"
 }
 Set-Content -Path $envPath -Value $envText -Encoding UTF8
 
 Write-Host ''
-Write-Host 'Native PostgreSQL setup complete.' -ForegroundColor Green
+Write-Host 'External local PostgreSQL override setup complete.' -ForegroundColor Green
 Write-Host "Database: $DatabaseName"
 Write-Host "User:     $DatabaseUser"
 Write-Host "Host:     ${PostgresHost}:$PostgresPort"
-Write-Host 'DATABASE_URL was written to .env (which is ignored by Git).'
+Write-Host 'SOL_LOCAL_DATABASE_URL was written to .env (which is ignored by Git).'
 Write-Host ''
 Write-Host 'Next:'
 Write-Host '  pnpm db:check'
