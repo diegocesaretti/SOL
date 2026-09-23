@@ -87,6 +87,9 @@ export async function migrateDatabase(pool: Pool = db, label?: string): Promise<
     ]);
     locked = true;
 
+    // Schema/data migrations are replayed independently on local and cloud.
+    // Do not journal migration-owned DML as user/runtime changes.
+    await client.query("SET sol.sync_apply = '1'");
     await ensureMigrationTable(client);
     const files = (await readdir(migrationsDir))
       .filter((file) => /^\d+_.+\.sql$/.test(file))
@@ -125,6 +128,7 @@ export async function migrateDatabase(pool: Pool = db, label?: string): Promise<
       await client.query("SELECT sol_install_sync_triggers()");
     }
   } finally {
+    await client.query("RESET sol.sync_apply").catch(() => undefined);
     if (locked) {
       await client.query("SELECT pg_advisory_unlock($1, $2)", [
         MIGRATION_LOCK_CLASS,
