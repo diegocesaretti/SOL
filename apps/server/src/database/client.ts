@@ -1,6 +1,7 @@
 import pg from "pg";
 import { config } from "../config.js";
 import { wakeOutbox } from "../core/outbox-wakeup.js";
+import { ensureLocalPostgres } from "./local-postgres.js";
 import {
   directPostgresConnectionString,
   normalizePostgresConnectionString,
@@ -8,25 +9,44 @@ import {
 
 const { Client, Pool } = pg;
 
-const poolConnectionString = normalizePostgresConnectionString(config.databaseUrl);
-const listenerConnectionString = normalizePostgresConnectionString(
-  config.databaseListenUrl ?? directPostgresConnectionString(config.databaseUrl),
+export const databaseRuntimeMode = config.databaseMode;
+
+const localRuntime = databaseRuntimeMode === "hybrid"
+  ? await ensureLocalPostgres()
+  : undefined;
+
+const activeConnectionString = normalizePostgresConnectionString(
+  localRuntime?.connectionString ?? config.databaseUrl,
 );
 
 export const db = new Pool({
-  connectionString: poolConnectionString,
+  connectionString: activeConnectionString,
   max: config.databasePoolMax,
   idleTimeoutMillis: config.databaseIdleTimeoutMs,
   connectionTimeoutMillis: config.databaseConnectionTimeoutMs,
 });
 
-// pg-pool emits errors when an idle physical connection is terminated by the
-// server/network. Without a listener Node treats the EventEmitter `error` as
-// fatal and terminates SOL. The broken client is discarded by pg-pool and a
-// future query will establish a fresh connection.
+export const cloudDb = databaseRuntimeMode === "hybrid"
+  ? new Pool({
+      connectionString: normalizePostgresConnectionString(config.databaseUrl),
+      max: Math.min(2, config.databasePoolMax),
+      idleTimeoutMillis: config.databaseIdleTimeoutMs,
+      connectionTimeoutMillis: config.databaseConnectionTimeoutMs,
+    })
+  : undefined;
+
 db.on("error", (error) => {
   console.error("[database] idle PostgreSQL pool connection failed", error);
 });
+cloudDb?.on("error", (error) => {
+  console.error("[database] idle cloud PostgreSQL pool connection failed", error);
+});
+
+const listenerConnectionString = databaseRuntimeMode === "hybrid"
+  ? activeConnectionString
+  : normalizePostgresConnectionString(
+      config.databaseListenUrl ?? directPostgresConnectionString(config.databaseUrl),
+    );
 
 const LISTENER_RECONNECT_MIN_MS = 1_000;
 const LISTENER_RECONNECT_MAX_MS = 30_000;
@@ -90,10 +110,9 @@ async function connectOutboxListener(): Promise<void> {
 
     await client.query("LISTEN sol_outbox");
     outboxListenerReconnectDelayMs = LISTENER_RECONNECT_MIN_MS;
-    console.log("[database] SOL outbox listener connected");
-
-    // Catch up immediately after startup/reconnect in case notifications were
-    // missed while the dedicated listener connection was unavailable.
+    console.log(
+      `[database] SOL outbox listener connected (${databaseRuntimeMode === "hybrid" ? "local" : "primary"})`,
+    );
     wakeOutbox();
   } catch (error) {
     if (outboxListener === client) outboxListener = undefined;
@@ -103,14 +122,21 @@ async function connectOutboxListener(): Promise<void> {
   }
 }
 
-// LISTEN/NOTIFY is session-scoped, so it must not share the transaction-pooled
-// Neon URL used by ordinary SQL. SOL_DB_LISTEN_URL can override the listener
-// endpoint; otherwise a Neon `-pooler` hostname is converted to its direct peer.
 void connectOutboxListener();
 
 export async function checkDatabase(): Promise<boolean> {
   try {
     await db.query("SELECT 1");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function checkCloudDatabase(): Promise<boolean | null> {
+  if (!cloudDb) return null;
+  try {
+    await cloudDb.query("SELECT 1");
     return true;
   } catch {
     return false;
@@ -129,5 +155,7 @@ export async function closeDatabase(): Promise<void> {
   outboxListener = undefined;
   if (listener) await listener.end().catch(() => undefined);
 
+  await cloudDb?.end().catch(() => undefined);
   await db.end();
+  await localRuntime?.stop();
 }
