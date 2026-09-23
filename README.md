@@ -24,6 +24,12 @@ SOL is the visible host and shared Core for a personal/family intelligence syste
                     │ MCP            │
                     └───────┬────────┘
                             │
+                    local PostgreSQL
+                            │
+                   batched cloud replica
+                            │
+                          Neon
+
               short-lived plugin runtime token
                             │
         ┌───────────────────┼───────────────────┐
@@ -128,16 +134,21 @@ Important policies:
 
 ## Development
 
-Requirements: Node.js 24+, pnpm and PostgreSQL/Neon.
+Requirements: Node.js 24+ and pnpm. SOL Full now carries its own PostgreSQL runtime.
+
+For a local-only development checkout:
 
 ```powershell
 pnpm install
+$env:SOL_CLOUD_SYNC="false"
 pnpm db:check
 pnpm db:migrate
 pnpm test
 pnpm typecheck
 pnpm dev
 ```
+
+For the normal Full profile, configure `DATABASE_URL` with Neon once. SOL seeds the embedded local database from Neon, then runs local-first and uses Neon only as a batched cloud replica.
 
 Open:
 
