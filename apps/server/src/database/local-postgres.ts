@@ -1,5 +1,6 @@
-import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { chmod, copyFile, cp, lstat, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
+import { dirname, resolve } from "node:path";
 import crypto from "node:crypto";
 import EmbeddedPostgres from "embedded-postgres";
 import { config } from "../config.js";
@@ -20,6 +21,52 @@ const DEFAULT_USER = "sol_local";
 const DEFAULT_DATABASE = "sol";
 
 let runtimePromise: Promise<LocalPostgresRuntime> | undefined;
+
+interface PortableSymlink {
+  source: string;
+  target: string;
+}
+
+async function hydratePortableWindowsPostgresFiles(): Promise<void> {
+  if (process.platform !== "win32" || process.arch !== "x64") return;
+
+  const require = createRequire(import.meta.url);
+  const packageEntry = require.resolve("@embedded-postgres/windows-x64");
+  const packageRoot = resolve(dirname(packageEntry), "..");
+  const manifestPath = resolve(packageRoot, "native", "pg-symlinks.json");
+
+  let links: PortableSymlink[];
+  try {
+    links = JSON.parse(await readFile(manifestPath, "utf8")) as PortableSymlink[];
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
+
+  for (const link of links) {
+    const source = resolve(packageRoot, link.source);
+    const target = resolve(packageRoot, link.target);
+
+    try {
+      await stat(target);
+      continue;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+
+    // ZIP extraction and locked-down Windows hosts may not preserve/create
+    // package symlinks. Replace a missing/broken link with a real copy so the
+    // PostgreSQL runtime remains portable without Developer Mode/admin rights.
+    await lstat(target).then(() => rm(target, { recursive: true, force: true })).catch(() => undefined);
+    await mkdir(dirname(target), { recursive: true });
+    const sourceStat = await stat(source);
+    if (sourceStat.isDirectory()) {
+      await cp(source, target, { recursive: true });
+    } else {
+      await copyFile(source, target);
+    }
+  }
+}
 
 function localConnectionString(credentials: LocalCredentials): string {
   const url = new URL("postgresql://127.0.0.1");
@@ -81,6 +128,8 @@ async function ensureDatabase(postgres: EmbeddedPostgres, database: string): Pro
 }
 
 async function startManagedLocalPostgres(): Promise<LocalPostgresRuntime> {
+  await hydratePortableWindowsPostgresFiles();
+
   const root = resolve(config.localDatabaseDir);
   const data = resolve(root, "data");
   await mkdir(root, { recursive: true });
