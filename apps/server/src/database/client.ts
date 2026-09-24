@@ -29,9 +29,9 @@ export const db = new Pool({
 export const cloudDb = databaseRuntimeMode === "hybrid"
   ? new Pool({
       connectionString: normalizePostgresConnectionString(config.databaseUrl),
-      max: Math.min(2, config.databasePoolMax),
-      idleTimeoutMillis: config.databaseIdleTimeoutMs,
-      connectionTimeoutMillis: config.databaseConnectionTimeoutMs,
+      max: 1,
+      idleTimeoutMillis: config.cloudDatabaseIdleTimeoutMs,
+      connectionTimeoutMillis: config.cloudDatabaseConnectionTimeoutMs,
     })
   : undefined;
 
