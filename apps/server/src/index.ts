@@ -244,7 +244,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
       syncBefore.cloudConfigured &&
       !syncBefore.seeded
     ) {
-      await retryCloudSeed();
+      void retryCloudSeed();
     }
 
     const onboarding = await getOnboardingState();
