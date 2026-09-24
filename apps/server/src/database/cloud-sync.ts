@@ -251,7 +251,9 @@ export async function initializeCloudSync(): Promise<void> {
   await loadState();
 
   if (state.seeded) {
-    state.state = (await cloudReachable()) ? "ready" : "offline";
+    // Do not wake Neon merely because SOL started. The last known cloud status is
+    // informational; scheduled sync will establish fresh reachability when needed.
+    state.state = state.cloudReachable === false ? "offline" : "ready";
     await saveState();
     return;
   }
