@@ -85,6 +85,22 @@ jobs:
           Copy-Item packages/database/migrations/*.sql dist/windows/SOL/packages/database/migrations/ -Force
           Copy-Item .env.example dist/windows/SOL/.env.example
 
+      - name: Validate tray PowerShell syntax
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path 'dist/windows/SOL/scripts/windows/sol-tray.ps1'),
+            [ref]$tokens,
+            [ref]$errors
+          ) | Out-Null
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            throw 'SOL tray PowerShell syntax validation failed'
+          }
+          Write-Host 'SOL tray PowerShell syntax is valid'
+
       - name: Write packaged build identity
         shell: pwsh
         run: |

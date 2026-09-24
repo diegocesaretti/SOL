@@ -19,6 +19,8 @@ interface PersistedCloudSyncState {
   lastPullAt?: string;
   lastPushAt?: string;
   lastError?: string;
+  cloudReachable?: boolean;
+  lastCloudCheckAt?: string;
 }
 
 export interface CloudSyncStatus extends PersistedCloudSyncState {
@@ -38,7 +40,6 @@ let state: CloudSyncStatus = {
 let timer: NodeJS.Timeout | undefined;
 let recoveryTimer: NodeJS.Timeout | undefined;
 let busy = false;
-const RECOVERY_RETRY_MS = 60_000;
 
 function quoteIdent(identifier: string): string {
   return `"${identifier.replaceAll('"', '""')}"`;
@@ -61,6 +62,8 @@ async function saveState(): Promise<void> {
     lastPullAt: state.lastPullAt,
     lastPushAt: state.lastPushAt,
     lastError: state.lastError,
+    cloudReachable: state.cloudReachable,
+    lastCloudCheckAt: state.lastCloudCheckAt,
   };
   await writeFile(statePath, JSON.stringify(persisted, null, 2), "utf8");
 }
@@ -192,11 +195,19 @@ async function replaceDatabaseContents(sourcePool: Pool, targetPool: Pool): Prom
 }
 
 async function cloudReachable(): Promise<boolean> {
-  if (!cloudDb) return false;
+  if (!cloudDb) {
+    state.cloudReachable = false;
+    state.lastCloudCheckAt = new Date().toISOString();
+    return false;
+  }
+
+  state.lastCloudCheckAt = new Date().toISOString();
   try {
     await cloudDb.query("SELECT 1");
+    state.cloudReachable = true;
     return true;
   } catch {
+    state.cloudReachable = false;
     return false;
   }
 }
@@ -240,7 +251,9 @@ export async function initializeCloudSync(): Promise<void> {
   await loadState();
 
   if (state.seeded) {
-    state.state = (await cloudReachable()) ? "ready" : "offline";
+    // Do not wake Neon merely because SOL started. The last known cloud status is
+    // informational; scheduled sync will establish fresh reachability when needed.
+    state.state = state.cloudReachable === false ? "offline" : "ready";
     await saveState();
     return;
   }
@@ -287,7 +300,7 @@ export function startCloudSync(): void {
   if (!recoveryTimer) {
     recoveryTimer = setInterval(() => {
       if (!state.seeded) void retryCloudSeed();
-    }, RECOVERY_RETRY_MS);
+    }, config.cloudRecoveryMs);
     recoveryTimer.unref();
   }
 }
