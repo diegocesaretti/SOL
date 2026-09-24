@@ -5,7 +5,7 @@ import "./database/auto-migrate.js";
 import { InMemoryEventBus } from "./core/event-bus.js";
 import { OutboxDispatcher } from "./core/outbox-dispatcher.js";
 import { checkCloudDatabase, checkDatabase, closeDatabase, databaseRuntimeMode } from "./database/client.js";
-import { cloudSyncStatus, startCloudSync, stopCloudSync } from "./database/cloud-sync.js";
+import { cloudSyncStatus, retryCloudSeed, startCloudSync, stopCloudSync } from "./database/cloud-sync.js";
 import { readJsonBody, sendHtml, sendJson } from "./http.js";
 import {
   authenticateRequest,
@@ -220,11 +220,64 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
   }
 
   if (request.method === "GET" && path === "/v1/onboarding") {
-    sendJson(response, 200, await getOnboardingState());
+    const onboarding = await getOnboardingState();
+    const sync = cloudSyncStatus();
+    sendJson(response, 200, {
+      ...onboarding,
+      databaseMode: databaseRuntimeMode,
+      cloudSync: sync,
+      recoveryRequired:
+        !onboarding.configured &&
+        databaseRuntimeMode === "hybrid" &&
+        sync.cloudConfigured &&
+        !sync.seeded,
+    });
+    return;
+  }
+
+  if (request.method === "POST" && path === "/v1/onboarding/recover") {
+    const before = await getOnboardingState();
+    const syncBefore = cloudSyncStatus();
+    if (
+      !before.configured &&
+      databaseRuntimeMode === "hybrid" &&
+      syncBefore.cloudConfigured &&
+      !syncBefore.seeded
+    ) {
+      await retryCloudSeed();
+    }
+
+    const onboarding = await getOnboardingState();
+    const sync = cloudSyncStatus();
+    sendJson(response, 200, {
+      ...onboarding,
+      databaseMode: databaseRuntimeMode,
+      cloudSync: sync,
+      recoveryRequired:
+        !onboarding.configured &&
+        databaseRuntimeMode === "hybrid" &&
+        sync.cloudConfigured &&
+        !sync.seeded,
+    });
     return;
   }
 
   if (request.method === "POST" && path === "/v1/onboarding") {
+    const sync = cloudSyncStatus();
+    if (
+      databaseRuntimeMode === "hybrid" &&
+      sync.cloudConfigured &&
+      !sync.seeded
+    ) {
+      sendJson(response, 409, {
+        error: "cloud_recovery_pending",
+        message:
+          "SOL is waiting to recover the existing installation from Neon before creating a new household.",
+        cloudSync: sync,
+      });
+      return;
+    }
+
     const input = await jsonBody<BootstrapInput>(request, response);
     if (!input) return;
     try {
