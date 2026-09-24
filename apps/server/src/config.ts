@@ -82,8 +82,11 @@ export const config = {
   databasePoolMax: integerEnv("SOL_DB_POOL_MAX", 4),
   databaseIdleTimeoutMs: integerEnv("SOL_DB_IDLE_TIMEOUT_MS", 15_000),
   databaseConnectionTimeoutMs: integerEnv("SOL_DB_CONNECT_TIMEOUT_MS", 15_000),
+  cloudDatabaseIdleTimeoutMs: integerEnv("SOL_CLOUD_DB_IDLE_TIMEOUT_MS", 1_000),
+  cloudDatabaseConnectionTimeoutMs: integerEnv("SOL_CLOUD_DB_CONNECT_TIMEOUT_MS", 5_000),
   localPostgresPort: integerEnv("SOL_LOCAL_POSTGRES_PORT", 55432),
   cloudSyncMs: integerEnv("SOL_CLOUD_SYNC_MS", 6 * 60 * 60 * 1000),
+  cloudRecoveryMs: integerEnv("SOL_CLOUD_RECOVERY_MS", 15 * 60 * 1000),
   sessionDays: integerEnv("SOL_SESSION_DAYS", 30),
   cookieSecure: booleanEnv("SOL_COOKIE_SECURE", false),
 
