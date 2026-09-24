@@ -123,6 +123,25 @@ jobs:
             Pop-Location
           }
 
+      - name: Smoke test embedded PostgreSQL lifecycle
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $smokeData = Join-Path $env:RUNNER_TEMP 'sol-postgres-smoke'
+          Remove-Item $smokeData -Recurse -Force -ErrorAction SilentlyContinue
+          $env:SOL_DATA_DIR = $smokeData
+          $env:SOL_DB_MODE = 'hybrid'
+          $env:SOL_LOCAL_POSTGRES_PORT = '55439'
+          $node = (Resolve-Path 'dist/windows/SOL/runtime/node.exe').Path
+          Push-Location 'dist/windows/SOL/apps/server'
+          try {
+            & $node --input-type=module -e "const { ensureLocalPostgres } = await import('./dist/database/local-postgres.js'); const runtime = await ensureLocalPostgres(); console.log('embedded PostgreSQL lifecycle smoke test ready'); await runtime.stop(); console.log('embedded PostgreSQL lifecycle smoke test stopped');"
+            if ($LASTEXITCODE -ne 0) { throw 'Embedded PostgreSQL lifecycle smoke test failed' }
+          } finally {
+            Pop-Location
+            Remove-Item $smokeData -Recurse -Force -ErrorAction SilentlyContinue
+          }
+
       - name: Verify core package structure
         shell: pwsh
         run: |
