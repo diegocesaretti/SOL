@@ -4,7 +4,7 @@ import { config } from "./config.js";
 import "./database/auto-migrate.js";
 import { InMemoryEventBus } from "./core/event-bus.js";
 import { OutboxDispatcher } from "./core/outbox-dispatcher.js";
-import { checkCloudDatabase, checkDatabase, closeDatabase, databaseRuntimeMode } from "./database/client.js";
+import { checkDatabase, closeDatabase, databaseRuntimeMode } from "./database/client.js";
 import { cloudSyncStatus, retryCloudSeed, startCloudSync, stopCloudSync } from "./database/cloud-sync.js";
 import { readJsonBody, sendHtml, sendJson } from "./http.js";
 import {
@@ -186,28 +186,31 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
 
   if (request.method === "GET" && path === "/health") {
     const database = await checkDatabase();
-    const cloudDatabase = await checkCloudDatabase();
+    const sync = cloudSyncStatus();
     sendJson(response, database ? 200 : 503, {
       ok: database,
       service: "sol-core",
       database,
       databaseMode: databaseRuntimeMode,
-      cloudDatabase,
-      cloudSync: cloudSyncStatus(),
+      // Never probe Neon from health checks. Tray/monitoring can poll this endpoint
+      // freely without waking cloud compute or blocking local health on cloud quota.
+      cloudDatabase: sync.cloudReachable ?? null,
+      cloudSync: sync,
     });
     return;
   }
 
   if (request.method === "GET" && path === "/v1/system") {
     const database = await checkDatabase();
+    const sync = cloudSyncStatus();
     sendJson(response, 200, {
       name: "SOL",
       architecture: "family-first data/knowledge OS + MCP",
       version: solVersion,
       database,
       databaseMode: databaseRuntimeMode,
-      cloudDatabase: await checkCloudDatabase(),
-      cloudSync: cloudSyncStatus(),
+      cloudDatabase: sync.cloudReachable ?? null,
+      cloudSync: sync,
       reasoningInterface: "mcp",
       aiProviderMode: config.aiProvider,
       optionalAiProviders: ["openai", "codex"],
