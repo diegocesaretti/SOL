@@ -36,7 +36,9 @@ let state: CloudSyncStatus = {
 };
 
 let timer: NodeJS.Timeout | undefined;
+let recoveryTimer: NodeJS.Timeout | undefined;
 let busy = false;
+const RECOVERY_RETRY_MS = 60_000;
 
 function quoteIdent(identifier: string): string {
   return `"${identifier.replaceAll('"', '""')}"`;
@@ -199,6 +201,40 @@ async function cloudReachable(): Promise<boolean> {
   }
 }
 
+export async function retryCloudSeed(): Promise<boolean> {
+  if (databaseRuntimeMode !== "hybrid" || !cloudDb) return false;
+  if (state.seeded) return true;
+  if (busy) return false;
+
+  busy = true;
+  try {
+    if (!(await cloudReachable())) {
+      state.state = "unseeded_offline";
+      state.lastError = "Cloud database is unavailable and the local replica has not been seeded yet.";
+      console.warn("[database] Neon unavailable before local seed; SOL will keep retrying recovery");
+      return false;
+    }
+
+    state.state = "seeding";
+    state.lastError = undefined;
+    await migrateDatabase(cloudDb);
+    await replaceDatabaseContents(cloudDb, db);
+    state.seeded = true;
+    state.lastPullAt = new Date().toISOString();
+    state.state = "ready";
+    console.log("[database] Local PostgreSQL seeded from Neon");
+    return true;
+  } catch (error) {
+    state.state = "error";
+    state.lastError = error instanceof Error ? error.message : String(error);
+    console.error("[database] Cloud seed failed; SOL will retry recovery", error);
+    return false;
+  } finally {
+    busy = false;
+    await saveState();
+  }
+}
+
 export async function initializeCloudSync(): Promise<void> {
   if (databaseRuntimeMode !== "hybrid" || !cloudDb) return;
   await loadState();
@@ -209,31 +245,7 @@ export async function initializeCloudSync(): Promise<void> {
     return;
   }
 
-  if (!(await cloudReachable())) {
-    state.state = "unseeded_offline";
-    state.lastError = "Cloud database is unavailable and the local replica has not been seeded yet.";
-    await saveState();
-    console.warn("[database] Neon unavailable before local seed; SOL will run locally without cloud history");
-    return;
-  }
-
-  state.state = "seeding";
-  state.lastError = undefined;
-  await saveState();
-  try {
-    await migrateDatabase(cloudDb);
-    await replaceDatabaseContents(cloudDb, db);
-    state.seeded = true;
-    state.lastPullAt = new Date().toISOString();
-    state.state = "ready";
-    console.log("[database] Local PostgreSQL seeded from Neon");
-  } catch (error) {
-    state.state = "error";
-    state.lastError = error instanceof Error ? error.message : String(error);
-    throw error;
-  } finally {
-    await saveState();
-  }
+  await retryCloudSeed();
 }
 
 export async function syncLocalToCloud(): Promise<boolean> {
@@ -265,14 +277,26 @@ export async function syncLocalToCloud(): Promise<boolean> {
 }
 
 export function startCloudSync(): void {
-  if (databaseRuntimeMode !== "hybrid" || !cloudDb || timer) return;
-  timer = setInterval(() => void syncLocalToCloud(), config.cloudSyncMs);
-  timer.unref();
+  if (databaseRuntimeMode !== "hybrid" || !cloudDb) return;
+
+  if (!timer) {
+    timer = setInterval(() => void syncLocalToCloud(), config.cloudSyncMs);
+    timer.unref();
+  }
+
+  if (!recoveryTimer) {
+    recoveryTimer = setInterval(() => {
+      if (!state.seeded) void retryCloudSeed();
+    }, RECOVERY_RETRY_MS);
+    recoveryTimer.unref();
+  }
 }
 
 export function stopCloudSync(): void {
   if (timer) clearInterval(timer);
+  if (recoveryTimer) clearInterval(recoveryTimer);
   timer = undefined;
+  recoveryTimer = undefined;
 }
 
 export function cloudSyncStatus(): CloudSyncStatus {
