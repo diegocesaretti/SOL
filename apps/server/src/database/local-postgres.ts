@@ -70,9 +70,10 @@ function windowsPgCtlPath(): string {
 async function runProcess(
   executable: string,
   args: string[],
-  options: { allowExitCodes?: number[]; env?: NodeJS.ProcessEnv } = {},
+  options: { allowExitCodes?: number[]; env?: NodeJS.ProcessEnv; timeoutMs?: number } = {},
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   const allowExitCodes = options.allowExitCodes ?? [0];
+  const timeoutMs = options.timeoutMs ?? 30_000;
 
   return await new Promise((resolvePromise, rejectPromise) => {
     const child = spawn(executable, args, {
@@ -83,14 +84,22 @@ async function runProcess(
 
     let stdout = "";
     let stderr = "";
+    let settled = false;
+
     child.stdout?.on("data", (chunk: Buffer) => {
       stdout += chunk.toString("utf8");
     });
     child.stderr?.on("data", (chunk: Buffer) => {
       stderr += chunk.toString("utf8");
     });
-    child.on("error", rejectPromise);
-    child.on("close", (code) => {
+
+    const finish = (code: number | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+
       const exitCode = code ?? -1;
       if (allowExitCodes.includes(exitCode)) {
         resolvePromise({ code: exitCode, stdout, stderr });
@@ -102,7 +111,34 @@ async function runProcess(
           `Embedded PostgreSQL command failed (exit ${exitCode}): ${executable} ${args.join(" ")}${detail ? `\n${detail}` : ""}`,
         ),
       );
+    };
+
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+      child.kill();
+      rejectPromise(
+        new Error(
+          `Embedded PostgreSQL command timed out after ${timeoutMs} ms: ${executable} ${args.join(" ")}`,
+        ),
+      );
+    }, timeoutMs);
+
+    child.on("error", (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+      rejectPromise(error);
     });
+
+    // On Windows pg_ctl can exit successfully while postgres.exe keeps inherited
+    // stdio handles open. Waiting for "close" can therefore deadlock SOL startup.
+    // The "exit" event reflects the pg_ctl process lifecycle itself.
+    child.on("exit", finish);
   });
 }
 
