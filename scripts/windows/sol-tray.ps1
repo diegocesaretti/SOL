@@ -1,16 +1,34 @@
 param(
   [string]$HostName = "127.0.0.1",
   [int]$Port = 3000,
-  [int]$LauncherPid = 0
+  [int]$LauncherPid = 0,
+  [string]$DataDir = ""
 )
 
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName System.Drawing
+if ([string]::IsNullOrWhiteSpace($DataDir)) {
+  $DataDir = Join-Path $env:LOCALAPPDATA "SOL"
+}
+$logDir = Join-Path $DataDir "logs"
+New-Item -ItemType Directory -Force $logDir | Out-Null
+$logPath = Join-Path $logDir "tray.log"
+
+function Write-TrayLog([string]$message) {
+  try {
+    Add-Content -Path $logPath -Value ("[{0}] {1}" -f [DateTimeOffset]::Now.ToString("o"), $message) -Encoding UTF8
+  } catch {}
+}
+
+Write-TrayLog "Tray starting. Host=$HostName Port=$Port LauncherPid=$LauncherPid"
+
+try {
+  Add-Type -AssemblyName System.Windows.Forms
+  Add-Type -AssemblyName System.Drawing
+} catch {
+  Write-TrayLog ("Failed to load WinForms assemblies: " + $_.Exception.Message)
+  throw
+}
 
 $baseUrl = "http://${HostName}:${Port}"
-$notify = New-Object System.Windows.Forms.NotifyIcon
-$notify.Visible = $true
-$notify.Text = "SOL · iniciando"
 
 function New-SolIcon([System.Drawing.Color]$color) {
   $bmp = New-Object System.Drawing.Bitmap 32, 32
@@ -25,7 +43,9 @@ function New-SolIcon([System.Drawing.Color]$color) {
   $format.Alignment = [System.Drawing.StringAlignment]::Center
   $format.LineAlignment = [System.Drawing.StringAlignment]::Center
   $g.DrawString("S", $font, $white, [System.Drawing.RectangleF]::new(2,1,28,28), $format)
-  $icon = [System.Drawing.Icon]::FromHandle($bmp.GetHicon())
+  $rawIcon = [System.Drawing.Icon]::FromHandle($bmp.GetHicon())
+  $icon = $rawIcon.Clone()
+  $rawIcon.Dispose()
   $format.Dispose(); $white.Dispose(); $font.Dispose(); $brush.Dispose(); $g.Dispose(); $bmp.Dispose()
   return $icon
 }
@@ -33,7 +53,12 @@ function New-SolIcon([System.Drawing.Color]$color) {
 $greenIcon = New-SolIcon ([System.Drawing.Color]::FromArgb(50, 190, 105))
 $redIcon = New-SolIcon ([System.Drawing.Color]::FromArgb(220, 75, 75))
 $yellowIcon = New-SolIcon ([System.Drawing.Color]::FromArgb(220, 165, 55))
+
+$notify = New-Object System.Windows.Forms.NotifyIcon
 $notify.Icon = $yellowIcon
+$notify.Text = "SOL · iniciando"
+$notify.Visible = $true
+Write-TrayLog "NotifyIcon visible"
 
 $menu = New-Object System.Windows.Forms.ContextMenuStrip
 $openInputs = $menu.Items.Add("Abrir Inputs")
@@ -51,10 +76,10 @@ $openInputs.add_Click({ Open-Sol "/inputs" })
 $openServices.add_Click({ Open-Sol "/inputs/plugins/ui" })
 $openHome.add_Click({ Open-Sol "/" })
 $openLife.add_Click({ Open-Sol "/life" })
-$notify.add_DoubleClick({ Open-Sol "/inputs/plugins/ui" })
+$notify.add_DoubleClick({ Open-Sol "/" })
 
-$script:failedChecks = 0
 $script:shouldExit = $false
+$script:lastStatus = ""
 $exitItem.add_Click({
   $script:shouldExit = $true
   if ($LauncherPid -gt 0) {
@@ -62,26 +87,47 @@ $exitItem.add_Click({
   }
 })
 
+function Set-TrayStatus([string]$status, [System.Drawing.Icon]$icon, [string]$text) {
+  $notify.Icon = $icon
+  $notify.Text = $text
+  if ($script:lastStatus -ne $status) {
+    Write-TrayLog ("Status=" + $status)
+    $script:lastStatus = $status
+  }
+}
+
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 5000
 $timer.add_Tick({
-  try {
-    $response = Invoke-RestMethod -Uri ($baseUrl + "/health") -Method Get -TimeoutSec 2
-    if ($response.ok -eq $true -and $response.database -eq $true) {
-      $notify.Icon = $greenIcon
-      $notify.Text = "SOL · funcionando"
-      $script:failedChecks = 0
-    } else {
-      $notify.Icon = $redIcon
-      $notify.Text = "SOL · error de base de datos"
-      $script:failedChecks++
+  if ($LauncherPid -gt 0) {
+    try {
+      Get-Process -Id $LauncherPid -ErrorAction Stop | Out-Null
+    } catch {
+      Write-TrayLog "Launcher exited; closing tray"
+      $script:shouldExit = $true
     }
-  } catch {
-    $notify.Icon = $redIcon
-    $notify.Text = "SOL · no responde"
-    $script:failedChecks++
   }
-  if ($script:shouldExit -or $script:failedChecks -ge 24) {
+
+  if (-not $script:shouldExit) {
+    try {
+      $response = Invoke-RestMethod -Uri ($baseUrl + "/health") -Method Get -TimeoutSec 2
+      if ($response.ok -eq $true -and $response.database -eq $true) {
+        if ($response.databaseMode -eq "hybrid" -and $response.cloudSync.seeded -eq $false) {
+          Set-TrayStatus "local-awaiting-cloud" $yellowIcon "SOL · local · esperando Neon"
+        } elseif ($response.databaseMode -eq "hybrid" -and $response.cloudDatabase -eq $false) {
+          Set-TrayStatus "local-cloud-offline" $yellowIcon "SOL · funcionando · Neon offline"
+        } else {
+          Set-TrayStatus "healthy" $greenIcon "SOL · funcionando"
+        }
+      } else {
+        Set-TrayStatus "database-error" $redIcon "SOL · error de base de datos"
+      }
+    } catch {
+      Set-TrayStatus "unreachable" $redIcon "SOL · no responde"
+    }
+  }
+
+  if ($script:shouldExit) {
     $timer.Stop()
     $notify.Visible = $false
     [System.Windows.Forms.Application]::Exit()
@@ -89,9 +135,12 @@ $timer.add_Tick({
 })
 $timer.Start()
 
-[System.Windows.Forms.Application]::Run()
-
-$notify.Visible = $false
-$notify.Dispose()
-$timer.Dispose()
-$greenIcon.Dispose(); $redIcon.Dispose(); $yellowIcon.Dispose()
+try {
+  [System.Windows.Forms.Application]::Run()
+} finally {
+  $notify.Visible = $false
+  $notify.Dispose()
+  $timer.Dispose()
+  $greenIcon.Dispose(); $redIcon.Dispose(); $yellowIcon.Dispose()
+  Write-TrayLog "Tray stopped"
+}
