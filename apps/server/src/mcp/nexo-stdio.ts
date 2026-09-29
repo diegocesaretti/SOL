@@ -17,11 +17,11 @@ import { correctMemoryFact, forgetMemoryFact, searchMemories } from "../modules/
 import { loadPluginMcpTools, registerPluginMcpToolsOnServer } from "./plugin-tools.js";
 
 async function loadToken(): Promise<string> {
-  const direct = process.env.NEXO_MCP_TOKEN?.trim() || process.env.SOL_MCP_TOKEN?.trim();
+  const direct = process.env.SOL_MCP_TOKEN?.trim() || process.env.NEXO_MCP_TOKEN?.trim();
   if (direct) return direct;
-  const file = process.env.NEXO_MCP_TOKEN_FILE?.trim() || process.env.SOL_MCP_TOKEN_FILE?.trim();
+  const file = process.env.SOL_MCP_TOKEN_FILE?.trim() || process.env.NEXO_MCP_TOKEN_FILE?.trim();
   if (file) return (await readFile(file, "utf8")).trim();
-  throw new Error("Nexo MCP requires NEXO_MCP_TOKEN (SOL_MCP_TOKEN remains supported for compatibility)");
+  throw new Error("SOL MCP requires SOL_MCP_TOKEN or SOL_MCP_TOKEN_FILE (legacy NEXO_MCP_* aliases remain supported)");
 }
 
 function text(value: unknown) {
@@ -34,59 +34,71 @@ async function main(): Promise<void> {
   const access = await authenticateMcpAccess(await loadToken());
   if (!access) {
     throw new Error(
-      "Nexo MCP authentication failed: token is invalid, expired, revoked, or member is inactive",
+      "SOL MCP authentication failed: token is invalid, expired, revoked, or member is inactive",
     );
   }
   const { principal, scopes } = access;
   const pluginTools = await loadPluginMcpTools(principal, scopes);
 
   serveStdio(() => {
-    const server = new McpServer({ name: "nexo", version: "0.12.0" });
+    const server = new McpServer({ name: "sol", version: "1.0.0" });
+
+    const statusTool = async () => {
+      const status = await getMcpStatus(principal);
+      const sources = Array.isArray(status.sources) ? status.sources as Array<Record<string, unknown>> : [];
+      return text({
+        product: "SOL",
+        role: "member-scoped data, memory and plugin-tool gateway for MCP clients",
+        member: status.member,
+        sources,
+        knowledge: status.knowledge,
+        recentTimelineItems: status.recentTimelineItems,
+        pluginTools: pluginTools.map((tool) => ({
+          pluginId: tool.pluginId,
+          name: tool.name,
+          requiredScope: tool.requiredScope,
+        })),
+        mcpScopes: scopes,
+        policy: {
+          privateDataIsMemberScoped: true,
+          householdOwnerIsNotUniversalPrivateReader: true,
+          externalMcpClientDoesReasoning: true,
+          internalAssistantBrain: false,
+          directExternalActionsRequireScope: "actions",
+          canInvokeExternalActions: scopes.includes("actions"),
+          canSubmitObservations: scopes.includes("submit"),
+          canWriteUserConfirmedMemory: scopes.includes("submit"),
+          memoryOwner: "SOL",
+          provenanceRequired: true,
+        },
+      });
+    };
+
+    server.registerTool(
+      "sol_status",
+      {
+        description:
+          "Describe the authenticated SOL member, visible sources, memory inventory, plugin tools, MCP scopes and privacy policy. Use this to discover what SOL can access for this member.",
+        inputSchema: z.object({}),
+      },
+      statusTool,
+    );
 
     server.registerTool(
       "nexo_status",
       {
         description:
-          "Describe the authenticated Nexo member, WhatsApp/memory inventory, MCP scopes and privacy policy. Nexo is a context/memory complement for the external Codex assistant; it is not the assistant brain.",
+          "Legacy compatibility alias for sol_status. Prefer sol_status for new clients.",
         inputSchema: z.object({}),
       },
-      async () => {
-        const status = await getMcpStatus(principal);
-        const sources = Array.isArray(status.sources) ? status.sources as Array<Record<string, unknown>> : [];
-        return text({
-          product: "Nexo",
-          role: "SOL memory/context for Codex; external providers are installed as plugins",
-          member: status.member,
-          sources,
-          knowledge: status.knowledge,
-          recentTimelineItems: status.recentTimelineItems,
-          pluginTools: pluginTools.map((tool) => ({
-            pluginId: tool.pluginId,
-            name: tool.name,
-            requiredScope: tool.requiredScope,
-          })),
-          mcpScopes: scopes,
-          policy: {
-            privateDataIsMemberScoped: true,
-            householdOwnerIsNotUniversalPrivateReader: true,
-            externalCodexDoesReasoning: true,
-            internalAssistantBrain: false,
-            directExternalActionsRequireScope: "actions",
-            canInvokeExternalActions: scopes.includes("actions"),
-            canSubmitObservations: scopes.includes("submit"),
-            canWriteUserConfirmedMemory: scopes.includes("submit"),
-            memoryOwner: "SOL",
-            provenanceRequired: true,
-          },
-        });
-      },
+      statusTool,
     );
 
     server.registerTool(
       "get_timeline",
       {
         description:
-          "Return the authenticated member's permission-filtered Nexo Life timeline. Use this for recent context; private records of other members are never retrieved.",
+          "Return the authenticated member's permission-filtered SOL Life timeline. Use this for recent context; private records of other members are never retrieved.",
         inputSchema: z.object({
           limit: z.number().int().min(10).max(120).optional(),
           before: z.string().datetime({ offset: true }).optional(),
@@ -99,7 +111,7 @@ async function main(): Promise<void> {
       "search_life",
       {
         description:
-          "Search permission-filtered Nexo Life observations and durable local records. Prefer search_whatsapp when the question is specifically about a WhatsApp conversation.",
+          "Search permission-filtered SOL Life observations and durable local records. Prefer search_whatsapp when the question is specifically about a WhatsApp conversation.",
         inputSchema: z.object({
           query: z.string().min(2).max(240),
           limit: z.number().int().min(1).max(60).optional(),
