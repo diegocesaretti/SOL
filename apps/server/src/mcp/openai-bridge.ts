@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { config } from "../config.js";
+import { authenticateMcpAccess } from "../modules/mcp/access.js";
 import { readOpenAiBridgeState, writeOpenAiBridgeState, type OpenAiBridgeState } from "./openai-bridge-state.js";
 
 const CORE_READ = new Set([
@@ -95,6 +96,12 @@ function parseTextResult(result: any): unknown {
 
 async function main(): Promise<void> {
   const token = await loadMcpToken();
+  async function assertMcpAccessActive(): Promise<void> {
+    if (!(await authenticateMcpAccess(token))) {
+      throw new Error("SOL MCP access was revoked, expired or disabled; stopping the OpenAI bridge");
+    }
+  }
+  await assertMcpAccessActive();
   const gateway = gatewayUrl();
   const command = stdioCommand();
   const client = new Client({ name: "sol-openai-plugin-bridge", version: "1.0.0" });
@@ -169,6 +176,7 @@ async function main(): Promise<void> {
   }
 
   async function publishCatalog(): Promise<void> {
+    await assertMcpAccessActive();
     await enroll();
     const response = await request("/bridge/catalog", {
       method: "POST",
@@ -249,6 +257,13 @@ async function main(): Promise<void> {
 
     const job = await response.json() as { id?: string; tool?: string; arguments?: Record<string, unknown> };
     if (!job.id || !job.tool) continue;
+    try {
+      await assertMcpAccessActive();
+    } catch (cause) {
+      console.error(cause instanceof Error ? cause.message : String(cause));
+      await client.close().catch(() => undefined);
+      process.exit(2);
+    }
     let result: unknown;
     let ok = true;
     let error: string | undefined;
