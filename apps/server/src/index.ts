@@ -216,7 +216,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
       optionalAiProviders: ["openai", "codex"],
       sourceMode: "plugins-only",
       sources: [],
-      interfaces: ["mcp_stdio", "web", "plugin_runtime", "windows_tray"],
+      interfaces: ["mcp_stdio", "openai_secure_mcp_tunnel_ready", "web", "plugin_runtime", "windows_tray"],
       views: ["inputs", "outputs", "life_timeline", "people", "projects", "mcp_access"],
     });
     return;
