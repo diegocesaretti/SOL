@@ -12,7 +12,11 @@ function optional(name: string): string | undefined {
 }
 
 const port = intEnv("PORT", 8787);
-const publicOrigin = (optional("SOL_GATEWAY_PUBLIC_ORIGIN") ?? `http://127.0.0.1:${port}`).replace(/\/$/, "");
+const renderHostname = optional("RENDER_EXTERNAL_HOSTNAME");
+const publicOrigin = (
+  optional("SOL_GATEWAY_PUBLIC_ORIGIN") ??
+  (renderHostname ? `https://${renderHostname}` : `http://127.0.0.1:${port}`)
+).replace(/\/$/, "");
 const signingSecret = optional("SOL_GATEWAY_SIGNING_SECRET") ?? (process.env.NODE_ENV === "production" ? "" : "sol-dev-signing-secret-change-me-please");
 
 if (!signingSecret || Buffer.byteLength(signingSecret, "utf8") < 32) {
