@@ -1,6 +1,6 @@
 {
   "name": "@sol/server",
-  "version": "0.15.20",
+  "version": "0.15.21",
   "private": true,
   "type": "module",
   "scripts": {
@@ -12,10 +12,12 @@
     "db:check": "tsx src/database/check.ts",
     "db:migrate": "tsx src/database/migrate.ts",
     "mcp": "tsx src/mcp/nexo-stdio.ts",
+    "mcp:bridge": "tsx src/mcp/openai-bridge.ts",
     "mcp:token": "tsx src/mcp/create-token.ts",
     "knowledge:consolidate": "tsx src/knowledge/consolidate.ts"
   },
   "dependencies": {
+    "@modelcontextprotocol/client": "2.0.0",
     "@modelcontextprotocol/server": "2.0.0",
     "pg": "^8.16.3",
     "zod": "4.4.3",

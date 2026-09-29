@@ -105,6 +105,12 @@ WhatsApp is provided by the **Nexo · WhatsApp** plugin. When possible, Nexo ide
 
 The previous native WhatsApp runtime and SOL-WhatsApp runtime are not part of SOL Core anymore.
 
+## ChatGPT public plugin
+
+SOL can also expose its member-scoped MCP through a public HTTPS gateway for a publishable ChatGPT plugin while keeping the home installation private. The local `sol-openai-bridge.ps1` process makes outbound-only HTTPS requests, mirrors the tools already exposed by SOL MCP and executes calls locally. The gateway handles Streamable HTTP MCP plus OAuth 2.1/PKCE.
+
+See [docs/OPENAI_PLUGIN.md](docs/OPENAI_PLUGIN.md) for deployment, pairing and plugin submission.
+
 ## MCP
 
 The active MCP surface exposes SOL-owned data and memory. Provider-specific tools such as Home Assistant control or marketplace actions are not hard-coded into Core; they belong to the relevant plugin/tool registration boundary.

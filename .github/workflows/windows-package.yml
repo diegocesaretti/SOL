@@ -83,13 +83,14 @@ jobs:
           Copy-Item (Get-Command node).Source dist/windows/SOL/runtime/node.exe
           Copy-Item scripts/windows/sol-tray.ps1 dist/windows/SOL/scripts/windows/sol-tray.ps1
           Copy-Item scripts/windows/sol-mcp.ps1 dist/windows/SOL/scripts/windows/sol-mcp.ps1
+          Copy-Item scripts/windows/sol-openai-bridge.ps1 dist/windows/SOL/scripts/windows/sol-openai-bridge.ps1
           Copy-Item packages/database/migrations/*.sql dist/windows/SOL/packages/database/migrations/ -Force
           Copy-Item .env.example dist/windows/SOL/.env.example
 
       - name: Validate packaged PowerShell syntax
         shell: pwsh
         run: |
-          foreach ($script in @('sol-tray.ps1', 'sol-mcp.ps1')) {
+          foreach ($script in @('sol-tray.ps1', 'sol-mcp.ps1', 'sol-openai-bridge.ps1')) {
             $tokens = $null
             $errors = $null
             $path = Resolve-Path ("dist/windows/SOL/scripts/windows/" + $script)
@@ -135,7 +136,7 @@ jobs:
           $node = (Resolve-Path 'dist/windows/SOL/runtime/node.exe').Path
           Push-Location 'dist/windows/SOL/apps/server'
           try {
-            & $node --input-type=module -e "await import('pg'); await import('zod'); await import('@modelcontextprotocol/server'); await import('embedded-postgres'); console.log('portable SOL Core dependencies resolve')"
+            & $node --input-type=module -e "await import('pg'); await import('zod'); await import('@modelcontextprotocol/server'); await import('@modelcontextprotocol/client'); await import('embedded-postgres'); console.log('portable SOL Core dependencies resolve')"
             if ($LASTEXITCODE -ne 0) { throw 'Portable Node dependency resolution failed' }
             & $node --input-type=module -e "await import('./dist/database/client.js'); await import('./dist/modules/plugins/bundled.js'); console.log('database and bundled-plugin runtimes import successfully')"
             if ($LASTEXITCODE -ne 0) { throw 'Portable SOL runtime import failed' }
@@ -175,11 +176,13 @@ jobs:
             'dist/windows/SOL/apps/server/dist/modules/plugins/bundled.js',
             'dist/windows/SOL/apps/server/node_modules/pg/package.json',
             'dist/windows/SOL/apps/server/node_modules/zod/package.json',
+            'dist/windows/SOL/apps/server/node_modules/@modelcontextprotocol/client/package.json',
             'dist/windows/SOL/apps/server/node_modules/embedded-postgres/package.json',
             'dist/windows/SOL/apps/server/node_modules/@embedded-postgres/windows-x64/package.json',
             'dist/windows/SOL/packages/database/migrations/0021_connections.sql',
             'dist/windows/SOL/scripts/windows/sol-tray.ps1',
             'dist/windows/SOL/scripts/windows/sol-mcp.ps1',
+            'dist/windows/SOL/scripts/windows/sol-openai-bridge.ps1',
             'dist/windows/SOL/.env.example'
           )
           foreach ($path in $required) { if (-not (Test-Path $path)) { throw "Missing package component: $path" } }
