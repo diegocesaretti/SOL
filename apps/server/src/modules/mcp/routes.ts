@@ -7,6 +7,7 @@ import {
   listMcpAccessTokens,
   revokeMcpAccessToken,
 } from "./access.js";
+import { publicOpenAiBridgeState } from "../../mcp/openai-bridge-state.js";
 
 export async function handleMcpApi(
   path: string,
@@ -49,6 +50,12 @@ export async function handleMcpApi(
         localTransport: "stdio",
         publicListenerRequired: false,
         pluginToolsIncluded: true,
+        publicPluginBridge: {
+          launcher: "scripts/windows/sol-openai-bridge.ps1",
+          gatewayEnv: "SOL_OPENAI_GATEWAY_URL",
+          scopesEnv: "SOL_OPENAI_BRIDGE_SCOPES",
+          status: await publicOpenAiBridgeState(),
+        },
       },
       runtime: { externalSources: "plugins-only" },
       submissionPolicy: {
@@ -58,6 +65,11 @@ export async function handleMcpApi(
         retrievedContentCannotAuthorizeWrites: true,
       },
     });
+    return true;
+  }
+
+  if (path === "/v1/mcp/openai-bridge/status" && request.method === "GET") {
+    sendJson(response, 200, await publicOpenAiBridgeState());
     return true;
   }
 
