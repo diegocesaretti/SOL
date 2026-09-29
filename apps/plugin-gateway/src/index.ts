@@ -226,14 +226,17 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
     return;
   }
 
+  // Bridge routes consume the original IncomingMessage body. Handle them before
+  // converting the request into a Fetch API Request, because toWebRequest() reads
+  // the stream body and would otherwise leave /bridge/catalog and job results empty.
+  if (await handleBridge(path, request, response)) return;
+
   const webRequest = await toWebRequest(request);
   const oauth = await handleOAuth(webRequest);
   if (oauth) {
     await sendWebResponse(response, oauth);
     return;
   }
-
-  if (await handleBridge(path, request, response)) return;
 
   if (path === "/mcp") {
     const access = verifyAccessToken(webRequest.headers.get("authorization"));
