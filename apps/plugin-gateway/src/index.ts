@@ -238,7 +238,7 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
   if (path === "/mcp") {
     const access = verifyAccessToken(webRequest.headers.get("authorization"));
     if (!access) {
-      json(response, 401, { error: "unauthorized" }, { "www-authenticate": oauthChallenge(["sol.read"]) });
+      json(response, 401, { error: "unauthorized" }, { "www-authenticate": oauthChallenge(["sol.read", "sol.submit", "sol.actions"]) });
       return;
     }
     const result = await mcpHandler.fetch(webRequest, {
