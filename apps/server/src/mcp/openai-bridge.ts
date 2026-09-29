@@ -153,7 +153,7 @@ async function main(): Promise<void> {
     const response = await fetch(`${gateway}/bridge/enroll`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ instanceId: state?.instanceId || undefined }),
+      body: JSON.stringify({}),
       signal: AbortSignal.timeout(15_000),
     });
     if (!response.ok) throw new Error(`Bridge enrollment failed: HTTP ${response.status}`);
