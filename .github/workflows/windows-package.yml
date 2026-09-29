@@ -82,24 +82,28 @@ jobs:
           New-Item -ItemType Directory -Force dist/windows/SOL/packages/database/migrations | Out-Null
           Copy-Item (Get-Command node).Source dist/windows/SOL/runtime/node.exe
           Copy-Item scripts/windows/sol-tray.ps1 dist/windows/SOL/scripts/windows/sol-tray.ps1
+          Copy-Item scripts/windows/sol-mcp.ps1 dist/windows/SOL/scripts/windows/sol-mcp.ps1
           Copy-Item packages/database/migrations/*.sql dist/windows/SOL/packages/database/migrations/ -Force
           Copy-Item .env.example dist/windows/SOL/.env.example
 
-      - name: Validate tray PowerShell syntax
+      - name: Validate packaged PowerShell syntax
         shell: pwsh
         run: |
-          $tokens = $null
-          $errors = $null
-          [System.Management.Automation.Language.Parser]::ParseFile(
-            (Resolve-Path 'dist/windows/SOL/scripts/windows/sol-tray.ps1'),
-            [ref]$tokens,
-            [ref]$errors
-          ) | Out-Null
-          if ($errors.Count -gt 0) {
-            $errors | ForEach-Object { Write-Error $_.Message }
-            throw 'SOL tray PowerShell syntax validation failed'
+          foreach ($script in @('sol-tray.ps1', 'sol-mcp.ps1')) {
+            $tokens = $null
+            $errors = $null
+            $path = Resolve-Path ("dist/windows/SOL/scripts/windows/" + $script)
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              $path,
+              [ref]$tokens,
+              [ref]$errors
+            ) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Error $_.Message }
+              throw "PowerShell syntax validation failed: $script"
+            }
+            Write-Host "PowerShell syntax is valid: $script"
           }
-          Write-Host 'SOL tray PowerShell syntax is valid'
 
       - name: Write packaged build identity
         shell: pwsh
@@ -175,6 +179,7 @@ jobs:
             'dist/windows/SOL/apps/server/node_modules/@embedded-postgres/windows-x64/package.json',
             'dist/windows/SOL/packages/database/migrations/0021_connections.sql',
             'dist/windows/SOL/scripts/windows/sol-tray.ps1',
+            'dist/windows/SOL/scripts/windows/sol-mcp.ps1',
             'dist/windows/SOL/.env.example'
           )
           foreach ($path in $required) { if (-not (Test-Path $path)) { throw "Missing package component: $path" } }
