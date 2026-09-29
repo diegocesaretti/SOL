@@ -66,7 +66,7 @@ async function toWebRequest(request: IncomingMessage): Promise<Request> {
   return new Request(new URL(request.url ?? "/", gatewayConfig.publicOrigin), {
     method: request.method ?? "GET",
     headers,
-    body: body && body.length ? body : undefined,
+    body: body && body.length ? new Uint8Array(body) : undefined,
   });
 }
 
