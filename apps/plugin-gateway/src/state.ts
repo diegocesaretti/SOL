@@ -70,10 +70,8 @@ function normalizedScopes(scopes: unknown): SolScope[] {
   return [...new Set<SolScope>(["read", ...values])];
 }
 
-export function enrollBridge(requestedInstanceId?: string): { instanceId: string; bridgeToken: string } {
-  const instanceId = typeof requestedInstanceId === "string" && /^[A-Za-z0-9_-]{12,120}$/.test(requestedInstanceId)
-    ? requestedInstanceId
-    : `sol_${randomId(18)}`;
+export function enrollBridge(): { instanceId: string; bridgeToken: string } {
+  const instanceId = `sol_${randomId(18)}`;
   const bridgeToken = signOpaqueToken({
     typ: "bridge",
     instanceId,
