@@ -112,11 +112,13 @@ The active MCP surface exposes SOL-owned data and memory. Provider-specific tool
 Create a member-scoped MCP token from SOL and start the current stdio endpoint with:
 
 ```powershell
-$env:NEXO_MCP_TOKEN="sol_mcp_..."
+$env:SOL_MCP_TOKEN="sol_mcp_..."
 pnpm mcp
 ```
 
-`SOL_MCP_TOKEN` remains accepted as a compatibility alias for now.
+The Windows bundle includes `scripts/windows/sol-mcp.ps1`, which launches the same MCP with the portable runtime. OpenAI Secure MCP Tunnel can use that stdio launcher to connect ChatGPT without exposing SOL or Home Assistant on a public port. See [docs/CHATGPT.md](docs/CHATGPT.md).
+
+Legacy `NEXO_MCP_TOKEN*` variables and `nexo_mcp_*` tokens remain accepted for compatibility.
 
 Important policies:
 
