@@ -13,7 +13,7 @@ const app=document.getElementById('app');
 function esc(v){return String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#039;','"':'&quot;'}[c]))}
 async function api(path,o={}){const c=new AbortController(),t=setTimeout(()=>c.abort(),12000);try{const r=await fetch(path,{cache:'no-store',...o,signal:c.signal});let b={};try{b=await r.json()}catch{}return{r,b}}catch(e){return{r:{ok:false,status:0},b:{error:e?.name==='AbortError'?'Tiempo de espera agotado':e?.message||'Error de conexión'}}}finally{clearTimeout(t)}}
 function fmt(v){if(!v)return '—';try{return new Intl.DateTimeFormat('es-AR',{dateStyle:'short',timeStyle:'short'}).format(new Date(v))}catch{return v}}
-function winPath(v){return String(v||'').replace(/\\/g,'/').replace(/\//g,'\\\\')}
+function winPath(v){const bs=String.fromCharCode(92);return String(v||'').split(bs).join('/').split('/').join(bs)}
 function launcherPath(status){return winPath(status.repoRoot)+'\\\\'+winPath(status.portableCommand||'scripts/windows/sol-mcp.ps1')}
 function codexConfigText(status,token){return JSON.stringify({mcpServers:{sol:{command:'powershell.exe',args:['-NoProfile','-ExecutionPolicy','Bypass','-File',launcherPath(status)],env:{SOL_MCP_TOKEN:token}}}},null,2)}
 function tunnelText(status,token){const launcher=launcherPath(status).replace(/"/g,'');return '$env:SOL_MCP_TOKEN="'+token+'"\\n'+'tunnel-client --tunnel-id "<TUNNEL_ID>" --mcp-command "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \`"'+launcher+'\`""'}
