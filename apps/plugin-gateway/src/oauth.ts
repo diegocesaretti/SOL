@@ -90,7 +90,7 @@ function formValue(form: URLSearchParams, name: string): string {
 }
 
 function parseScopes(value: string | null): string[] {
-  const values = (value ?? "sol.read").split(/\s+/).filter(Boolean);
+  const values = (value ?? "sol.read sol.submit sol.actions").split(/\s+/).filter(Boolean);
   if (!values.length) values.push("sol.read");
   if (!values.includes("sol.read")) values.unshift("sol.read");
   if (values.some((scope) => !OAUTH_SCOPES.has(scope))) throw new Error("invalid_scope");
