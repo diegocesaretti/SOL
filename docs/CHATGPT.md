@@ -64,12 +64,18 @@ The launcher also accepts `SOL_MCP_TOKEN_FILE`. Legacy `NEXO_MCP_TOKEN*` variabl
 
 Create a Secure MCP Tunnel in the OpenAI Platform and install/run the official `tunnel-client` on the SOL PC.
 
-The SOL MCP page generates the command shape:
+The SOL MCP page generates the current profile-based command shape:
 
 ```powershell
+$env:CONTROL_PLANE_API_KEY="<OPENAI_PLATFORM_API_KEY>"
 $env:SOL_MCP_TOKEN="sol_mcp_..."
-tunnel-client --tunnel-id "<TUNNEL_ID>" --mcp-command "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"C:\path\to\SOL\scripts\windows\sol-mcp.ps1`""
+
+tunnel-client init --sample sample_mcp_stdio_local --profile sol-chatgpt --tunnel-id "<TUNNEL_ID>" --mcp-command "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"C:\path\to\SOL\scripts\windows\sol-mcp.ps1`""
+tunnel-client doctor --profile sol-chatgpt --explain
+tunnel-client run --profile sol-chatgpt
 ```
+
+Create the tunnel and obtain the control-plane API key from OpenAI Platform tunnel settings. Keep `tunnel-client run --profile sol-chatgpt` healthy while ChatGPT uses the connection.
 
 Do not publish port 3000 and do not point the tunnel at Home Assistant directly.
 
@@ -77,7 +83,7 @@ Do not publish port 3000 and do not point the tunnel at Home Assistant directly.
 
 Where the ChatGPT account/surface supports custom MCP apps/tunnels, add the created tunnel as an app named `SOL`.
 
-The exact availability of custom MCP apps, write actions and Voice invocation is controlled by the ChatGPT product/plan. SOL does not bypass those product permissions.
+ChatGPT Voice can use plugins/apps that are available to the current account, but a private custom MCP is still subject to the account's custom-MCP entitlement. SOL does not bypass those product permissions. For consumer accounts where private custom MCP is unavailable, this bridge remains usable by local MCP clients and by supported OpenAI products until the ChatGPT entitlement changes.
 
 ## Home Assistant behavior
 
