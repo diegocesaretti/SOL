@@ -35,13 +35,13 @@ export async function createMcpAccessToken(
   if (input.allowActions === true && principal.role !== "owner" && principal.role !== "adult") {
     throw new Error("only owners and adults can grant MCP external-action access");
   }
-  const label = normalizeLabel(input.label ?? "Codex · Nexo");
+  const label = normalizeLabel(input.label ?? "SOL · MCP");
   const requestedDays = Number(input.expiresInDays ?? 90);
   const expiresInDays = Number.isFinite(requestedDays)
     ? Math.max(1, Math.min(365, Math.trunc(requestedDays)))
     : 90;
   const expiresAt = new Date(Date.now() + expiresInDays * 86_400_000);
-  const token = `nexo_mcp_${randomBytes(32).toString("base64url")}`;
+  const token = `sol_mcp_${randomBytes(32).toString("base64url")}`;
   const scopes = ["read"];
   if (input.allowSubmit === true) scopes.push("submit");
   if (input.allowActions === true) scopes.push("actions");

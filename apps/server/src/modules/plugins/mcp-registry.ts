@@ -6,6 +6,7 @@ const TOOL_RE = /^[a-z][a-z0-9_]{1,79}$/;
 const MCP_SCOPES = new Set(["read", "submit", "actions"]);
 const STREMIO_PLAYBACK_TOOL = "home_assistant_stremio_play_best";
 const RESERVED_TOOL_NAMES = new Set([
+  "sol_status",
   "nexo_status",
   "get_timeline",
   "search_life",

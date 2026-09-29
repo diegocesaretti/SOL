@@ -30,26 +30,29 @@ WhatsApp · Calendar · Home Assistant · Mercado Libre · MCP submissions · fu
 
 MCP clients do not receive database credentials, unrestricted SQL, another member's private records, connector secrets or direct dangerous actions.
 
-MCP now has two independent scopes:
+MCP has three independent scopes:
 
 ```text
-read    → query permission-filtered SOL data
-submit  → add user-authorized observations to Life
+read     → query permission-filtered SOL data and plugin read tools
+submit   → add user-authorized observations/memory to SOL
+actions  → invoke explicitly registered plugin action tools
 ```
 
-`submit` is deliberately **not** an action/executive scope. It cannot write Calendar, call Home Assistant services, change Mercado Libre, grant permissions or directly mutate arbitrary Knowledge.
+`submit` never grants external actions. `actions` is restricted to owner/adult token creation and still does not bypass each plugin/tool's own confirmation and safety policy.
 
 ## Protocol / transport
 
-The implementation targets MCP specification `2026-07-28` with `@modelcontextprotocol/server` v2. `serveStdio` negotiates protocol compatibility with the connecting client, including supported 2025-era clients. The initial transport is local `stdio`.
+The implementation targets MCP specification `2026-07-28` with `@modelcontextprotocol/server` v2. `serveStdio` negotiates protocol compatibility with the connecting client, including supported 2025-era clients.
 
-Why stdio first:
+The canonical local transport remains `stdio`. Remote ChatGPT access uses OpenAI Secure MCP Tunnel to launch that same stdio server; SOL does not add a public MCP listener.
 
-- no public HTTP listener;
-- no remote OAuth surface yet;
-- ideal for a SOL host that also runs a local MCP-capable client;
+Why this split:
+
+- SOL Core stays on loopback;
+- Home Assistant and plugin callback endpoints stay private;
 - member identity is explicit through a revocable SOL MCP token;
-- remote MCP can be added later without rewriting the data facade/tools.
+- local clients and remote tunnel clients use the exact same tools/scopes;
+- there is no second remote authorization implementation to drift from the local MCP.
 
 ## Member-scoped access
 
@@ -71,7 +74,7 @@ The clear token is shown only when it is created. PostgreSQL stores only a SHA-2
 
 A household owner still cannot use MCP to read another member's private source content merely because they administer SOL.
 
-Existing tokens created before submission support remain `read` only. Create a new token and explicitly enable submissions when a client such as Codex should be able to save information into SOL.
+Existing tokens preserve their stored scopes. Create a new token when a client should gain `submit` or `actions`; never broaden an existing client implicitly. New tokens use the `sol_mcp_` prefix while legacy `nexo_mcp_` tokens remain valid.
 
 ## Bootstrap
 
@@ -91,20 +94,28 @@ The same capability is available at:
 http://127.0.0.1:3000/mcp
 ```
 
-To run the server manually:
+To run the server manually from source:
 
 ```powershell
 $env:SOL_MCP_TOKEN="sol_mcp_..."
 pnpm mcp
 ```
 
-You can alternatively point `SOL_MCP_TOKEN_FILE` at a local file containing the token so it does not need to be placed directly in an environment block.
+The Windows portable bundle includes:
+
+```text
+scripts/windows/sol-mcp.ps1
+```
+
+which launches the packaged Node/runtime MCP without requiring pnpm. You can alternatively point `SOL_MCP_TOKEN_FILE` at a local file containing the token.
+
+For ChatGPT remote access, see [CHATGPT.md](CHATGPT.md).
 
 ## Read tools
 
 ### `sol_status`
 
-Returns the authenticated member, token scopes, visible source inventory, Knowledge counts and the active privacy policy.
+Returns the authenticated member, token scopes, visible source inventory, Knowledge counts, active privacy policy and dynamically available plugin tools. `nexo_status` remains as a legacy alias.
 
 ### `get_timeline`
 
@@ -122,13 +133,15 @@ Returns visible Person entities, aliases and visible facts from Knowledge.
 
 Returns visible Project entities, aliases and visible facts from Knowledge.
 
-### `get_home_state`
+### Plugin tools
 
-Returns current Home Assistant entities explicitly selected for SOL sync. This is a read tool; it does not call Home Assistant services.
+Providers register their own tools through SOL's Tool Registry. They are loaded into each MCP session only when:
 
-### `get_business_summary`
+- the plugin is active and its loopback callback is healthy;
+- the authenticated member is allowed to see the tool;
+- the token contains the tool's required scope.
 
-Returns the compact permission-filtered Mercado Libre summary already used by SOL's business context. It does not include connector credentials or buyer addresses.
+For example, the Home Assistant plugin currently contributes read tools such as `home_assistant_search_states` and `home_assistant_get_state`, plus `home_assistant_call_service` when `actions` is present. Provider credentials never become MCP arguments.
 
 ## Submission tools
 
@@ -216,10 +229,10 @@ The MCP source account itself remains member-owned. Family visibility is attache
 - connector OAuth/access tokens;
 - arbitrary files from the SOL host;
 - unrestricted source dumps;
-- `call_service` against Home Assistant;
-- direct Mercado Libre stock/price/listing/reply mutations;
-- immediate Calendar writes;
-- delete/update operations that bypass Executive;
+- arbitrary provider calls that were not explicitly registered as plugin tools;
+- action tools when the token lacks the `actions` scope;
+- provider mutations that bypass plugin permissions/confirmation policy;
+- delete/update operations that bypass SOL authorization;
 - direct arbitrary fact/entity mutation;
 - an LLM-controlled way to grant itself more visibility.
 
