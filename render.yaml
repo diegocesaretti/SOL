@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: sol-plugin-gateway
+    runtime: node
+    buildCommand: corepack enable && pnpm install --no-frozen-lockfile && pnpm --filter @sol/plugin-gateway build
+    startCommand: pnpm --filter @sol/plugin-gateway start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: NODE_ENV
+        value: production
+      - key: SOL_GATEWAY_SIGNING_SECRET
+        generateValue: true
+      - key: SOL_GATEWAY_SUPPORT_EMAIL
+        sync: false
+      - key: OPENAI_APPS_CHALLENGE
+        sync: false
