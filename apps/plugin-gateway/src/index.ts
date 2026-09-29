@@ -119,8 +119,8 @@ async function handleBridge(path: string, request: IncomingMessage, response: Se
       return true;
     }
     try {
-      const body = await jsonBody(request);
-      const result = enrollBridge(typeof body.instanceId === "string" ? body.instanceId : undefined);
+      await jsonBody(request);
+      const result = enrollBridge();
       json(response, 201, result);
     } catch (error) {
       json(response, 400, { error: error instanceof Error ? error.message : "invalid_request" });
