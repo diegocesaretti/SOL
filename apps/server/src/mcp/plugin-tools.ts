@@ -58,6 +58,24 @@ function text(value: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }] };
 }
 
+function toolTitle(name: string): string {
+  return name
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function toolAnnotations(tool: PluginMcpTool) {
+  const readOnly = tool.requiredScope === "read";
+  return {
+    readOnlyHint: readOnly,
+    openWorldHint: false,
+    destructiveHint: readOnly ? false : true,
+    idempotentHint: readOnly ? true : undefined,
+  };
+}
+
 function pluginResult(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return text(value);
   const envelope = value as Record<string, unknown>;
@@ -101,8 +119,10 @@ export function registerPluginMcpToolsOnServer(
     server.registerTool(
       tool.name,
       {
+        title: toolTitle(tool.name),
         description: `${tool.description}\n\nProvided by SOL plugin: ${tool.pluginId}.`,
         inputSchema: zodInputSchema(tool.inputSchema),
+        annotations: toolAnnotations(tool),
       },
       async (args: Record<string, unknown>) => pluginResult(await invokePluginMcpTool(principal, tool, args)),
     );
