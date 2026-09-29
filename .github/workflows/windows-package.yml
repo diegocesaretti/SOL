@@ -83,13 +83,14 @@ jobs:
           Copy-Item (Get-Command node).Source dist/windows/SOL/runtime/node.exe
           Copy-Item scripts/windows/sol-tray.ps1 dist/windows/SOL/scripts/windows/sol-tray.ps1
           Copy-Item scripts/windows/sol-mcp.ps1 dist/windows/SOL/scripts/windows/sol-mcp.ps1
+          Copy-Item scripts/windows/sol-openai-bridge.ps1 dist/windows/SOL/scripts/windows/sol-openai-bridge.ps1
           Copy-Item packages/database/migrations/*.sql dist/windows/SOL/packages/database/migrations/ -Force
           Copy-Item .env.example dist/windows/SOL/.env.example
 
       - name: Validate packaged PowerShell syntax
         shell: pwsh
         run: |
-          foreach ($script in @('sol-tray.ps1', 'sol-mcp.ps1')) {
+          foreach ($script in @('sol-tray.ps1', 'sol-mcp.ps1', 'sol-openai-bridge.ps1')) {
             $tokens = $null
             $errors = $null
             $path = Resolve-Path ("dist/windows/SOL/scripts/windows/" + $script)
@@ -180,6 +181,7 @@ jobs:
             'dist/windows/SOL/packages/database/migrations/0021_connections.sql',
             'dist/windows/SOL/scripts/windows/sol-tray.ps1',
             'dist/windows/SOL/scripts/windows/sol-mcp.ps1',
+            'dist/windows/SOL/scripts/windows/sol-openai-bridge.ps1',
             'dist/windows/SOL/.env.example'
           )
           foreach ($path in $required) { if (-not (Test-Path $path)) { throw "Missing package component: $path" } }
