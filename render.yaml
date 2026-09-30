@@ -10,6 +10,8 @@ services:
         value: "24"
       - key: NODE_ENV
         value: production
+      - key: SOL_GATEWAY_TOOL_EXPOSURE
+        value: facade
       - key: SOL_GATEWAY_SIGNING_SECRET
         generateValue: true
       - key: SOL_GATEWAY_SUPPORT_EMAIL

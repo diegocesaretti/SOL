@@ -18,6 +18,10 @@ const publicOrigin = (
   (renderHostname ? `https://${renderHostname}` : `http://127.0.0.1:${port}`)
 ).replace(/\/$/, "");
 const signingSecret = optional("SOL_GATEWAY_SIGNING_SECRET") ?? (process.env.NODE_ENV === "production" ? "" : "sol-dev-signing-secret-change-me-please");
+const toolExposure = (optional("SOL_GATEWAY_TOOL_EXPOSURE") ?? "both").toLowerCase();
+if (!["raw", "facade", "both"].includes(toolExposure)) {
+  throw new Error("SOL_GATEWAY_TOOL_EXPOSURE must be raw, facade or both");
+}
 
 if (!signingSecret || Buffer.byteLength(signingSecret, "utf8") < 32) {
   throw new Error("SOL_GATEWAY_SIGNING_SECRET must be at least 32 bytes");
@@ -27,6 +31,7 @@ export const gatewayConfig = {
   port,
   publicOrigin,
   signingSecret,
+  toolExposure: toolExposure as "raw" | "facade" | "both",
   challengeToken: optional("OPENAI_APPS_CHALLENGE"),
   supportEmail: optional("SOL_GATEWAY_SUPPORT_EMAIL"),
   jobTimeoutMs: intEnv("SOL_GATEWAY_JOB_TIMEOUT_MS", 65_000),
