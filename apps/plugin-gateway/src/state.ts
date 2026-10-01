@@ -1,5 +1,5 @@
 import { gatewayConfig } from "./config.js";
-import { randomId, signOpaqueToken, verifyOpaqueToken, type SignedPayload } from "./crypto.js";
+import { deterministicPairCode, randomId, signOpaqueToken, verifyOpaqueToken, type SignedPayload } from "./crypto.js";
 
 export type SolScope = "read" | "submit" | "actions";
 
@@ -48,13 +48,6 @@ interface PairingRecord {
   allowedScopes: SolScope[];
 }
 
-interface PairingTokenPayload extends SignedPayload {
-  typ: "pairing";
-  instanceId: string;
-  allowedScopes: SolScope[];
-  jti: string;
-}
-
 interface PendingJob {
   instanceId: string;
   resolve: (value: unknown) => void;
@@ -64,6 +57,7 @@ interface PendingJob {
 
 const catalogs = new Map<string, BridgeCatalog>();
 const consumedPairings = new Map<string, { firstConsumedAt: number; expiresAt: number }>();
+const activeBridgeInstances = new Map<string, number>();
 const queues = new Map<string, BridgeJob[]>();
 const pending = new Map<string, PendingJob>();
 
@@ -91,7 +85,9 @@ export function authenticateBridge(authorization: string | null): string | null 
   const match = authorization?.match(/^Bearer\s+(.+)$/i);
   if (!match?.[1]) return null;
   const payload = verifyOpaqueToken<BridgeTokenPayload>(match[1], "bridge");
-  return payload?.instanceId ?? null;
+  const instanceId = payload?.instanceId ?? null;
+  if (instanceId) activeBridgeInstances.set(instanceId, Date.now());
+  return instanceId;
 }
 
 export function updateBridgeCatalog(
@@ -145,45 +141,53 @@ export function getBridgeCatalog(instanceId: string): BridgeCatalog | undefined 
 
 export function issuePairCode(instanceId: string, scopes: unknown): { code: string; expiresAt: string; scopes: SolScope[] } {
   const values = normalizedScopes(scopes);
-  const now = nowSeconds();
-  const exp = now + Math.max(1, Math.floor(gatewayConfig.pairCodeTtlMs / 1000));
-  const payload: PairingTokenPayload = {
-    typ: "pairing",
-    iat: now,
-    exp,
-    jti: randomId(12),
-    instanceId,
-    allowedScopes: values,
-  };
-  const code = `sol_pair_${signOpaqueToken(payload)}`;
-  return { code, expiresAt: new Date(exp * 1000).toISOString(), scopes: values };
+  const windowMs = Math.max(60_000, gatewayConfig.pairCodeTtlMs);
+  const bucket = Math.floor(Date.now() / windowMs);
+  activeBridgeInstances.set(instanceId, Date.now());
+  const code = deterministicPairCode(`${instanceId}|${values.join(",")}|${bucket}`);
+  const expiresAt = (bucket + 2) * windowMs;
+  return { code, expiresAt: new Date(expiresAt).toISOString(), scopes: values };
 }
 
 export function consumePairCode(code: string): PairingRecord | null {
-  const normalized = code.trim();
-  if (!normalized.startsWith("sol_pair_")) return null;
-  const payload = verifyOpaqueToken<PairingTokenPayload>(normalized.slice("sol_pair_".length), "pairing");
-  if (!payload?.jti || !payload.instanceId || !Array.isArray(payload.allowedScopes) || typeof payload.exp !== "number") return null;
+  const normalized = code.trim().toUpperCase();
+  if (!/^[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$/.test(normalized)) return null;
 
   const now = Date.now();
-  const expiresAt = payload.exp * 1000;
-  if (expiresAt <= now) return null;
+  const windowMs = Math.max(60_000, gatewayConfig.pairCodeTtlMs);
+  const currentBucket = Math.floor(now / windowMs);
+  const scopeSets: SolScope[][] = [
+    ["read"],
+    ["read", "submit"],
+    ["read", "actions"],
+    ["read", "submit", "actions"],
+  ];
 
-  const prior = consumedPairings.get(payload.jti);
-  if (prior) {
-    // Some OAuth surfaces can submit the authorization form twice while following
-    // the redirect. Allow a very short idempotent retry window for the same signed
-    // pairing token, while keeping the code effectively single-use afterwards.
-    if (now - prior.firstConsumedAt > 20_000) return null;
-  } else {
-    consumedPairings.set(payload.jti, { firstConsumedAt: now, expiresAt });
+  const candidateInstances = new Set<string>([
+    ...catalogs.keys(),
+    ...activeBridgeInstances.keys(),
+  ]);
+
+  for (const instanceId of candidateInstances) {
+    for (const values of scopeSets) {
+      for (const bucket of [currentBucket, currentBucket - 1]) {
+        const candidate = deterministicPairCode(`${instanceId}|${values.join(",")}|${bucket}`);
+        if (candidate !== normalized) continue;
+
+        const expiresAt = (bucket + 2) * windowMs;
+        if (expiresAt <= now) return null;
+
+        const key = `${instanceId}|${bucket}|${normalized}`;
+        const prior = consumedPairings.get(key);
+        if (prior && now - prior.firstConsumedAt > 20_000) return null;
+        if (!prior) consumedPairings.set(key, { firstConsumedAt: now, expiresAt });
+
+        return { instanceId, expiresAt, allowedScopes: values };
+      }
+    }
   }
 
-  return {
-    instanceId: payload.instanceId,
-    expiresAt,
-    allowedScopes: normalizedScopes(payload.allowedScopes),
-  };
+  return null;
 }
 
 export function bridgeConnection(instanceId: string): {
@@ -260,8 +264,11 @@ export function completeBridgeJob(
 
 export function cleanupState(): void {
   const now = Date.now();
-  for (const [jti, pairing] of consumedPairings) {
-    if (pairing.expiresAt <= now) consumedPairings.delete(jti);
+  for (const [key, pairing] of consumedPairings) {
+    if (pairing.expiresAt <= now) consumedPairings.delete(key);
+  }
+  for (const [instanceId, seenAt] of activeBridgeInstances) {
+    if (now - seenAt > 24 * 60 * 60_000) activeBridgeInstances.delete(instanceId);
   }
   for (const [instanceId, catalog] of catalogs) {
     if (now - catalog.updatedAt > 24 * 60 * 60_000) catalogs.delete(instanceId);
