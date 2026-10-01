@@ -153,11 +153,9 @@ export function consumePairCode(code: string): PairingRecord | null {
   const verified = verifySelfContainedPairCode(code);
   if (!verified) return null;
 
-  const now = Date.now();
-  const prior = consumedPairings.get(verified.replayKey);
-  if (prior && now - prior.firstConsumedAt > 20_000) return null;
-  if (!prior) consumedPairings.set(verified.replayKey, { firstConsumedAt: now, expiresAt: verified.expiresAt });
-
+  // ChatGPT may POST the same OAuth authorization form multiple times while
+  // completing the redirect/token flow. Keep the signed pairing code valid
+  // for its full short TTL instead of treating a later retry as a replay.
   const allowedScopes: SolScope[] = ["read"];
   if ((verified.scopeBits & 2) !== 0) allowedScopes.push("submit");
   if ((verified.scopeBits & 4) !== 0) allowedScopes.push("actions");
