@@ -7,7 +7,8 @@ SOL Fast is the low-latency local bridge used by ChatGPT Voice through Remote De
 ```
 ChatGPT / Voice
   -> Remote Desktop Commander
-  -> C:\sol\sol-fast.ps1
+  -> C:\sol\sol-fast.cmd   (fast path for common commands)
+     or C:\sol\sol-fast.ps1 (discovery / complex raw calls)
   -> http://127.0.0.1:8770
   -> SOL Fast persistent MCP clients
        - SOL Core MCP
@@ -28,12 +29,26 @@ C:\sol\sol-fast.ps1 schema home_assistant_call_service
 
 Unknown quick commands return machine-readable guidance so an agent can recover by using `tools`, `schema` and `call`.
 
+## Fast path
+
+For common HTPC operations prefer the CMD client because starting a fresh PowerShell process adds substantial latency:
+
+```cmd
+C:\sol\sol-fast.cmd tv_cocina
+C:\sol\sol-fast.cmd tv_dormitorio
+C:\sol\sol-fast.cmd aire_cocina
+C:\sol\sol-fast.cmd youtube_play "dQw4w9WgXcQ" dormitorio
+```
+
+The PowerShell wrapper remains the compatible full client for discovery and complex/raw calls.
+
 ## Quick commands
 
 Examples:
 
 ```powershell
 C:\sol\sol-fast.ps1 tv_cocina
+C:\sol\sol-fast.ps1 tv_dormitorio
 C:\sol\sol-fast.ps1 aire_cocina
 C:\sol\sol-fast.ps1 home_find "tele cocina"
 C:\sol\sol-fast.ps1 media_play "Los Simpson"
@@ -53,13 +68,18 @@ C:\sol\sol-fast.ps1 call <tool_name> '<json arguments>'
 
 Real-world actions require an explicit current-user request. SOL Fast preserves the confirmation requirement of the underlying tools. The `home_action` and `youtube_play` quick commands only add `confirmedByUser=true` when invoked through the action path.
 
-After an action, the calling agent should read the relevant live state again before claiming success.
+For ordinary actions the calling agent should verify live state before claiming success. `youtube_play` is optimized specially: it performs action + verification inside the same SOL Fast request, so the caller should not issue a second verification round trip when `verification.confirmed=true`.
 
 ## YouTube
 
-`youtube_play` accepts only YouTube URLs and sends the URL to `media_player.tv_cocina_2` with Home Assistant `media_player.play_media` and `media_content_type=url`.
+`youtube_play` accepts only YouTube URLs. It defaults to the kitchen TV and supports an explicit bedroom target:
 
-When the user names a video or song instead of supplying a URL, the agent should first resolve a concrete YouTube URL and then call `youtube_play`.
+- `target=cocina` -> `media_player.tv_cocina_2`
+- `target=dormitorio` -> `media_player.tv_dormitorio_2`
+
+It sends the URL through Home Assistant `media_player.play_media` with `media_content_type=url`, then polls the relevant TV entities inside the same request. The response contains a `verification` object with `confirmed`, `level`, timing, evidence and compact state snapshots.
+
+When the caller knows the intended video title it may pass `expectedTitle`; matching that title provides stronger verification. If the user names a video or song instead of supplying a URL, the agent should first resolve a concrete YouTube URL. For the fast CMD client, prefer passing the extracted YouTube video ID instead of a URL with extra query parameters; the client builds the canonical URL internally.
 
 ## Stremio target and language policy
 
@@ -93,7 +113,8 @@ The Home Assistant plugin's old manual Spanish-title policy is disabled by defau
 Current household deployment:
 
 - Server: `C:\SOL\SOL\apps\server\sol-fast-server.mjs`
-- Wrapper: `C:\sol\sol-fast.ps1`
+- Fast client: `C:\sol\sol-fast.cmd`
+- Full wrapper: `C:\sol\sol-fast.ps1`
 - Loopback HTTP: `127.0.0.1:8770`
 
 The bridge is intentionally loopback-only.
