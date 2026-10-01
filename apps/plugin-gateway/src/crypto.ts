@@ -56,6 +56,16 @@ export function pairCode(): string {
   return `${value.slice(0, 4)}-${value.slice(4)}`;
 }
 
+export function deterministicPairCode(input: string): string {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const bytes = createHmac("sha256", gatewayConfig.signingSecret)
+    .update(`sol-pair-v2:${input}`)
+    .digest();
+  let value = "";
+  for (let index = 0; index < 8; index += 1) value += alphabet[bytes[index]! % alphabet.length];
+  return `${value.slice(0, 4)}-${value.slice(4)}`;
+}
+
 export function pkceS256(verifier: string): string {
   return createHash("sha256").update(verifier).digest("base64url");
 }
