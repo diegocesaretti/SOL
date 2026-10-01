@@ -73,6 +73,25 @@ test("merges playback defaults before native stream selection", () => {
   assert.deepEqual(client.streamPreferences({ quality: "4k", language: "latin" }), { quality: "4k", language: "latin" });
 });
 
+test("defaults Stremio playback to cocina and resolves dormitorio explicitly", () => {
+  const client = new SolPluginClient({
+    HA_SOL_TV_REMOTE_ENTITY_ID: "remote.tv_cocina_test",
+    HA_SOL_TV_DORMITORIO_REMOTE_ENTITY_ID: "remote.tv_dormitorio_test"
+  });
+  assert.deepEqual(client.resolvePlaybackTarget(), {
+    target: "cocina",
+    remoteEntityId: "remote.tv_cocina_test"
+  });
+  assert.deepEqual(client.resolvePlaybackTarget("dormitorio"), {
+    target: "dormitorio",
+    remoteEntityId: "remote.tv_dormitorio_test"
+  });
+
+  const playBest = STREMIO_MCP_TOOLS.find((tool) => tool.name === "home_assistant_stremio_play_best");
+  assert.deepEqual(playBest.inputSchema.properties.target.enum, ["cocina", "dormitorio"]);
+  assert.equal(playBest.inputSchema.properties.target.default, "cocina");
+});
+
 test("deduplicates simultaneous and recently repeated identical play_best requests", async () => {
   const client = new SolPluginClient({ HA_SOL_STREMIO_PLAYBACK_DEDUPE_MS: "30000" });
   let physicalRuns = 0;
@@ -137,6 +156,18 @@ test("different play_best requests are not deduplicated", async () => {
   assert.equal(physicalRuns, 2);
 });
 
+test("same content on cocina and dormitorio is not deduplicated", async () => {
+  const client = new SolPluginClient({ HA_SOL_STREMIO_PLAYBACK_DEDUPE_MS: "30000" });
+  let physicalRuns = 0;
+  client.playBest = async (args) => {
+    physicalRuns += 1;
+    return { playbackRequested: true, target: args.target || "cocina" };
+  };
+  await client.handleStremioTool("home_assistant_stremio_play_best", { query: "Matrix", target: "cocina" });
+  await client.handleStremioTool("home_assistant_stremio_play_best", { query: "Matrix", target: "dormitorio" });
+  assert.equal(physicalRuns, 2);
+});
+
 test("removed open_detail tool cannot launch Stremio", async () => {
   const client = new SolPluginClient({});
   await assert.rejects(
@@ -170,6 +201,7 @@ test("Matrix Spanish follows exactly one launch-wait-move-center path", async ()
     HA_SOL_STREMIO_INDEXED_CENTER_DELAY_MS: "0",
     HA_SOL_STREMIO_INDEXED_CENTER_HOLD_MS: "120",
     HA_SOL_TV_REMOTE_ENTITY_ID: "remote.tv",
+    HA_SOL_TV_DORMITORIO_REMOTE_ENTITY_ID: "remote.tv_bedroom",
     HA_SOL_STREMIO_ENABLED: "true",
     HA_SOL_ALLOW_CONTROL: "true"
   });
@@ -181,18 +213,28 @@ test("Matrix Spanish follows exactly one launch-wait-move-center path", async ()
   };
   client.resolveForStream = async () => ({ resolved: { type: "movie", id: "tt0133093", videoId: "tt0133093", selected: { name: "The Matrix" } }, streamId: "tt0133093", episodeDecision: null });
   let launched = null;
+  let launchedRemote = null;
   let launchCount = 0;
-  client.launchStremio = async (uri) => { launchCount += 1; launched = uri; return { ok: true, deepLink: uri }; };
+  client.launchStremio = async (uri, remoteEntityId) => {
+    launchCount += 1;
+    launched = uri;
+    launchedRemote = remoteEntityId;
+    return { ok: true, deepLink: uri, remoteEntityId };
+  };
   client.haService = async (_domain, _service, payload) => { calls.push(payload); return { ok: true }; };
 
   try {
-    const result = await client.handleStremioTool("home_assistant_stremio_play_best", { query: "Matrix", language: "spanish" });
+    const result = await client.handleStremioTool("home_assistant_stremio_play_best", { query: "Matrix", language: "spanish", target: "dormitorio" });
     assert.equal(result.playbackRequested, true);
     assert.equal(result.selected.nativeIndex, 3);
     assert.equal(result.preferences.quality, "1080p");
     assert.equal(result.timing.initialFocusIndex, 0);
     assert.equal(launchCount, 1);
+    assert.equal(launchedRemote, "remote.tv_bedroom");
+    assert.equal(result.playbackTarget.target, "dormitorio");
+    assert.equal(result.playbackTarget.remoteEntityId, "remote.tv_bedroom");
     assert.equal(launched.includes("autoPlay=true"), false);
+    assert.deepEqual(calls.map((item) => item.entity_id), ["remote.tv_bedroom", "remote.tv_bedroom", "remote.tv_bedroom", "remote.tv_bedroom"]);
     assert.deepEqual(calls.map((item) => item.command), ["DPAD_RIGHT", "DPAD_RIGHT", "DPAD_RIGHT", "DPAD_CENTER"]);
     assert.equal(calls.at(-1).hold_secs, 0.12);
   } finally {

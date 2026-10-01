@@ -7,6 +7,7 @@ const MCP_SCOPES = new Set(["read", "submit", "actions"]);
 const STREMIO_PLAYBACK_TOOL = "home_assistant_stremio_play_best";
 const RESERVED_TOOL_NAMES = new Set([
   "sol_status",
+  "sol_request",
   "nexo_status",
   "get_timeline",
   "search_life",

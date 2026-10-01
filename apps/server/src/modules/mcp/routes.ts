@@ -32,6 +32,7 @@ export async function handleMcpApi(
       tokenFileEnv: "SOL_MCP_TOKEN_FILE",
       tools: [
         "sol_status",
+        "sol_request (high-level natural-language router; actions require explicit confirmation + actions scope)",
         "get_timeline",
         "search_life",
         "search_whatsapp",

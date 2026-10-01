@@ -15,6 +15,7 @@ import { submitMcpInformation, submitMcpSchedule } from "../modules/mcp/submissi
 import { listMcpAttentionQueue, searchMcpWhatsapp } from "../modules/mcp/whatsapp.js";
 import { correctMemoryFact, forgetMemoryFact, searchMemories } from "../modules/memory/service.js";
 import { loadPluginMcpTools, registerPluginMcpToolsOnServer } from "./plugin-tools.js";
+import { createSolRequestRouter } from "../modules/router/sol-request.js";
 
 async function loadToken(): Promise<string> {
   const direct = process.env.SOL_MCP_TOKEN?.trim() || process.env.NEXO_MCP_TOKEN?.trim();
@@ -39,6 +40,7 @@ async function main(): Promise<void> {
   }
   const { principal, scopes } = access;
   const pluginTools = await loadPluginMcpTools(principal, scopes);
+  const requestRouter = createSolRequestRouter(principal, scopes, pluginTools);
 
   serveStdio(() => {
     const server = new McpServer({ name: "sol", version: "1.0.0" });
@@ -64,6 +66,8 @@ async function main(): Promise<void> {
           householdOwnerIsNotUniversalPrivateReader: true,
           externalMcpClientDoesReasoning: true,
           internalAssistantBrain: false,
+          highLevelRouter: "sol_request",
+          routerAgentFallback: "Codex OAuth planner; SOL validates and executes canonical tools",
           directExternalActionsRequireScope: "actions",
           canInvokeExternalActions: scopes.includes("actions"),
           canSubmitObservations: scopes.includes("submit"),
@@ -92,6 +96,35 @@ async function main(): Promise<void> {
         inputSchema: z.object({}),
       },
       statusTool,
+    );
+
+    server.registerTool(
+      "sol_request",
+      {
+        description:
+          "High-level natural-language router built into SOL Main. It uses deterministic fast paths for common Home Assistant/media requests and may use the locally authenticated Codex OAuth CLI only as a planning fallback. Codex never directly executes SOL tools: SOL validates scopes, explicit-user confirmation and canonical tool arguments before execution. Prefer direct MCP tools when the exact tool is already known.",
+        inputSchema: z.object({
+          text: z.string().min(2).max(8000),
+          confirmedByUser: z.boolean().optional().describe(
+            "Set true only when the current user's request explicitly authorizes a real-world action or write. Read-only requests do not require it.",
+          ),
+          mode: z.enum(["auto", "fast", "agent"]).optional().describe(
+            "auto is the normal mode. fast forbids Codex fallback; agent skips deterministic routing and is intended for diagnostics/complex requests.",
+          ),
+        }),
+        annotations: {
+          readOnlyHint: false,
+          destructiveHint: true,
+          idempotentHint: false,
+          openWorldHint: false,
+        },
+      },
+      async ({ text: requestText, confirmedByUser, mode }) =>
+        text(await requestRouter.handle({
+          text: requestText,
+          confirmedByUser,
+          mode,
+        })),
     );
 
     server.registerTool(

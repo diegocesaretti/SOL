@@ -108,6 +108,12 @@ interface FacadeAlias {
 
 const FACADE_ALIASES: FacadeAlias[] = [
   {
+    publicName: "sol_request",
+    remoteName: "sol_request",
+    title: "Ask SOL",
+    description: "Send a natural-language request to SOL Main's high-level router. SOL uses deterministic fast routing when possible and an optional Codex OAuth planning fallback when needed. Use only when the exact canonical SOL tool is not already obvious; explicit real-world actions still require current-user confirmation.",
+  },
+  {
     publicName: "sol_home_find",
     remoteName: "home_assistant_search_states",
     title: "Find live home state",
@@ -352,7 +358,7 @@ export const mcpHandler = createMcpHandler(({ authInfo }) => {
     { name: "SOL", version: "1.0.0" },
     {
       instructions:
-        "SOL is the user's private home/context backend. Prefer the simple sol_home_*, sol_media_*, sol_whatsapp_* and sol_memory_* facade tools for common spoken requests. Query SOL before asserting live Home Assistant state and never invent device state. Use sol_find_capability plus the matching sol_run_* tool only for advanced capabilities not covered by the facade. Use read tools first to resolve targets. Only invoke submit/action tools when the user's current request clearly authorizes the write or real-world action, and preserve every SOL confirmation and permission boundary.",
+        "SOL is the user's private home/context backend. When the exact canonical capability is obvious, prefer the simple sol_home_*, sol_media_*, sol_whatsapp_* and sol_memory_* facade tools for minimum latency. Otherwise use sol_request to let SOL Main route the natural-language request. Query SOL before asserting live Home Assistant state and never invent device state. Use sol_find_capability plus the matching sol_run_* tool for advanced direct capability access. Only invoke submit/action tools when the user's current request clearly authorizes the write or real-world action, and preserve every SOL confirmation and permission boundary.",
     },
   );
 
