@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Net.Http;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.Json;
 
 namespace SolLauncher;
 
@@ -139,10 +140,41 @@ internal static class Program
             child.BeginErrorReadLine();
 
             var ready = await WaitForHealth(baseUrl, TimeSpan.FromSeconds(30));
-            if (ready) OpenBrowser(baseUrl + "/v1/inputs/plugins/ui");
-            else MessageBox(IntPtr.Zero, $"SOL no respondió a tiempo. Revisá el log:\n{logPath}", "SOL · error de inicio", 0x10);
+            Process? openAiBridge = null;
+            StreamWriter? openAiBridgeLog = null;
+            if (ready)
+            {
+                openAiBridge = TryStartOpenAiBridge(
+                    root,
+                    persistent.DataRoot,
+                    env,
+                    node,
+                    job,
+                    out openAiBridgeLog,
+                    out var bridgeStatus);
+                if (!string.IsNullOrWhiteSpace(bridgeStatus))
+                {
+                    lock (log) log.WriteLine($"[{DateTimeOffset.Now:O}] BRIDGE {bridgeStatus}");
+                }
+                OpenBrowser(baseUrl + "/v1/inputs/plugins/ui");
+            }
+            else
+            {
+                MessageBox(IntPtr.Zero, $"SOL no respondió a tiempo. Revisá el log:\n{logPath}", "SOL · error de inicio", 0x10);
+            }
 
             await child.WaitForExitAsync();
+
+            if (openAiBridge is not null)
+            {
+                try
+                {
+                    if (!openAiBridge.HasExited) openAiBridge.Kill(entireProcessTree: true);
+                }
+                catch { }
+                try { openAiBridge.Dispose(); } catch { }
+            }
+            try { openAiBridgeLog?.Dispose(); } catch { }
 
             if (File.Exists(pendingUpdate))
             {
@@ -163,6 +195,144 @@ internal static class Program
         {
             lock (log) log.WriteLine($"[{DateTimeOffset.Now:O}] LAUNCHER {ex}");
             MessageBox(IntPtr.Zero, $"No se pudo iniciar SOL.\n\n{ex.Message}\n\nLog: {logPath}", "SOL", 0x10);
+        }
+    }
+
+    private static Process? TryStartOpenAiBridge(
+        string root,
+        string dataRoot,
+        string envPath,
+        string node,
+        JobHandle job,
+        out StreamWriter? bridgeLog,
+        out string status)
+    {
+        bridgeLog = null;
+
+        var gateway = ReadEnvValue(envPath, "SOL_OPENAI_GATEWAY_URL")?.Trim();
+        if (string.IsNullOrWhiteSpace(gateway))
+        {
+            status = "OpenAI/Render bridge disabled: SOL_OPENAI_GATEWAY_URL is not configured.";
+            return null;
+        }
+
+        var directToken =
+            ReadEnvValue(envPath, "SOL_MCP_TOKEN")?.Trim()
+            ?? ReadEnvValue(envPath, "NEXO_MCP_TOKEN")?.Trim();
+
+        var tokenFile =
+            ReadEnvValue(envPath, "SOL_MCP_TOKEN_FILE")?.Trim()
+            ?? ReadEnvValue(envPath, "NEXO_MCP_TOKEN_FILE")?.Trim();
+
+        if (!string.IsNullOrWhiteSpace(tokenFile))
+        {
+            tokenFile = Environment.ExpandEnvironmentVariables(tokenFile);
+            if (!Path.IsPathRooted(tokenFile)) tokenFile = Path.Combine(dataRoot, tokenFile);
+        }
+        else
+        {
+            var defaultTokenFile = Path.Combine(dataRoot, "secrets", "chatgpt-sol-mcp-token.txt");
+            if (File.Exists(defaultTokenFile)) tokenFile = defaultTokenFile;
+        }
+
+        if (string.IsNullOrWhiteSpace(directToken) && (string.IsNullOrWhiteSpace(tokenFile) || !File.Exists(tokenFile)))
+        {
+            status = "OpenAI/Render bridge waiting for an MCP token.";
+            return null;
+        }
+
+        var bridgeEntry = Path.Combine(root, "apps", "server", "dist", "mcp", "openai-bridge.js");
+        var mcpEntry = Path.Combine(root, "apps", "server", "dist", "mcp", "nexo-stdio.js");
+        var preload = Path.Combine(root, "apps", "server", "dist", "mcp", "stdio-preload.js");
+        if (!File.Exists(bridgeEntry) || !File.Exists(mcpEntry) || !File.Exists(preload))
+        {
+            status = "OpenAI/Render bridge not started because the portable MCP runtime is incomplete.";
+            return null;
+        }
+
+        var scopes = ReadEnvValue(envPath, "SOL_OPENAI_BRIDGE_SCOPES")?.Trim();
+        if (string.IsNullOrWhiteSpace(scopes)) scopes = "read,submit,actions";
+
+        var logDir = Path.Combine(dataRoot, "logs");
+        Directory.CreateDirectory(logDir);
+        var bridgeLogPath = Path.Combine(logDir, "openai-bridge.log");
+        bridgeLog = new StreamWriter(
+            new FileStream(bridgeLogPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite),
+            Encoding.UTF8)
+        {
+            AutoFlush = true,
+        };
+
+        var process = new Process
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = node,
+                Arguments = $"\"{bridgeEntry}\"",
+                WorkingDirectory = root,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            },
+            EnableRaisingEvents = true,
+        };
+
+        process.StartInfo.Environment["SOL_DATA_DIR"] = dataRoot;
+        process.StartInfo.Environment["SOL_ENV_FILE"] = envPath;
+        process.StartInfo.Environment["SOL_OPENAI_GATEWAY_URL"] = gateway;
+        process.StartInfo.Environment["SOL_OPENAI_BRIDGE_SCOPES"] = scopes;
+        process.StartInfo.Environment["SOL_MCP_BRIDGE_STDIO_COMMAND"] = node;
+        process.StartInfo.Environment["SOL_MCP_BRIDGE_STDIO_ARGS"] = JsonSerializer.Serialize(new[]
+        {
+            "--import",
+            new Uri(preload).AbsoluteUri,
+            mcpEntry,
+        });
+
+        if (!string.IsNullOrWhiteSpace(directToken))
+        {
+            process.StartInfo.Environment["SOL_MCP_TOKEN"] = directToken;
+        }
+        else if (!string.IsNullOrWhiteSpace(tokenFile))
+        {
+            process.StartInfo.Environment["SOL_MCP_TOKEN_FILE"] = tokenFile;
+        }
+
+        var writer = bridgeLog!;
+        process.OutputDataReceived += (_, e) =>
+        {
+            if (e.Data is not null) lock (writer) writer.WriteLine($"[{DateTimeOffset.Now:O}] OUT {e.Data}");
+        };
+        process.ErrorDataReceived += (_, e) =>
+        {
+            if (e.Data is not null) lock (writer) writer.WriteLine($"[{DateTimeOffset.Now:O}] ERR {e.Data}");
+        };
+        process.Exited += (_, _) =>
+        {
+            try
+            {
+                lock (writer) writer.WriteLine($"[{DateTimeOffset.Now:O}] EXIT code={process.ExitCode}");
+            }
+            catch { }
+        };
+
+        try
+        {
+            if (!process.Start()) throw new InvalidOperationException("Windows did not start the OpenAI bridge process.");
+            job.Assign(process);
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+            status = $"OpenAI/Render bridge started (PID {process.Id}).";
+            return process;
+        }
+        catch (Exception ex)
+        {
+            try { process.Dispose(); } catch { }
+            try { bridgeLog.Dispose(); } catch { }
+            bridgeLog = null;
+            status = $"OpenAI/Render bridge failed to start: {ex.Message}";
+            return null;
         }
     }
 

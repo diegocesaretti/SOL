@@ -73,15 +73,14 @@ Environment controls:
 
 Direct MCP tools remain canonical. Once a client can consume the complete SOL MCP catalog reliably, it can bypass `sol_request` for known capabilities and use the router only when orchestration adds value.
 
-## Migration / cleanup
+## Runtime architecture
 
-Do not remove the existing SOL Fast or legacy bridges merely because `sol_request` exists.
+SOL Full now uses one canonical MCP surface. The Windows launcher supervises SOL Core and, when configured, the outbound Render/OpenAI bridge.
 
-Removal is a later migration step after production verification proves that no active client depends on:
+Legacy local transport layers are retired:
 
-- `sol-fast-server.mjs`;
-- `sol-fast.ps1` / `sol-fast.cmd`;
-- `sol-full-bridge.mjs` or its watchdog;
-- facade aliases or duplicated compatibility paths.
+- SOL Fast is no longer part of the project;
+- the standalone `sol-full-bridge` and watchdog are not required;
+- Remote Desktop Commander is a maintenance/debug tool, not the normal MCP transport.
 
-The canonical plugin tools themselves must remain.
+Direct plugin tools remain canonical. `sol_request` is an optional orchestration facade over those tools.
