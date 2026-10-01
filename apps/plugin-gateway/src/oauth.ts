@@ -353,23 +353,48 @@ async function tokenEndpoint(request: Request): Promise<Response> {
   const form = new URLSearchParams(await request.text());
   const grantType = formValue(form, "grant_type");
   const clientId = formValue(form, "client_id");
+  console.log("SOL OAuth token attempt", {
+    grantType,
+    hasClientId: Boolean(clientId),
+    clientIdPrefix: clientId.slice(0, 12),
+    hasCode: Boolean(formValue(form, "code")),
+    hasVerifier: Boolean(formValue(form, "code_verifier")),
+    hasRedirectUri: Boolean(formValue(form, "redirect_uri")),
+    redirectHost: (() => { try { return new URL(formValue(form, "redirect_uri")).host; } catch { return "missing_or_invalid"; } })(),
+    hasResource: Boolean(formValue(form, "resource")),
+  });
   const client = validateClient(clientId);
-  if (!client) return oauthError("invalid_client", "Unknown or expired OAuth client", 401);
+  if (!client) {
+    console.log("SOL OAuth token result", { ok: false, reason: "invalid_client" });
+    return oauthError("invalid_client", "Unknown or expired OAuth client", 401);
+  }
 
   if (grantType === "authorization_code") {
     const code = verifyOpaqueToken<AuthorizationCodePayload>(formValue(form, "code"), "authorization_code");
-    if (!code) return oauthError("invalid_grant", "Authorization code is invalid or expired");
-    if (usedAuthorizationCodes.has(code.jti)) return oauthError("invalid_grant", "Authorization code was already used");
+    if (!code) {
+      console.log("SOL OAuth token result", { ok: false, reason: "invalid_or_expired_code" });
+      return oauthError("invalid_grant", "Authorization code is invalid or expired");
+    }
+    if (usedAuthorizationCodes.has(code.jti)) {
+      console.log("SOL OAuth token result", { ok: false, reason: "authorization_code_reused" });
+      return oauthError("invalid_grant", "Authorization code was already used");
+    }
     if (code.clientId !== clientId || code.redirectUri !== formValue(form, "redirect_uri")) {
+      console.log("SOL OAuth token result", { ok: false, reason: "client_or_redirect_mismatch" });
       return oauthError("invalid_grant", "Authorization code client or redirect_uri mismatch");
     }
     const resource = formValue(form, "resource") || code.resource;
-    if (!resourceMatches(resource) || code.resource !== resource) return oauthError("invalid_target", "resource mismatch");
+    if (!resourceMatches(resource) || code.resource !== resource) {
+      console.log("SOL OAuth token result", { ok: false, reason: "resource_mismatch", resource });
+      return oauthError("invalid_target", "resource mismatch");
+    }
     const verifier = formValue(form, "code_verifier");
     if (!verifier || !secureStringEqual(pkceS256(verifier), code.codeChallenge)) {
+      console.log("SOL OAuth token result", { ok: false, reason: "pkce_failed" });
       return oauthError("invalid_grant", "PKCE verification failed");
     }
     usedAuthorizationCodes.set(code.jti, code.exp ?? seconds() + 180);
+    console.log("SOL OAuth token result", { ok: true, grantType: "authorization_code", instanceIdSuffix: code.instanceId.slice(-8), scopes: code.scopes });
     return issueTokens({
       clientId,
       instanceId: code.instanceId,
