@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { FACADE_ALIASES, findCapabilities } from "./mcp.js";
+import { FACADE_ALIASES, findCapabilities, publicAnnotations } from "./mcp.js";
 import type { BridgeCatalog, RemoteToolDefinition } from "./state.js";
 
 function tool(name: string, description: string, requiredScope: "read" | "submit" | "actions" = "read"): RemoteToolDefinition {
@@ -47,9 +47,11 @@ test("YouTube query resolves to the dedicated playback tool", () => {
   assert.equal(matches[0]?.name, "home_assistant_youtube_play");
 });
 
-test("public facade exposes WhatsApp sending when Nexo provides it", () => {
+test("public facade exposes WhatsApp sending with irreversible-send metadata", () => {
   const alias = FACADE_ALIASES.find((item) => item.publicName === "sol_whatsapp_send");
   assert.equal(alias?.remoteName, "send_whatsapp");
+  assert.equal(alias?.annotations.openWorldHint, true);
+  assert.equal(alias?.annotations.destructiveHint, true);
 });
 
 test("capability search respects OAuth scopes", () => {
@@ -58,4 +60,34 @@ test("capability search respects OAuth scopes", () => {
 
   const withActions = findCapabilities(catalog, ["sol.read", "sol.actions"], "apagar aire", 8);
   assert.equal(withActions.some((item) => item.name === "home_assistant_call_service"), true);
+});
+test("public annotations mark external actions as open-world and irreversible sends as destructive", () => {
+  const annotations = publicAnnotations(tool("send_whatsapp", "Send WhatsApp.", "actions"));
+  assert.equal(annotations.openWorldHint, true);
+  assert.equal(annotations.destructiveHint, true);
+  assert.equal(annotations.readOnlyHint, false);
+});
+
+test("public annotations keep playback/navigation non-destructive", () => {
+  const youtube = publicAnnotations(tool("home_assistant_youtube_play", "Play YouTube.", "actions"));
+  assert.equal(youtube.openWorldHint, true);
+  assert.equal(youtube.destructiveHint, false);
+
+  const stremio = publicAnnotations(tool("home_assistant_stremio_search", "Search Stremio.", "read"));
+  assert.equal(stremio.openWorldHint, true);
+  assert.equal(stremio.destructiveHint, false);
+  assert.equal(stremio.readOnlyHint, true);
+});
+
+test("public annotations keep bounded cached Home Assistant reads closed-world", () => {
+  const annotations = publicAnnotations(tool("home_assistant_get_state", "Read cached state.", "read"));
+  assert.equal(annotations.openWorldHint, false);
+  assert.equal(annotations.readOnlyHint, true);
+  assert.equal(annotations.destructiveHint, false);
+});
+
+test("public annotations mark submit tools open-world while preserving additive writes", () => {
+  const annotations = publicAnnotations(tool("save_observation", "Save observation.", "submit"));
+  assert.equal(annotations.openWorldHint, true);
+  assert.equal(annotations.destructiveHint, false);
 });
