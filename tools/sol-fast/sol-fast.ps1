@@ -79,6 +79,12 @@ elseif ($Command -eq "media_play") {
 }
 elseif ($Command -eq "youtube_play") {
   $quickArgs.url = $Value
+  if ($Json -and $Json -ne "{}") {
+    $opts = $Json | ConvertFrom-Json
+    foreach ($p in $opts.PSObject.Properties) {
+      $quickArgs[$p.Name] = $p.Value
+    }
+  }
 }
 elseif ($Command -eq "home_action") {
   $actionJson = if ($Value -and $Value.Trim().StartsWith("{")) { $Value } elseif ($Json -and $Json -ne "{}") { $Json } else { "{}" }

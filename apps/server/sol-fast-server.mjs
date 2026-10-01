@@ -1,6 +1,11 @@
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { createServer } from "node:http";
+import {
+  buildYoutubePlayPlan,
+  stateFingerprint,
+  youtubeStateEvidence
+} from "./sol-fast-youtube.mjs";
 
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.SOL_FAST_PORT || 8770);
@@ -158,41 +163,95 @@ function unwrapResult(value) {
   return value;
 }
 
-function normalizeYoutubeUrl(value) {
-  const raw = String(value || "").trim();
-  if (!raw) throw new Error("youtube_url_required");
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
-  let parsed;
-  try { parsed = new URL(raw); } catch { throw new Error("youtube_url_invalid"); }
-  if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("youtube_url_invalid_protocol");
+async function readStateSafe(entityId) {
+  try {
+    const raw = await callTool("home_assistant_get_state", { entityId });
+    const state = unwrapResult(raw);
+    return state && typeof state === "object" ? state : { entityId, error: "invalid_state_response" };
+  } catch (error) {
+    return { entityId, error: error?.message || String(error) };
+  }
+}
 
-  const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
-  const allowed = host === "youtu.be"
-    || host === "youtube.com"
-    || host === "m.youtube.com"
-    || host === "music.youtube.com";
-  if (!allowed) throw new Error("youtube_url_invalid_host");
+async function readYoutubeStates(destination) {
+  const states = [];
+  for (const entityId of destination.verifyEntityIds) {
+    states.push(await readStateSafe(entityId));
+  }
+  return states;
+}
 
-  return parsed.toString();
+function compactYoutubeState(state) {
+  const attributes = state?.attributes && typeof state.attributes === "object" ? state.attributes : {};
+  return {
+    entityId: state?.entityId || null,
+    state: state?.state || null,
+    appId: attributes.app_id || null,
+    appName: attributes.app_name || null,
+    mediaTitle: attributes.media_title || null,
+    lastUpdated: state?.lastUpdated || null,
+    error: state?.error || null
+  };
+}
+
+async function verifyYoutubePlayback(plan, beforeStates) {
+  const timeoutMs = Math.max(500, Math.min(8000, Number(process.env.SOL_FAST_YOUTUBE_VERIFY_TIMEOUT_MS || 3000)));
+  const startedAt = Date.now();
+  const before = new Map(beforeStates.map((state) => [state.entityId, stateFingerprint(state)]));
+  const delays = [0, 120, 220, 350, 500, 700, 900, 1200];
+  let attempts = 0;
+  let lastStates = beforeStates;
+  let bestEvidence = null;
+
+  for (const delayMs of delays) {
+    if (delayMs > 0) await sleep(delayMs);
+    if (Date.now() - startedAt > timeoutMs) break;
+
+    attempts += 1;
+    const states = await readYoutubeStates(plan.destination);
+    lastStates = states;
+
+    for (const state of states) {
+      const evidence = youtubeStateEvidence(state, plan.expectedTitle);
+      if (!evidence) continue;
+
+      const changed = before.get(state.entityId) !== stateFingerprint(state);
+      const exactTitle = evidence.level === "expected_title";
+      if (exactTitle || changed) {
+        return {
+          confirmed: true,
+          level: exactTitle ? "expected_title" : "youtube_state_changed",
+          attempts,
+          elapsedMs: Date.now() - startedAt,
+          evidence,
+          states: states.map(compactYoutubeState)
+        };
+      }
+      bestEvidence = evidence;
+    }
+  }
+
+  return {
+    confirmed: false,
+    level: bestEvidence ? "youtube_app_active_unconfirmed" : "not_confirmed",
+    attempts,
+    elapsedMs: Date.now() - startedAt,
+    evidence: bestEvidence,
+    states: lastStates.map(compactYoutubeState)
+  };
 }
 
 const quickMap = {
   tv_cocina: () => ["home_assistant_get_state", { entityId: "media_player.tv_cocina_2" }],
+  tv_dormitorio: () => ["home_assistant_get_state", { entityId: "media_player.tv_dormitorio_2" }],
   aire_cocina: () => ["home_assistant_get_state", { entityId: "climate.aire_cocina" }],
   home_find: (a) => ["home_assistant_search_states", { query: String(a.query || ""), limit: Number(a.limit || 20) }],
   media_play: (a) => ["home_assistant_stremio_play_best", a],
-  youtube_play: (a) => ["home_assistant_call_service", {
-    domain: "media_player",
-    service: "play_media",
-    target: { entity_id: String(a.entityId || "media_player.tv_cocina_2") },
-    serviceData: {
-      media: {
-        media_content_id: normalizeYoutubeUrl(a.url),
-        media_content_type: "url"
-      }
-    },
-    confirmedByUser: true
-  }],
+  youtube_play: (a) => ["home_assistant_call_service", buildYoutubePlayPlan(a).toolArgs],
   whatsapp_search: (a) => ["search_whatsapp", { query: String(a.query || ""), limit: Number(a.limit || 20) }],
   memory_search: (a) => ["memory_search", { query: String(a.query || ""), limit: Number(a.limit || 20) }],
   context_search: (a) => ["search_life", { query: String(a.query || ""), limit: Number(a.limit || 20) }],
@@ -203,7 +262,14 @@ const quickDocs = {
   tv_cocina: {
     kind: "read",
     usage: "sol-fast.ps1 tv_cocina",
+    fastUsage: "sol-fast.cmd tv_cocina",
     description: "Read the current kitchen TV state."
+  },
+  tv_dormitorio: {
+    kind: "read",
+    usage: "sol-fast.ps1 tv_dormitorio",
+    fastUsage: "sol-fast.cmd tv_dormitorio",
+    description: "Read the current bedroom TV state."
   },
   aire_cocina: {
     kind: "read",
@@ -222,8 +288,9 @@ const quickDocs = {
   },
   youtube_play: {
     kind: "action",
-    usage: "sol-fast.ps1 youtube_play \"https://www.youtube.com/watch?v=...\"",
-    description: "Play a YouTube URL on TV Cocina through Home Assistant media_player.play_media using an Android TV deep link. If the user names a video/song instead of giving a URL, resolve a concrete YouTube URL first, then use this command. Prefer this over raw home_action."
+    usage: "sol-fast.ps1 youtube_play \"https://www.youtube.com/watch?v=...\" ['{\"target\":\"cocina|dormitorio\",\"expectedTitle\":\"optional title\"}']",
+    fastUsage: "sol-fast.cmd youtube_play \"<video-id-or-canonical-youtube-url>\" [cocina|dormitorio]",
+    description: "Play a concrete YouTube URL through Home Assistant media_player.play_media. Default target is cocina; use target=dormitorio only when explicitly requested. SOL Fast verifies the resulting TV state in the same call. If the user names a video/song instead of giving a URL, resolve a concrete YouTube URL first, then use this command."
   },
   whatsapp_search: {
     kind: "read",
@@ -256,13 +323,18 @@ function helpPayload(extra = {}) {
       "Do not pass the user's natural-language sentence as the command name.",
       "Translate the request to a documented quick command or inspect the real SOL Full tool catalog.",
       "For an unfamiliar capability, run: sol-fast.ps1 tools",
-      "For YouTube playback on TV Cocina, resolve a concrete YouTube URL if needed, then prefer: sol-fast.ps1 youtube_play <url>.",
+      "For common hot-path commands on HTPC, prefer C:\\sol\\sol-fast.cmd to avoid PowerShell startup latency; keep sol-fast.ps1 for discovery and complex/raw calls.",
+      "For YouTube playback, resolve a concrete YouTube URL if needed, then use youtube_play. Default target is cocina; use dormitorio only when explicitly requested. The youtube_play response already includes verification, so do not make a second verification call unless verification.confirmed is false and the user needs certainty.",
       "For Stremio playback, default target is cocina. If the user explicitly asks for the bedroom TV, set target=dormitorio. Leave language unspecified by default; only set language=spanish, latin, or english when explicitly requested.",
       "Before calling an unfamiliar raw tool, run: sol-fast.ps1 schema <tool_name>",
       "Use actions only when the current user request explicitly authorizes them.",
       "After a real-world action, read the relevant state again before claiming success."
     ],
     quickCommands: quickDocs,
+    clients: {
+      fast: "C:\\sol\\sol-fast.cmd",
+      full: "C:\\sol\\sol-fast.ps1"
+    },
     discovery: {
       help: "sol-fast.ps1 help",
       tools: "sol-fast.ps1 tools",
@@ -283,7 +355,7 @@ const server = createServer(async (req, res) => {
       return sendJson(res, 200, {
         ok: true,
         service: "sol-fast",
-        version: "1.2",
+        version: "1.3",
         connected: Boolean(client) && Boolean(nexoClient),
         providers: {
           core: { connected: Boolean(client), toolCount: coreTools.length },
@@ -361,6 +433,33 @@ const server = createServer(async (req, res) => {
         return sendJson(res, 403, { error: "user_confirmation_required" });
       }
       const args = body.arguments && typeof body.arguments === "object" ? body.arguments : {};
+
+      if (command === "youtube_play") {
+        let plan;
+        try {
+          plan = buildYoutubePlayPlan(args);
+        } catch (error) {
+          return sendJson(res, 200, helpPayload({
+            error: error?.message || String(error),
+            receivedCommand: command,
+            nextStep: "Resolve a valid YouTube URL, choose target=cocina or target=dormitorio, then retry youtube_play."
+          }));
+        }
+
+        const beforeStates = await readYoutubeStates(plan.destination);
+        const action = await callTool(plan.tool, plan.toolArgs);
+        const verification = await verifyYoutubePlayback(plan, beforeStates);
+        return sendJson(res, 200, {
+          command,
+          tool: plan.tool,
+          target: plan.destination.target,
+          entityId: plan.destination.entityId,
+          url: plan.url,
+          action: unwrapResult(action),
+          verification
+        });
+      }
+
       let tool;
       let toolArgs;
       try {
