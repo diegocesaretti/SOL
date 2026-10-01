@@ -132,6 +132,7 @@ function redirectWithError(redirectUri: string, state: string, error: string, de
   const url = new URL(redirectUri);
   url.searchParams.set("error", error);
   url.searchParams.set("error_description", description);
+  url.searchParams.set("iss", gatewayConfig.publicOrigin);
   if (state) url.searchParams.set("state", state);
   return Response.redirect(url.toString(), 302);
 }
@@ -189,7 +190,7 @@ export function oauthAuthorizationServerMetadata(): Response {
     grant_types_supported: ["authorization_code", "refresh_token"],
     code_challenge_methods_supported: ["S256"],
     token_endpoint_auth_methods_supported: ["none"],
-    authorization_response_iss_parameter_supported: false,
+    authorization_response_iss_parameter_supported: true,
   });
 }
 
@@ -307,6 +308,7 @@ async function authorizePost(request: Request): Promise<Response> {
   const authorizationCode = `sol_ac_${randomId(24)}`;
   authorizationCodes.set(authorizationCode, payload);
   url.searchParams.set("code", authorizationCode);
+  url.searchParams.set("iss", gatewayConfig.publicOrigin);
   if (state) url.searchParams.set("state", state);
   console.log("SOL OAuth authorize redirect", {
     redirectHost: url.host,
