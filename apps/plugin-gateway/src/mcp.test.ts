@@ -21,6 +21,7 @@ const catalog: BridgeCatalog = {
     tool("home_assistant_call_service", "Execute a Home Assistant service.", "actions"),
     tool("memory_search", "Search explicit durable SOL memories visible to the member."),
     tool("search_whatsapp", "Search observed WhatsApp history stored by Nexo."),
+    tool("send_whatsapp", "Send one WhatsApp text using the dedicated output account.", "actions"),
     tool("home_assistant_stremio_play_best", "Play the best Stremio stream.", "actions"),
     tool("home_assistant_youtube_play", "Play and verify a concrete YouTube video on the configured TV.", "actions"),
   ],
@@ -44,6 +45,11 @@ test("public facade exposes the dedicated YouTube playback tool", () => {
 test("YouTube query resolves to the dedicated playback tool", () => {
   const matches = findCapabilities(catalog, ["sol.read", "sol.actions"], "poné un video de youtube", 5);
   assert.equal(matches[0]?.name, "home_assistant_youtube_play");
+});
+
+test("public facade exposes WhatsApp sending when Nexo provides it", () => {
+  const alias = FACADE_ALIASES.find((item) => item.publicName === "sol_whatsapp_send");
+  assert.equal(alias?.remoteName, "send_whatsapp");
 });
 
 test("capability search respects OAuth scopes", () => {

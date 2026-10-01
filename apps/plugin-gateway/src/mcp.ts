@@ -149,6 +149,13 @@ export const FACADE_ALIASES: FacadeAlias[] = [
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false, idempotentHint: true },
   },
   {
+    publicName: "sol_whatsapp_send",
+    remoteName: "send_whatsapp",
+    title: "Send a WhatsApp message",
+    description: "Send one WhatsApp text through SOL/Nexo's dedicated output account. Use only when the current user explicitly asks to send the message; preserve confirmedByUser=true and the exact recipient/message requested.",
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+  },
+  {
     publicName: "sol_memory_search",
     remoteName: "memory_search",
     title: "Search SOL memory",
@@ -166,7 +173,6 @@ export const FACADE_ALIASES: FacadeAlias[] = [
 
 const FACADE_RESERVED_NAMES = new Set([
   "sol_profile",
-  "sol_request",
   "sol_find_capability",
   "sol_run_read",
   "sol_run_submit",
@@ -377,7 +383,7 @@ export const mcpHandler = createMcpHandler(({ authInfo }) => {
     { name: "SOL", version: "1.0.0" },
     {
       instructions:
-        "SOL is the user's private home/context backend. Use the explicit facade tools for live Home Assistant state, home actions, media playback, WhatsApp context, durable memory, and broader private context. Use sol_youtube_play for YouTube videos or songs; use sol_media_play only for movies, series and episodes through Stremio. Query SOL before asserting live device state and never invent device state. Only invoke action tools when the user's current request clearly authorizes the real-world action, and preserve every SOL confirmation and permission boundary.",
+        "SOL is the user's private home/context backend. The MCP exposes the complete permission-filtered SOL Full catalog plus explicit facade tools for common workflows. Prefer a dedicated facade tool when it exactly matches the request; otherwise use any directly exposed SOL Full tool. sol_find_capability plus sol_run_read/sol_run_submit/sol_run_action provide a stable discovery fallback for advanced capabilities. Use sol_youtube_play for YouTube videos or songs; use sol_media_play only for movies, series and episodes through Stremio. Query SOL before asserting live device state and never invent device state. Only invoke submit/action tools when the user's current request clearly authorizes the write or real-world action, and preserve every SOL confirmation and permission boundary.",
     },
   );
 
@@ -416,6 +422,14 @@ export const mcpHandler = createMcpHandler(({ authInfo }) => {
   if (exposure === "facade" || exposure === "both") {
     registerFacadeAliases(server, catalog, instanceId, oauthScopes);
   }
+
+  // Always expose the SOL Full discovery/runner layer. It keeps every
+  // permission-filtered bridge capability reachable even when a client uses
+  // facade-only exposure, and provides a stable fallback as SOL Full grows.
+  registerCapabilitySearch(server, catalog, oauthScopes);
+  registerDynamicRunner(server, catalog, instanceId, oauthScopes, "read");
+  registerDynamicRunner(server, catalog, instanceId, oauthScopes, "submit");
+  registerDynamicRunner(server, catalog, instanceId, oauthScopes, "actions");
 
   if (exposure === "raw" || exposure === "both") {
     for (const tool of catalog?.tools ?? []) {

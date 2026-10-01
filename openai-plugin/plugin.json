@@ -1,8 +1,8 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "sol",
-  "version": "0.1.1",
-  "description": "Connect ChatGPT to a private SOL installation for Home Assistant, memory and authorized local tools.",
+  "version": "0.1.2",
+  "description": "Connect ChatGPT to the complete permission-filtered SOL Full and Nexo MCP catalog, including Home Assistant, memory, WhatsApp and authorized local tools.",
   "author": {
     "name": "SOL"
   },
