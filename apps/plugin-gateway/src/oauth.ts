@@ -304,8 +304,16 @@ async function authorizePost(request: Request): Promise<Response> {
     instanceId: pairing.instanceId,
   };
   const url = new URL(redirectUri);
-  url.searchParams.set("code", signOpaqueToken(payload));
+  const authorizationCode = signOpaqueToken(payload);
+  url.searchParams.set("code", authorizationCode);
   if (state) url.searchParams.set("state", state);
+  console.log("SOL OAuth authorize redirect", {
+    redirectHost: url.host,
+    redirectPath: url.pathname,
+    codeLength: authorizationCode.length,
+    locationLength: url.toString().length,
+    hasState: Boolean(state),
+  });
   return Response.redirect(url.toString(), 302);
 }
 
