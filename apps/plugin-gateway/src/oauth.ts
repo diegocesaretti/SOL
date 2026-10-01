@@ -272,7 +272,19 @@ async function authorizePost(request: Request): Promise<Response> {
       ? redirectWithError(redirectUri, state, "invalid_request", "OAuth request validation failed")
       : validation;
   }
-  const pairing = consumePairCode(formValue(form, "pair_code"));
+  const submittedPairCode = formValue(form, "pair_code");
+  console.log("SOL OAuth pairing attempt", {
+    pairCodeLength: submittedPairCode.length,
+    pairCodePrefix: submittedPairCode.slice(0, 5),
+    pairCodeSuffix: submittedPairCode.slice(-4),
+    clientIdPrefix: formValue(form, "client_id").slice(0, 12),
+    redirectHost: (() => { try { return new URL(redirectUri).host; } catch { return "invalid"; } })(),
+  });
+  const pairing = consumePairCode(submittedPairCode);
+  console.log("SOL OAuth pairing result", {
+    accepted: Boolean(pairing),
+    instanceIdSuffix: pairing?.instanceId.slice(-8) ?? null,
+  });
   if (!pairing) return authorizeForm(form, "El código no existe o ya venció. Generá uno nuevo desde SOL.");
   try {
     ensureAllowedScopes(validation.scopes, pairing.allowedScopes);
