@@ -125,7 +125,7 @@ const FACADE_ALIASES: FacadeAlias[] = [
     remoteName: "home_assistant_call_service",
     title: "Control the home",
     description: "Execute an explicit Home Assistant service action through SOL after the target is resolved. Use only when the user's current request clearly asks for the action. Preserve the required confirmedByUser field.",
-    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   },
   {
     publicName: "sol_media_play",
