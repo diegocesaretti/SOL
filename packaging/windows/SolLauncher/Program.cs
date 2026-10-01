@@ -212,8 +212,7 @@ internal static class Program
         var gateway = ReadEnvValue(envPath, "SOL_OPENAI_GATEWAY_URL")?.Trim();
         if (string.IsNullOrWhiteSpace(gateway))
         {
-            status = "OpenAI/Render bridge disabled: SOL_OPENAI_GATEWAY_URL is not configured.";
-            return null;
+            gateway = "https://sol-plugin-gateway.onrender.com";
         }
 
         var directToken =
