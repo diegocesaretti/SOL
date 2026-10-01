@@ -1,12 +1,18 @@
 # Home Assistant SOL plugin
 
-Home Assistant bridge for SOL. Stremio intentionally has one playback architecture:
+Home Assistant bridge for SOL. YouTube and Stremio each have exactly one playback architecture.
+
+## YouTube playback
+
+`SOL MCP -> home_assistant_youtube_play -> exact configured media_player -> Home Assistant play_media -> cache verification`
+
+`home_assistant_youtube_play` is the only YouTube playback tool. It accepts a YouTube URL or video id, maps `cocina` and `dormitorio` to explicit configured entities, sends the URL through Home Assistant and verifies the resulting YouTube state before reporting confirmation. It never falls back to another entity with the same friendly name.
+
+## Stremio playback
 
 `SOL MCP -> Home Assistant plugin -> Cinemeta/account -> all account stream addons -> proven native index -> official Stremio -> Home Assistant remote keys`
 
 There is no Android TV Satellite, Accessibility service, screenshot observer, MCP forwarding proxy, audience-classifier wrapper, launch guard, generic first-stream autoclick, focus nudge, addon-ranking runtime or alternate provider-profile playback path.
-
-## Stremio playback
 
 `home_assistant_stremio_play_best` is the only playback tool. It:
 
@@ -24,7 +30,7 @@ The plugin does not claim playback confirmation because it intentionally has no 
 
 ## Stremio settings kept intentionally
 
-Only settings that alter the active path remain: account credentials, one Android TV remote entity, provider timeout, default quality/language, startup delay, inter-key delay, initial focus index, pre-select delay, final select key and select-key hold duration.
+Only settings that alter the active path remain: account credentials, one Android TV remote entity, provider timeout, default quality/language, startup delay, reset option, inter-key delay, pre-select delay, final select key and select-key hold duration.
 
 ## Home Assistant
 

@@ -10,6 +10,8 @@ For Home Assistant:
 - Prefer search/list tools to resolve the correct entity when the user's natural-language name is ambiguous.
 - Read the relevant current state before a conditional action.
 - Use action tools only when the user's current request clearly asks for that action and the tool is available.
+- For YouTube videos or songs, prefer `sol_youtube_play`. Resolve a concrete YouTube URL/video id when necessary; do not route YouTube through Stremio or a generic media receiver.
+- Use `sol_media_play` for movies, series and episodes through Stremio, not for YouTube.
 - Preserve every confirmation field required by the SOL tool. Do not manufacture a confirmation the user did not provide.
 - For security-sensitive actions such as alarms, locks, gates, doors, cameras or access control, keep the user's intent explicit and rely on ChatGPT's action-review flow plus SOL's own permissions.
 

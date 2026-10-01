@@ -112,7 +112,7 @@ interface FacadeAlias {
   };
 }
 
-const FACADE_ALIASES: FacadeAlias[] = [
+export const FACADE_ALIASES: FacadeAlias[] = [
   {
     publicName: "sol_home_find",
     remoteName: "home_assistant_search_states",
@@ -130,8 +130,15 @@ const FACADE_ALIASES: FacadeAlias[] = [
   {
     publicName: "sol_media_play",
     remoteName: "home_assistant_stremio_play_best",
-    title: "Play media on the TV",
-    description: "Play a requested movie, series or episode using SOL's existing deterministic Stremio playback flow. Prefer this for spoken requests such as 'poné Los Simpson'.",
+    title: "Play movies or series on the TV",
+    description: "Play a requested movie, series or episode using SOL's deterministic Stremio playback flow. Do not use this tool for YouTube videos or songs.",
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+  },
+  {
+    publicName: "sol_youtube_play",
+    remoteName: "home_assistant_youtube_play",
+    title: "Play a YouTube video on the TV",
+    description: "Play one concrete YouTube video on the configured kitchen or bedroom TV. Resolve a YouTube URL or video id first when the user names a song/video. The underlying SOL Home Assistant tool selects the exact TV entity and verifies the resulting YouTube state.",
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   },
   {
@@ -182,7 +189,11 @@ const SEARCH_ALIASES: Record<string, string[]> = {
   recordar: ["memory", "remember", "fact"],
   pelicula: ["stremio", "media", "play"],
   serie: ["stremio", "media", "play"],
-  reproducir: ["stremio", "media", "play"],
+  youtube: ["youtube", "video", "play"],
+  video: ["youtube", "video", "play"],
+  cancion: ["youtube", "music", "play"],
+  musica: ["youtube", "music", "play"],
+  reproducir: ["youtube", "stremio", "media", "play"],
 };
 
 function normalizeSearch(value: string): string {
@@ -366,7 +377,7 @@ export const mcpHandler = createMcpHandler(({ authInfo }) => {
     { name: "SOL", version: "1.0.0" },
     {
       instructions:
-        "SOL is the user's private home/context backend. Use the explicit facade tools for live Home Assistant state, home actions, media playback, WhatsApp context, durable memory, and broader private context. Query SOL before asserting live device state and never invent device state. Only invoke action tools when the user's current request clearly authorizes the real-world action, and preserve every SOL confirmation and permission boundary.",
+        "SOL is the user's private home/context backend. Use the explicit facade tools for live Home Assistant state, home actions, media playback, WhatsApp context, durable memory, and broader private context. Use sol_youtube_play for YouTube videos or songs; use sol_media_play only for movies, series and episodes through Stremio. Query SOL before asserting live device state and never invent device state. Only invoke action tools when the user's current request clearly authorizes the real-world action, and preserve every SOL confirmation and permission boundary.",
     },
   );
 

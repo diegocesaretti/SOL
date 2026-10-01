@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { findCapabilities } from "./mcp.js";
+import { FACADE_ALIASES, findCapabilities } from "./mcp.js";
 import type { BridgeCatalog, RemoteToolDefinition } from "./state.js";
 
 function tool(name: string, description: string, requiredScope: "read" | "submit" | "actions" = "read"): RemoteToolDefinition {
@@ -22,6 +22,7 @@ const catalog: BridgeCatalog = {
     tool("memory_search", "Search explicit durable SOL memories visible to the member."),
     tool("search_whatsapp", "Search observed WhatsApp history stored by Nexo."),
     tool("home_assistant_stremio_play_best", "Play the best Stremio stream.", "actions"),
+    tool("home_assistant_youtube_play", "Play and verify a concrete YouTube video on the configured TV.", "actions"),
   ],
 };
 test("Spanish TV query finds Home Assistant TV tools", () => {
@@ -33,6 +34,16 @@ test("Spanish TV query finds Home Assistant TV tools", () => {
 test("memory query prioritizes memory search", () => {
   const matches = findCapabilities(catalog, ["sol.read"], "qué recuerda la memoria", 3);
   assert.equal(matches[0]?.name, "memory_search");
+});
+
+test("public facade exposes the dedicated YouTube playback tool", () => {
+  const alias = FACADE_ALIASES.find((item) => item.publicName === "sol_youtube_play");
+  assert.equal(alias?.remoteName, "home_assistant_youtube_play");
+});
+
+test("YouTube query resolves to the dedicated playback tool", () => {
+  const matches = findCapabilities(catalog, ["sol.read", "sol.actions"], "poné un video de youtube", 5);
+  assert.equal(matches[0]?.name, "home_assistant_youtube_play");
 });
 
 test("capability search respects OAuth scopes", () => {

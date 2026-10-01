@@ -16,7 +16,6 @@
     "mcp": "pnpm --filter @sol/server mcp",
     "mcp:bridge": "pnpm --filter @sol/server mcp:bridge",
     "plugin-gateway": "pnpm --filter @sol/plugin-gateway dev",
-    "mcp:legacy": "pnpm --filter @sol/server mcp:legacy",
     "mcp:token": "pnpm --filter @sol/server mcp:token",
     "knowledge:consolidate": "pnpm --filter @sol/server knowledge:consolidate",
     "plugin:pack": "node scripts/pack-sol-plugin.mjs",

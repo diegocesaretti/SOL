@@ -26,11 +26,13 @@ test("bridge enrollment token authenticates and catalog is member-instance scope
   assert.equal(getBridgeCatalog(enrolled.instanceId)?.profile?.displayName, "Tester");
 });
 
-test("pair codes are single-use", () => {
+test("pair codes tolerate OAuth retries during their short TTL", () => {
   const enrolled = enrollBridge();
   const pair = issuePairCode(enrolled.instanceId, ["read", "actions"]);
   const first = consumePairCode(pair.code);
+  const retry = consumePairCode(pair.code);
   assert.equal(first?.instanceId, enrolled.instanceId);
   assert.deepEqual(first?.allowedScopes, ["read", "actions"]);
-  assert.equal(consumePairCode(pair.code), null);
+  assert.equal(retry?.instanceId, enrolled.instanceId);
+  assert.deepEqual(retry?.allowedScopes, ["read", "actions"]);
 });

@@ -1,13 +1,9 @@
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { createServer } from "node:http";
-import {
-  buildYoutubePlayPlan,
-  stateFingerprint,
-  youtubeStateEvidence
-} from "./sol-fast-youtube.mjs";
 
 const HOST = "127.0.0.1";
+const VERSION = "1.4";
 const PORT = Number(process.env.SOL_FAST_PORT || 8770);
 
 const mcpEnv = {
@@ -163,95 +159,13 @@ function unwrapResult(value) {
   return value;
 }
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function readStateSafe(entityId) {
-  try {
-    const raw = await callTool("home_assistant_get_state", { entityId });
-    const state = unwrapResult(raw);
-    return state && typeof state === "object" ? state : { entityId, error: "invalid_state_response" };
-  } catch (error) {
-    return { entityId, error: error?.message || String(error) };
-  }
-}
-
-async function readYoutubeStates(destination) {
-  const states = [];
-  for (const entityId of destination.verifyEntityIds) {
-    states.push(await readStateSafe(entityId));
-  }
-  return states;
-}
-
-function compactYoutubeState(state) {
-  const attributes = state?.attributes && typeof state.attributes === "object" ? state.attributes : {};
-  return {
-    entityId: state?.entityId || null,
-    state: state?.state || null,
-    appId: attributes.app_id || null,
-    appName: attributes.app_name || null,
-    mediaTitle: attributes.media_title || null,
-    lastUpdated: state?.lastUpdated || null,
-    error: state?.error || null
-  };
-}
-
-async function verifyYoutubePlayback(plan, beforeStates) {
-  const timeoutMs = Math.max(500, Math.min(8000, Number(process.env.SOL_FAST_YOUTUBE_VERIFY_TIMEOUT_MS || 3000)));
-  const startedAt = Date.now();
-  const before = new Map(beforeStates.map((state) => [state.entityId, stateFingerprint(state)]));
-  const delays = [0, 120, 220, 350, 500, 700, 900, 1200];
-  let attempts = 0;
-  let lastStates = beforeStates;
-  let bestEvidence = null;
-
-  for (const delayMs of delays) {
-    if (delayMs > 0) await sleep(delayMs);
-    if (Date.now() - startedAt > timeoutMs) break;
-
-    attempts += 1;
-    const states = await readYoutubeStates(plan.destination);
-    lastStates = states;
-
-    for (const state of states) {
-      const evidence = youtubeStateEvidence(state, plan.expectedTitle);
-      if (!evidence) continue;
-
-      const changed = before.get(state.entityId) !== stateFingerprint(state);
-      const exactTitle = evidence.level === "expected_title";
-      if (exactTitle || changed) {
-        return {
-          confirmed: true,
-          level: exactTitle ? "expected_title" : "youtube_state_changed",
-          attempts,
-          elapsedMs: Date.now() - startedAt,
-          evidence,
-          states: states.map(compactYoutubeState)
-        };
-      }
-      bestEvidence = evidence;
-    }
-  }
-
-  return {
-    confirmed: false,
-    level: bestEvidence ? "youtube_app_active_unconfirmed" : "not_confirmed",
-    attempts,
-    elapsedMs: Date.now() - startedAt,
-    evidence: bestEvidence,
-    states: lastStates.map(compactYoutubeState)
-  };
-}
-
 const quickMap = {
   tv_cocina: () => ["home_assistant_get_state", { entityId: "media_player.tv_cocina_2" }],
   tv_dormitorio: () => ["home_assistant_get_state", { entityId: "media_player.tv_dormitorio_2" }],
   aire_cocina: () => ["home_assistant_get_state", { entityId: "climate.aire_cocina" }],
   home_find: (a) => ["home_assistant_search_states", { query: String(a.query || ""), limit: Number(a.limit || 20) }],
   media_play: (a) => ["home_assistant_stremio_play_best", a],
-  youtube_play: (a) => ["home_assistant_call_service", buildYoutubePlayPlan(a).toolArgs],
+  youtube_play: (a) => ["home_assistant_youtube_play", { ...a, confirmedByUser: true }],
   whatsapp_search: (a) => ["search_whatsapp", { query: String(a.query || ""), limit: Number(a.limit || 20) }],
   memory_search: (a) => ["memory_search", { query: String(a.query || ""), limit: Number(a.limit || 20) }],
   context_search: (a) => ["search_life", { query: String(a.query || ""), limit: Number(a.limit || 20) }],
@@ -290,7 +204,7 @@ const quickDocs = {
     kind: "action",
     usage: "sol-fast.ps1 youtube_play \"https://www.youtube.com/watch?v=...\" ['{\"target\":\"cocina|dormitorio\",\"expectedTitle\":\"optional title\"}']",
     fastUsage: "sol-fast.cmd youtube_play \"<video-id-or-canonical-youtube-url>\" [cocina|dormitorio]",
-    description: "Play a concrete YouTube URL through Home Assistant media_player.play_media. Default target is cocina; use target=dormitorio only when explicitly requested. SOL Fast verifies the resulting TV state in the same call. If the user names a video/song instead of giving a URL, resolve a concrete YouTube URL first, then use this command."
+    description: "Play one concrete YouTube video through SOL's Home Assistant YouTube tool. The Home Assistant plugin owns target selection and playback verification; SOL Fast does not implement a second playback path."
   },
   whatsapp_search: {
     kind: "read",
@@ -317,7 +231,7 @@ const quickDocs = {
 function helpPayload(extra = {}) {
   return {
     service: "SOL Fast",
-    version: "1.2",
+    version: VERSION,
     purpose: "Fast local aggregate bridge to the user's authenticated SOL Full and Nexo MCPs.",
     modelInstructions: [
       "Do not pass the user's natural-language sentence as the command name.",
@@ -355,7 +269,7 @@ const server = createServer(async (req, res) => {
       return sendJson(res, 200, {
         ok: true,
         service: "sol-fast",
-        version: "1.3",
+        version: VERSION,
         connected: Boolean(client) && Boolean(nexoClient),
         providers: {
           core: { connected: Boolean(client), toolCount: coreTools.length },
@@ -434,32 +348,6 @@ const server = createServer(async (req, res) => {
       }
       const args = body.arguments && typeof body.arguments === "object" ? body.arguments : {};
 
-      if (command === "youtube_play") {
-        let plan;
-        try {
-          plan = buildYoutubePlayPlan(args);
-        } catch (error) {
-          return sendJson(res, 200, helpPayload({
-            error: error?.message || String(error),
-            receivedCommand: command,
-            nextStep: "Resolve a valid YouTube URL, choose target=cocina or target=dormitorio, then retry youtube_play."
-          }));
-        }
-
-        const beforeStates = await readYoutubeStates(plan.destination);
-        const action = await callTool(plan.tool, plan.toolArgs);
-        const verification = await verifyYoutubePlayback(plan, beforeStates);
-        return sendJson(res, 200, {
-          command,
-          tool: plan.tool,
-          target: plan.destination.target,
-          entityId: plan.destination.entityId,
-          url: plan.url,
-          action: unwrapResult(action),
-          verification
-        });
-      }
-
       let tool;
       let toolArgs;
       try {
@@ -468,9 +356,7 @@ const server = createServer(async (req, res) => {
         return sendJson(res, 200, helpPayload({
           error: error?.message || String(error),
           receivedCommand: command,
-          nextStep: command === "youtube_play"
-            ? "Resolve a valid youtube.com or youtu.be URL and retry youtube_play."
-            : "Correct the quick-command arguments and retry."
+          nextStep: "Correct the quick-command arguments and retry."
         }));
       }
       const result = await callTool(tool, toolArgs);
