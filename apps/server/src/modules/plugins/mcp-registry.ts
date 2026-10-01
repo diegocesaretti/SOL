@@ -165,6 +165,77 @@ async function callbackIsLive(tool: PluginMcpTool): Promise<boolean> {
   }
 }
 
+async function latestCompatiblePluginMcpTool(
+  principal: AuthPrincipal,
+  tool: PluginMcpTool,
+): Promise<PluginMcpTool | undefined> {
+  const result = await db.query<{
+    plugin_id: string;
+    name: string;
+    description: string;
+    input_schema: Record<string, unknown>;
+    callback_url: string;
+    required_scope: "read" | "submit" | "actions";
+    visibility: "private" | "family";
+  }>(
+    `SELECT plugin_id, name, description, input_schema, callback_url,
+            required_scope, visibility::text
+     FROM plugin_mcp_tools
+     WHERE household_id = $1
+       AND plugin_id = $2
+       AND name = $3
+       AND required_scope = $4
+       AND (visibility = 'family' OR owner_member_id = $5)
+     LIMIT 1`,
+    [
+      principal.householdId,
+      tool.pluginId,
+      tool.name,
+      tool.requiredScope,
+      principal.memberId,
+    ],
+  );
+  const row = result.rows[0];
+  if (!row) return undefined;
+  return {
+    pluginId: row.plugin_id,
+    name: row.name,
+    description: row.description,
+    inputSchema: row.input_schema,
+    callbackUrl: row.callback_url,
+    requiredScope: row.required_scope,
+    visibility: row.visibility,
+  };
+}
+
+async function invokePluginCallback(
+  principal: AuthPrincipal,
+  tool: PluginMcpTool,
+  args: Record<string, unknown>,
+): Promise<{ response: Response; payload: unknown }> {
+  const response = await fetch(callbackUrl(tool.callbackUrl), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      type: "sol.plugin.mcp.invoke",
+      pluginId: tool.pluginId,
+      tool: tool.name,
+      arguments: args,
+      caller: {
+        householdId: principal.householdId,
+        memberId: principal.memberId,
+        displayName: principal.displayName,
+        role: principal.role,
+      },
+    }),
+    signal: AbortSignal.timeout(pluginToolTimeoutMs(tool)),
+  });
+  return {
+    response,
+    payload: await response.json().catch(() => ({})),
+  };
+}
+
 export async function listPluginMcpTools(
   principal: AuthPrincipal,
   scopes: string[],
@@ -216,30 +287,32 @@ export async function invokePluginMcpTool(
   tool: PluginMcpTool,
   args: Record<string, unknown>,
 ): Promise<unknown> {
-  const url = callbackUrl(tool.callbackUrl);
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      type: "sol.plugin.mcp.invoke",
-      pluginId: tool.pluginId,
-      tool: tool.name,
-      arguments: args,
-      caller: {
-        householdId: principal.householdId,
-        memberId: principal.memberId,
-        displayName: principal.displayName,
-        role: principal.role,
-      },
-    }),
-    signal: AbortSignal.timeout(pluginToolTimeoutMs(tool)),
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const reason = payload && typeof payload === "object" && "error" in payload
-      ? String((payload as { error?: unknown }).error || `HTTP ${response.status}`)
-      : `HTTP ${response.status}`;
-    throw new Error(`Plugin ${tool.pluginId} tool ${tool.name}: ${reason}`);
+  let activeTool = tool;
+  let attempt: { response: Response; payload: unknown };
+
+  try {
+    attempt = await invokePluginCallback(principal, activeTool, args);
+  } catch (error) {
+    const latest = await latestCompatiblePluginMcpTool(principal, tool);
+    if (!latest || latest.callbackUrl === tool.callbackUrl) throw error;
+    activeTool = latest;
+    attempt = await invokePluginCallback(principal, activeTool, args);
   }
-  return payload;
+
+  if (!attempt.response.ok && attempt.response.status === 404) {
+    const latest = await latestCompatiblePluginMcpTool(principal, tool);
+    if (latest && latest.callbackUrl !== activeTool.callbackUrl) {
+      activeTool = latest;
+      attempt = await invokePluginCallback(principal, activeTool, args);
+    }
+  }
+
+  if (!attempt.response.ok) {
+    const payload = attempt.payload;
+    const reason = payload && typeof payload === "object" && "error" in payload
+      ? String((payload as { error?: unknown }).error || `HTTP ${attempt.response.status}`)
+      : `HTTP ${attempt.response.status}`;
+    throw new Error(`Plugin ${activeTool.pluginId} tool ${activeTool.name}: ${reason}`);
+  }
+  return attempt.payload;
 }
