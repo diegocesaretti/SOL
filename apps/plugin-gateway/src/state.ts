@@ -1,5 +1,5 @@
 import { gatewayConfig } from "./config.js";
-import { randomId, signOpaqueToken, signSelfContainedPairCode, verifyOpaqueToken, verifySelfContainedPairCode, type SignedPayload } from "./crypto.js";
+import { randomId, secureStringEqual, signOpaqueToken, signSelfContainedPairCode, verifyOpaqueToken, verifySelfContainedPairCode, type SignedPayload } from "./crypto.js";
 
 export type SolScope = "read" | "submit" | "actions";
 
@@ -59,6 +59,177 @@ const catalogs = new Map<string, BridgeCatalog>();
 const consumedPairings = new Map<string, { firstConsumedAt: number; expiresAt: number }>();
 const queues = new Map<string, BridgeJob[]>();
 const pending = new Map<string, PendingJob>();
+
+const REVIEW_INSTANCE_ID = "sol_review_demo";
+
+function reviewDemoCatalog(): BridgeCatalog {
+  return {
+    instanceId: REVIEW_INSTANCE_ID,
+    updatedAt: Date.now(),
+    profile: {
+      displayName: "SOL Review Demo",
+      memberRole: "reviewer",
+      solVersion: "review-demo",
+    },
+    tools: [
+      {
+        name: "home_assistant_search_states",
+        title: "Search demo home state",
+        description: "Search simulated Home Assistant states in the isolated SOL review environment.",
+        requiredScope: "read",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            query: { type: "string", minLength: 1, maxLength: 160 },
+          },
+          required: ["query"],
+        },
+      },
+      {
+        name: "home_assistant_call_service",
+        title: "Control demo home",
+        description: "Simulate a Home Assistant service call in the isolated SOL review environment.",
+        requiredScope: "actions",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            domain: { type: "string" },
+            service: { type: "string" },
+            target: { type: "object", additionalProperties: true },
+            serviceData: { type: "object", additionalProperties: true },
+            confirmedByUser: { type: "boolean", const: true },
+          },
+          required: ["domain", "service", "confirmedByUser"],
+        },
+      },
+      {
+        name: "home_assistant_stremio_play_best",
+        title: "Play demo media",
+        description: "Simulate media playback in the isolated SOL review environment.",
+        requiredScope: "actions",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            query: { type: "string", minLength: 1, maxLength: 240 },
+            entityId: { type: "string", maxLength: 160 },
+          },
+          required: ["query"],
+        },
+      },
+      {
+        name: "search_whatsapp",
+        title: "Search demo WhatsApp",
+        description: "Search synthetic WhatsApp examples in the isolated SOL review environment.",
+        requiredScope: "read",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            query: { type: "string", minLength: 1, maxLength: 240 },
+            limit: { type: "integer", minimum: 1, maximum: 20 },
+          },
+          required: ["query"],
+        },
+      },
+      {
+        name: "memory_search",
+        title: "Search demo memory",
+        description: "Search synthetic durable memories in the isolated SOL review environment.",
+        requiredScope: "read",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            query: { type: "string", minLength: 1, maxLength: 240 },
+            limit: { type: "integer", minimum: 1, maximum: 20 },
+          },
+          required: ["query"],
+        },
+      },
+      {
+        name: "search_life",
+        title: "Search demo context",
+        description: "Search synthetic SOL Life context in the isolated SOL review environment.",
+        requiredScope: "read",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            query: { type: "string", minLength: 1, maxLength: 240 },
+            limit: { type: "integer", minimum: 1, maximum: 20 },
+          },
+          required: ["query"],
+        },
+      },
+    ],
+  };
+}
+
+function reviewDemoResult(tool: string, args: Record<string, unknown>): unknown {
+  if (tool === "home_assistant_search_states") {
+    return {
+      reviewDemo: true,
+      query: args.query ?? "",
+      matches: [
+        { entity_id: "light.review_living_room", friendly_name: "Review Living Room Light", state: "on" },
+        { entity_id: "climate.review_kitchen", friendly_name: "Review Kitchen Climate", state: "cool", temperature: 23 },
+        { entity_id: "media_player.review_tv", friendly_name: "Review TV", state: "idle" },
+      ],
+    };
+  }
+  if (tool === "home_assistant_call_service") {
+    return {
+      reviewDemo: true,
+      simulated: true,
+      ok: true,
+      message: "Demo action accepted. No real device was contacted.",
+      request: {
+        domain: args.domain ?? null,
+        service: args.service ?? null,
+        target: args.target ?? {},
+        serviceData: args.serviceData ?? {},
+      },
+    };
+  }
+  if (tool === "home_assistant_stremio_play_best") {
+    return {
+      reviewDemo: true,
+      simulated: true,
+      ok: true,
+      message: "Demo playback started on Review TV. No real media device was contacted.",
+      query: args.query ?? "",
+      entityId: args.entityId ?? "media_player.review_tv",
+    };
+  }
+  if (tool === "search_whatsapp") {
+    return {
+      reviewDemo: true,
+      results: [
+        { contact: "Demo Contact", timestamp: "2026-09-30T14:30:00Z", text: "Synthetic review message about a delivery." },
+      ],
+    };
+  }
+  if (tool === "memory_search") {
+    return {
+      reviewDemo: true,
+      results: [
+        { memory: "The review household prefers the living-room lights dimmed in the evening.", source: "synthetic_demo" },
+      ],
+    };
+  }
+  if (tool === "search_life") {
+    return {
+      reviewDemo: true,
+      results: [
+        { type: "note", summary: "Synthetic review context: HVAC maintenance is scheduled for Friday." },
+      ],
+    };
+  }
+  throw new Error("tool_not_available");
+}
 
 function nowSeconds(): number {
   return Math.floor(Date.now() / 1000);
@@ -133,6 +304,7 @@ export function updateBridgeCatalog(
 }
 
 export function getBridgeCatalog(instanceId: string): BridgeCatalog | undefined {
+  if (instanceId === REVIEW_INSTANCE_ID) return reviewDemoCatalog();
   return catalogs.get(instanceId);
 }
 
@@ -150,7 +322,19 @@ export function issuePairCode(instanceId: string, scopes: unknown): { code: stri
 }
 
 export function consumePairCode(code: string): PairingRecord | null {
-  const verified = verifySelfContainedPairCode(code);
+  const submitted = code.trim();
+  if (
+    gatewayConfig.reviewPairCode
+    && secureStringEqual(submitted, gatewayConfig.reviewPairCode)
+  ) {
+    return {
+      instanceId: REVIEW_INSTANCE_ID,
+      expiresAt: Date.now() + 24 * 60 * 60_000,
+      allowedScopes: ["read", "submit", "actions"],
+    };
+  }
+
+  const verified = verifySelfContainedPairCode(submitted);
   if (!verified) return null;
 
   // ChatGPT may POST the same OAuth authorization form multiple times while
@@ -173,6 +357,15 @@ export function bridgeConnection(instanceId: string): {
   toolCount: number;
   profile?: BridgeProfile;
 } {
+  if (instanceId === REVIEW_INSTANCE_ID) {
+    const catalog = reviewDemoCatalog();
+    return {
+      online: true,
+      lastCatalogAt: new Date(catalog.updatedAt).toISOString(),
+      toolCount: catalog.tools.length,
+      profile: catalog.profile,
+    };
+  }
   const catalog = catalogs.get(instanceId);
   if (!catalog) return { online: false, toolCount: 0 };
   const online = Date.now() - catalog.updatedAt < 90_000;
@@ -189,6 +382,12 @@ export async function invokeBridgeTool(
   tool: string,
   args: Record<string, unknown>,
 ): Promise<unknown> {
+  if (instanceId === REVIEW_INSTANCE_ID) {
+    const catalog = reviewDemoCatalog();
+    if (!catalog.tools.some((entry) => entry.name === tool)) throw new Error("tool_not_available");
+    return reviewDemoResult(tool, args);
+  }
+
   const catalog = catalogs.get(instanceId);
   if (!catalog || Date.now() - catalog.updatedAt > 90_000) throw new Error("sol_bridge_offline");
   if (!catalog.tools.some((entry) => entry.name === tool)) throw new Error("tool_not_available");

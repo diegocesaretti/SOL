@@ -34,6 +34,7 @@ export const gatewayConfig = {
   toolExposure: toolExposure as "raw" | "facade" | "both",
   challengeToken: optional("OPENAI_APPS_CHALLENGE"),
   supportEmail: optional("SOL_GATEWAY_SUPPORT_EMAIL"),
+  reviewPairCode: optional("SOL_GATEWAY_REVIEW_PAIR_CODE"),
   jobTimeoutMs: intEnv("SOL_GATEWAY_JOB_TIMEOUT_MS", 65_000),
   bridgeLongPollMs: Math.min(30_000, intEnv("SOL_GATEWAY_BRIDGE_LONG_POLL_MS", 25_000)),
   pairCodeTtlMs: Math.min(30 * 60_000, intEnv("SOL_GATEWAY_PAIR_CODE_TTL_MS", 10 * 60_000)),
