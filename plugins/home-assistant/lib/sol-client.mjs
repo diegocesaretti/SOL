@@ -44,6 +44,7 @@ function playbackRequestKey(args = {}, defaults = {}) {
     episode: args.episode ?? null,
     quality: clean(args.quality || defaults.quality || "auto").toLowerCase(),
     language: clean(args.language || defaults.language || "any").toLowerCase(),
+    target: clean(args.target || "cocina").toLowerCase(),
     autoPlay: args.autoPlay !== false
   };
   return JSON.stringify(key);
@@ -62,6 +63,7 @@ const PLAYBACK_PROPERTIES = {
   ...CONTENT_PROPERTIES,
   quality: { type: "string", enum: ["auto", "4k", "1080p", "720p", "480p"] },
   language: { type: "string", enum: ["any", "latin", "spanish", "english"] },
+  target: { type: "string", enum: ["cocina", "dormitorio"], default: "cocina" },
   autoPlay: { type: "boolean", default: true }
 };
 
@@ -179,6 +181,11 @@ export class SolPluginClient extends SolPluginClientCore {
     this.stremioEnabled = boolEnv(env, "HA_SOL_STREMIO_ENABLED", true);
     this.allowControl = boolEnv(env, "HA_SOL_ALLOW_CONTROL", false);
     this.stremioRemoteEntityId = clean(env.HA_SOL_TV_REMOTE_ENTITY_ID);
+    this.stremioTargets = {
+      cocina: this.stremioRemoteEntityId,
+      dormitorio: clean(env.HA_SOL_TV_DORMITORIO_REMOTE_ENTITY_ID || "remote.tv_dormitorio")
+    };
+    this.stremioDefaultTarget = "cocina";
     this.stremioTimeoutMs = 8000;
     this.stremioAddonTimeoutMs = numberEnv(env, "HA_SOL_STREMIO_ADDON_TIMEOUT_MS", 20000, 1000, 120000);
     this.stremioAddonRetries = 1;
@@ -223,6 +230,14 @@ export class SolPluginClient extends SolPluginClientCore {
       quality: clean(args.quality || this.defaultPreferences.quality || "auto").toLowerCase(),
       language: clean(args.language || this.defaultPreferences.language || "any").toLowerCase()
     };
+  }
+
+  resolvePlaybackTarget(value) {
+    const target = clean(value || this.stremioDefaultTarget || "cocina").toLowerCase();
+    if (!["cocina", "dormitorio"].includes(target)) throw new Error("stremio_target_invalid");
+    const remoteEntityId = clean(this.stremioTargets?.[target]);
+    if (!remoteEntityId) throw new Error(`stremio_target_${target}_remote_required`);
+    return { target, remoteEntityId };
   }
 
   async refreshAccount(force = false) {
@@ -298,16 +313,16 @@ export class SolPluginClient extends SolPluginClientCore {
     };
   }
 
-  async launchStremio(uri) {
+  async launchStremio(uri, remoteEntityId = this.stremioRemoteEntityId) {
     if (!this.stremioEnabled) throw new Error("stremio_deep_links_disabled");
     if (!this.allowControl) throw new Error("home_assistant_control_disabled");
-    if (!this.stremioRemoteEntityId) throw new Error("tv_remote_entity_id_required");
+    if (!remoteEntityId) throw new Error("tv_remote_entity_id_required");
     if (!isStremioDeepLink(uri)) throw new Error("stremio_deep_link_invalid_scheme");
     const result = await this.haService("remote", "turn_on", {
-      entity_id: this.stremioRemoteEntityId,
+      entity_id: remoteEntityId,
       activity: uri
     });
-    return { ok: true, via: "home_assistant_remote_turn_on", deepLink: uri, result };
+    return { ok: true, via: "home_assistant_remote_turn_on", remoteEntityId, deepLink: uri, result };
   }
 
   stremioStatus() {
@@ -316,6 +331,11 @@ export class SolPluginClient extends SolPluginClientCore {
       architecture: "single_path_native_indexed",
       officialStremioOnly: true,
       remoteEntityId: this.stremioRemoteEntityId || null,
+      defaultTarget: this.stremioDefaultTarget,
+      targets: Object.fromEntries(Object.entries(this.stremioTargets).map(([target, remoteEntityId]) => [
+        target,
+        { remoteEntityId: remoteEntityId || null, configured: Boolean(remoteEntityId) }
+      ])),
       account: this.account.snapshot(),
       defaults: this.defaultPreferences,
       timing: indexedNavigationTiming(this.env),
@@ -328,6 +348,7 @@ export class SolPluginClient extends SolPluginClientCore {
     if (!this.allowControl) throw new Error("home_assistant_control_disabled");
     if (!this.account.configured) throw new Error("stremio_account_required_for_native_index_selection");
 
+    const playbackTarget = this.resolvePlaybackTarget(args.target);
     const { resolved, streamId, episodeDecision } = await this.resolveForStream(args);
     const preferences = this.streamPreferences(args);
     const queried = await queryAccountProviderSlices(this, {
@@ -341,6 +362,7 @@ export class SolPluginClient extends SolPluginClientCore {
         failClosed: true,
         content: { type: resolved.type, id: resolved.id, videoId: resolved.videoId, selected: resolved.selected },
         preferences,
+        playbackTarget,
         episodeDecision,
         selection: choice,
         providerErrors: queried.slices.filter((slice) => slice.error).map((slice) => ({ addonId: slice.addonId, error: slice.error }))
@@ -366,13 +388,14 @@ export class SolPluginClient extends SolPluginClientCore {
       videoId: resolved.videoId || streamId || resolved.id,
       autoPlay: false
     });
-    const launch = await this.launchStremio(nativeLink);
+    const launch = await this.launchStremio(nativeLink, playbackTarget.remoteEntityId);
 
     if (args.autoPlay === false) {
       return {
         playbackRequested: false,
         content: { type: resolved.type, id: resolved.id, videoId: resolved.videoId, selected: resolved.selected },
         preferences,
+        playbackTarget,
         episodeDecision,
         selected: choice.selected,
         indexedSelection: plan,
@@ -381,12 +404,15 @@ export class SolPluginClient extends SolPluginClientCore {
     }
 
     const timing = await waitForIndexedNavigation(this.env);
-    const selection = await executeIndexedSelection(this, plan, timing);
+    const targetClient = Object.create(this);
+    targetClient.stremioRemoteEntityId = playbackTarget.remoteEntityId;
+    const selection = await executeIndexedSelection(targetClient, plan, timing);
     return {
       playbackRequested: true,
       playbackConfirmed: null,
       content: { type: resolved.type, id: resolved.id, videoId: resolved.videoId, selected: resolved.selected },
       preferences,
+      playbackTarget,
       episodeDecision,
       selected: choice.selected,
       indexedSelection: plan,
