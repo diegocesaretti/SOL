@@ -44,7 +44,7 @@ interface RefreshTokenPayload extends SignedPayload {
   scopes: string[];
 }
 
-const usedAuthorizationCodes = new Map<string, number>();
+const authorizationCodes = new Map<string, AuthorizationCodePayload>();
 const OAUTH_SCOPES = new Set(["sol.read", "sol.submit", "sol.actions"]);
 
 function seconds(): number {
@@ -304,7 +304,8 @@ async function authorizePost(request: Request): Promise<Response> {
     instanceId: pairing.instanceId,
   };
   const url = new URL(redirectUri);
-  const authorizationCode = signOpaqueToken(payload);
+  const authorizationCode = `sol_ac_${randomId(24)}`;
+  authorizationCodes.set(authorizationCode, payload);
   url.searchParams.set("code", authorizationCode);
   if (state) url.searchParams.set("state", state);
   console.log("SOL OAuth authorize redirect", {
@@ -378,14 +379,12 @@ async function tokenEndpoint(request: Request): Promise<Response> {
   }
 
   if (grantType === "authorization_code") {
-    const code = verifyOpaqueToken<AuthorizationCodePayload>(formValue(form, "code"), "authorization_code");
-    if (!code) {
+    const authorizationCode = formValue(form, "code");
+    const code = authorizationCodes.get(authorizationCode);
+    if (!code || (code.exp ?? 0) <= seconds()) {
+      if (authorizationCode) authorizationCodes.delete(authorizationCode);
       console.log("SOL OAuth token result", { ok: false, reason: "invalid_or_expired_code" });
       return oauthError("invalid_grant", "Authorization code is invalid or expired");
-    }
-    if (usedAuthorizationCodes.has(code.jti)) {
-      console.log("SOL OAuth token result", { ok: false, reason: "authorization_code_reused" });
-      return oauthError("invalid_grant", "Authorization code was already used");
     }
     if (code.clientId !== clientId || code.redirectUri !== formValue(form, "redirect_uri")) {
       console.log("SOL OAuth token result", { ok: false, reason: "client_or_redirect_mismatch" });
@@ -401,7 +400,7 @@ async function tokenEndpoint(request: Request): Promise<Response> {
       console.log("SOL OAuth token result", { ok: false, reason: "pkce_failed" });
       return oauthError("invalid_grant", "PKCE verification failed");
     }
-    usedAuthorizationCodes.set(code.jti, code.exp ?? seconds() + 180);
+    authorizationCodes.delete(authorizationCode);
     console.log("SOL OAuth token result", { ok: true, grantType: "authorization_code", instanceIdSuffix: code.instanceId.slice(-8), scopes: code.scopes });
     return issueTokens({
       clientId,
@@ -446,7 +445,7 @@ export async function handleOAuth(request: Request): Promise<Response | null> {
 
 export function cleanupOAuthState(): void {
   const now = seconds();
-  for (const [jti, exp] of usedAuthorizationCodes) {
-    if (exp <= now) usedAuthorizationCodes.delete(jti);
+  for (const [authorizationCode, payload] of authorizationCodes) {
+    if ((payload.exp ?? 0) <= now) authorizationCodes.delete(authorizationCode);
   }
 }
