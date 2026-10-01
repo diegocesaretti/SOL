@@ -217,8 +217,8 @@ const quickDocs = {
   },
   media_play: {
     kind: "action",
-    usage: "sol-fast.ps1 media_play \"title or media query\" ['{\"language\":\"spanish|latin|english\",\"quality\":\"auto|4k|1080p|720p|480p\"}']",
-    description: "Use SOL's deterministic Stremio playback flow. Default language is unrestricted (any): do not send a language field unless the user explicitly asks for Spanish, Latin Spanish, or English."
+    usage: "sol-fast.ps1 media_play \"title or media query\" ['{\"target\":\"cocina|dormitorio\",\"language\":\"spanish|latin|english\",\"quality\":\"auto|4k|1080p|720p|480p\"}']",
+    description: "Use SOL's deterministic Stremio playback flow. Default target is cocina. Use target=dormitorio only when the user explicitly asks for the bedroom TV. Default language is unrestricted (any): do not send a language field unless the user explicitly asks for Spanish, Latin Spanish, or English."
   },
   youtube_play: {
     kind: "action",
@@ -257,7 +257,7 @@ function helpPayload(extra = {}) {
       "Translate the request to a documented quick command or inspect the real SOL Full tool catalog.",
       "For an unfamiliar capability, run: sol-fast.ps1 tools",
       "For YouTube playback on TV Cocina, resolve a concrete YouTube URL if needed, then prefer: sol-fast.ps1 youtube_play <url>.",
-      "For Stremio playback, leave language unspecified by default. Only set language=spanish, latin, or english when the user explicitly requests that language.",
+      "For Stremio playback, default target is cocina. If the user explicitly asks for the bedroom TV, set target=dormitorio. Leave language unspecified by default; only set language=spanish, latin, or english when explicitly requested.",
       "Before calling an unfamiliar raw tool, run: sol-fast.ps1 schema <tool_name>",
       "Use actions only when the current user request explicitly authorizes them.",
       "After a real-world action, read the relevant state again before claiming success."

@@ -61,7 +61,22 @@ After an action, the calling agent should read the relevant live state again bef
 
 When the user names a video or song instead of supplying a URL, the agent should first resolve a concrete YouTube URL and then call `youtube_play`.
 
-## Stremio language policy
+## Stremio target and language policy
+
+Stremio defaults to the kitchen TV. When the user does not name a TV, omit `target` or use `target=cocina`.
+
+When the user explicitly asks for the bedroom TV, use:
+
+```powershell
+C:\sol\sol-fast.ps1 media_play "title" '{"target":"dormitorio"}'
+```
+
+The Home Assistant plugin maps:
+
+- `target=cocina` -> the configured `HA_SOL_TV_REMOTE_ENTITY_ID`
+- `target=dormitorio` -> `HA_SOL_TV_DORMITORIO_REMOTE_ENTITY_ID`, defaulting to `remote.tv_dormitorio`
+
+The selected target applies to both the Stremio deep-link launch and every DPAD key used for native stream-index selection. The target is also part of the playback dedupe key, so the same content can be launched independently on both TVs.
 
 Stremio has no forced language by default. When no language is explicitly requested, the agent must omit the `language` field and the Stremio path uses `any`.
 
