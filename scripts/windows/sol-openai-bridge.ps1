@@ -31,10 +31,12 @@ if ([string]::IsNullOrWhiteSpace($env:SOL_OPENAI_GATEWAY_URL)) {
 $portableNode = Join-Path $root "runtime\node.exe"
 $portableBridge = Join-Path $root "apps\server\dist\mcp\openai-bridge.js"
 $portableMcp = Join-Path $root "apps\server\dist\mcp\nexo-stdio.js"
+$portablePreload = Join-Path $root "apps\server\dist\mcp\stdio-preload.js"
 
-if ((Test-Path $portableNode) -and (Test-Path $portableBridge) -and (Test-Path $portableMcp)) {
+if ((Test-Path $portableNode) -and (Test-Path $portableBridge) -and (Test-Path $portableMcp) -and (Test-Path $portablePreload)) {
   $env:SOL_MCP_BRIDGE_STDIO_COMMAND = $portableNode
-  $env:SOL_MCP_BRIDGE_STDIO_ARGS = ConvertTo-Json -Compress @($portableMcp)
+  $preloadUri = ([System.Uri]$portablePreload).AbsoluteUri
+  $env:SOL_MCP_BRIDGE_STDIO_ARGS = ConvertTo-Json -Compress @("--import", $preloadUri, $portableMcp)
   & $portableNode $portableBridge
   exit $LASTEXITCODE
 }

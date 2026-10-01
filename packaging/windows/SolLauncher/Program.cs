@@ -243,7 +243,7 @@ internal static class Program
 
         var bridgeEntry = Path.Combine(root, "apps", "server", "dist", "mcp", "openai-bridge.js");
         var mcpEntry = Path.Combine(root, "apps", "server", "dist", "mcp", "nexo-stdio.js");
-        var preload = Path.Combine(root, "apps", "server", "dist", "mcp", "stdio-preload.mjs");
+        var preload = Path.Combine(root, "apps", "server", "dist", "mcp", "stdio-preload.js");
         if (!File.Exists(bridgeEntry) || !File.Exists(mcpEntry) || !File.Exists(preload))
         {
             status = "OpenAI/Render bridge not started because the portable MCP runtime is incomplete.";

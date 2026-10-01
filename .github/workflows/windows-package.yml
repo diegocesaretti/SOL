@@ -175,7 +175,7 @@ jobs:
             'dist/windows/SOL/apps/server/dist/index.js',
             'dist/windows/SOL/apps/server/dist/mcp/openai-bridge.js',
             'dist/windows/SOL/apps/server/dist/mcp/nexo-stdio.js',
-            'dist/windows/SOL/apps/server/dist/mcp/stdio-preload.mjs',
+            'dist/windows/SOL/apps/server/dist/mcp/stdio-preload.js',
             'dist/windows/SOL/apps/server/dist/modules/plugins/bundled.js',
             'dist/windows/SOL/apps/server/node_modules/pg/package.json',
             'dist/windows/SOL/apps/server/node_modules/zod/package.json',
