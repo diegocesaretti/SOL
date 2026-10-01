@@ -80,17 +80,44 @@ function normalizeResult(value: unknown): any {
   return text(value);
 }
 
+const NON_DESTRUCTIVE_WRITE_TOOLS = new Set([
+  "save_observation",
+  "remember_fact",
+  "save_schedule",
+  "acknowledge_codex_whatsapp_replies",
+  "home_assistant_youtube_play",
+  "home_assistant_tv_navigate",
+  "home_assistant_tv_navigate_path",
+  "home_assistant_stremio_open_page",
+  "home_assistant_stremio_open_search",
+  "home_assistant_stremio_play_best",
+]);
+
+export function publicAnnotations(tool: RemoteToolDefinition) {
+  const readOnly = tool.requiredScope === "read";
+  const externalRead = tool.name.startsWith("home_assistant_stremio_")
+    || tool.name === "summarize_whatsapp";
+  const openWorld = !readOnly || externalRead || tool.annotations?.openWorldHint === true;
+  const destructive = readOnly
+    ? false
+    : NON_DESTRUCTIVE_WRITE_TOOLS.has(tool.name)
+      ? false
+      : tool.annotations?.destructiveHint ?? true;
+  return {
+    readOnlyHint: readOnly,
+    destructiveHint: destructive,
+    openWorldHint: openWorld,
+    idempotentHint: readOnly ? true : undefined,
+  };
+}
+
 function toolRegistration(tool: RemoteToolDefinition): any {
   const scope = oauthScope(tool.requiredScope);
   return {
     title: tool.title,
     description: tool.description,
     inputSchema: zodInputSchema(tool.inputSchema),
-    annotations: tool.annotations ?? {
-      readOnlyHint: tool.requiredScope === "read",
-      destructiveHint: tool.requiredScope !== "read",
-      openWorldHint: false,
-    },
+    annotations: publicAnnotations(tool),
     securitySchemes: [{ type: "oauth2", scopes: [scope] }],
     _meta: {
       "securitySchemes": [{ type: "oauth2", scopes: [scope] }],
@@ -153,7 +180,7 @@ export const FACADE_ALIASES: FacadeAlias[] = [
     remoteName: "send_whatsapp",
     title: "Send a WhatsApp message",
     description: "Send one WhatsApp text through SOL/Nexo's dedicated output account. Use only when the current user explicitly asks to send the message; preserve confirmedByUser=true and the exact recipient/message requested.",
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   },
   {
     publicName: "sol_memory_search",
@@ -349,7 +376,7 @@ function registerDynamicRunner(
         readOnlyHint: scope === "read",
         destructiveHint: scope !== "read",
         idempotentHint: scope === "read",
-        openWorldHint: false,
+        openWorldHint: true,
       },
       securitySchemes: [{ type: "oauth2", scopes: [requiredOauthScope] }],
       _meta: {
