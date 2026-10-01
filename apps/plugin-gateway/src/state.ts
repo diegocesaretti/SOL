@@ -56,7 +56,6 @@ interface PendingJob {
 }
 
 const catalogs = new Map<string, BridgeCatalog>();
-const consumedPairings = new Map<string, { firstConsumedAt: number; expiresAt: number }>();
 const queues = new Map<string, BridgeJob[]>();
 const pending = new Map<string, PendingJob>();
 
@@ -440,9 +439,6 @@ export function completeBridgeJob(
 
 export function cleanupState(): void {
   const now = Date.now();
-  for (const [key, pairing] of consumedPairings) {
-    if (pairing.expiresAt <= now) consumedPairings.delete(key);
-  }
   for (const [instanceId, catalog] of catalogs) {
     if (now - catalog.updatedAt > 24 * 60 * 60_000) catalogs.delete(instanceId);
   }

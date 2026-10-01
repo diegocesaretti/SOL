@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "sol",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Connect ChatGPT to a private SOL installation for Home Assistant, memory and authorized local tools.",
   "author": {
     "name": "SOL"
@@ -14,7 +14,7 @@
       "interface": {
         "displayName": "SOL",
         "shortDescription": "Connect ChatGPT to your private SOL assistant.",
-        "longDescription": "Use ChatGPT and Voice to query live Home Assistant state, perform authorized device actions, search SOL memory and use other tools installed in your private SOL instance.",
+        "longDescription": "Use ChatGPT and Voice to query live Home Assistant state, perform authorized device actions, play verified YouTube videos on configured TVs, search SOL memory and use other tools installed in your private SOL instance.",
         "developerName": "SOL",
         "category": "Productivity",
         "capabilities": ["Read", "Write"],
@@ -24,6 +24,7 @@
         "defaultPrompt": [
           "Ask SOL what temperature it is in the kitchen.",
           "Ask SOL whether any lights are still on.",
+          "Ask SOL to play a YouTube video on the kitchen TV.",
           "Use SOL to check Home Assistant and turn off the kitchen air conditioner."
         ],
         "brandColor": "#20242A"

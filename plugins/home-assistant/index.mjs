@@ -4,6 +4,11 @@ import { mkdir } from "node:fs/promises";
 import { HaStateCache } from "./lib/cache.mjs";
 import { HomeAssistantClient } from "./lib/ha-client.mjs";
 import { SolPluginClient, STREMIO_MCP_TOOLS } from "./lib/sol-client.mjs";
+import {
+  buildYoutubePlayPlan,
+  verifyYoutubePlayback,
+  youtubeTargetsFromEnv
+} from "./lib/youtube-playback.mjs";
 
 function required(name) {
   const value = process.env[name]?.trim();
@@ -65,6 +70,8 @@ const config = {
   ingestPresence: boolEnv("HA_SOL_INGEST_PRESENCE", true),
   allowControl: boolEnv("HA_SOL_ALLOW_CONTROL", false),
   tvRemoteEntityId: process.env.HA_SOL_TV_REMOTE_ENTITY_ID?.trim() || "",
+  youtubeTargets: youtubeTargetsFromEnv(process.env),
+  youtubeVerifyTimeoutMs: numberEnv("HA_SOL_YOUTUBE_VERIFY_TIMEOUT_MS", 3000, 500, 8000),
   dataDir: process.env.SOL_PLUGIN_DATA_DIR || new URL("./.data", import.meta.url).pathname
 };
 
@@ -210,7 +217,8 @@ const baseTools = [
   { name: "home_assistant_list_people", description: "List cached Home Assistant Person entities and SOL Person bindings.", inputSchema: { type: "object", properties: {}, additionalProperties: false }, requiredScope: "read" },
   { name: "home_assistant_list_areas", description: "List Home Assistant areas from the cached registry.", inputSchema: { type: "object", properties: {}, additionalProperties: false }, requiredScope: "read" },
   { name: "home_assistant_get_services", description: "List cached Home Assistant service definitions.", inputSchema: { type: "object", properties: { domain: { type: "string" } }, additionalProperties: false }, requiredScope: "read" },
-  { name: "home_assistant_call_service", description: "Execute a Home Assistant service. Requires plugin control and explicit user confirmation.", inputSchema: { type: "object", properties: { confirmedByUser: { type: "boolean", const: true }, domain: { type: "string" }, service: { type: "string" }, target: { type: "object" }, serviceData: { type: "object" } }, required: ["confirmedByUser", "domain", "service"], additionalProperties: false }, requiredScope: "actions" }
+  { name: "home_assistant_call_service", description: "Execute a Home Assistant service. Requires plugin control and explicit user confirmation.", inputSchema: { type: "object", properties: { confirmedByUser: { type: "boolean", const: true }, domain: { type: "string" }, service: { type: "string" }, target: { type: "object" }, serviceData: { type: "object" } }, required: ["confirmedByUser", "domain", "service"], additionalProperties: false }, requiredScope: "actions" },
+  { name: "home_assistant_youtube_play", description: "Play one concrete YouTube video on the configured kitchen or bedroom TV using the exact Home Assistant media_player entity, then verify the resulting YouTube state.", inputSchema: { type: "object", properties: { confirmedByUser: { type: "boolean", const: true }, url: { type: "string", minLength: 6, maxLength: 500 }, target: { type: "string", enum: ["cocina", "dormitorio"] }, expectedTitle: { type: "string", maxLength: 300 } }, required: ["confirmedByUser", "url"], additionalProperties: false }, requiredScope: "actions" }
 ];
 
 const tvTools = [
@@ -259,7 +267,42 @@ async function dispatchTool(tool, args) {
     const result = await ha.callService(domain, service, args.serviceData || {}, args.target || {}, returnResponse);
     return { ok: true, result: result ?? null, cache: cache.status() };
   }
-  if (tool === "home_assistant_tv_status") return { mode: "home_assistant_only", remoteConfigured: Boolean(config.tvRemoteEntityId), remoteEntityId: config.tvRemoteEntityId || null, controlEnabled: config.allowControl, visualObservationAvailable: false };
+  if (tool === "home_assistant_youtube_play") {
+    if (!config.allowControl) throw new Error("home_assistant_control_disabled");
+    if (args.confirmedByUser !== true) throw new Error("explicit_user_confirmation_required");
+    const plan = buildYoutubePlayPlan(args, config.youtubeTargets);
+    const beforeState = compactEntity(cache.getEntity(plan.destination.entityId));
+    const result = await ha.callService(
+      "media_player",
+      "play_media",
+      plan.serviceData,
+      { entity_id: plan.destination.entityId },
+      false
+    );
+    const verification = await verifyYoutubePlayback({
+      plan,
+      beforeState,
+      timeoutMs: config.youtubeVerifyTimeoutMs,
+      readState: async (entityId) => compactEntity(cache.getEntity(entityId))
+    });
+    return {
+      ok: true,
+      target: plan.destination.target,
+      entityId: plan.destination.entityId,
+      url: plan.url,
+      action: result ?? null,
+      verification,
+      cache: cache.status()
+    };
+  }
+  if (tool === "home_assistant_tv_status") return {
+    mode: "home_assistant_only",
+    remoteConfigured: Boolean(config.tvRemoteEntityId),
+    remoteEntityId: config.tvRemoteEntityId || null,
+    youtubeTargets: config.youtubeTargets,
+    controlEnabled: config.allowControl,
+    visualObservationAvailable: false
+  };
   if (tool === "home_assistant_tv_navigate") {
     assertTvActionAllowed();
     return navigateTv(String(args.direction || "").trim().toLowerCase(), args.count);
@@ -282,7 +325,13 @@ const server = createServer(async (request, response) => {
         cache: cache.status(),
         personSync: personSyncStatus(),
         controlEnabled: config.allowControl,
-        tv: { mode: "home_assistant_only", configured: Boolean(config.tvRemoteEntityId), remoteEntityId: config.tvRemoteEntityId || null, visualObservationAvailable: false }
+        tv: {
+          mode: "home_assistant_only",
+          configured: Boolean(config.tvRemoteEntityId),
+          remoteEntityId: config.tvRemoteEntityId || null,
+          youtubeTargets: config.youtubeTargets,
+          visualObservationAvailable: false
+        }
       });
       return;
     }

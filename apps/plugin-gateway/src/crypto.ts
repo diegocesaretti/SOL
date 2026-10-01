@@ -48,24 +48,6 @@ export function randomId(bytes = 18): string {
   return randomBytes(bytes).toString("base64url");
 }
 
-export function pairCode(): string {
-  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  const bytes = randomBytes(8);
-  let value = "";
-  for (let index = 0; index < 8; index += 1) value += alphabet[bytes[index]! % alphabet.length];
-  return `${value.slice(0, 4)}-${value.slice(4)}`;
-}
-
-export function deterministicPairCode(input: string): string {
-  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  const bytes = createHmac("sha256", gatewayConfig.signingSecret)
-    .update(`sol-pair-v2:${input}`)
-    .digest();
-  let value = "";
-  for (let index = 0; index < 8; index += 1) value += alphabet[bytes[index]! % alphabet.length];
-  return `${value.slice(0, 4)}-${value.slice(4)}`;
-}
-
 export interface SelfContainedPairCode {
   code: string;
   expiresAt: number;
