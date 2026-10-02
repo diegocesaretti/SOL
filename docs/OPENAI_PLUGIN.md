@@ -1,6 +1,6 @@
 # SOL public plugin for ChatGPT
 
-SOL 0.15.22 includes a public-plugin path alongside the existing local MCP and Secure MCP Tunnel path.
+SOL 0.15.23 includes a public-plugin path alongside the existing local MCP and Secure MCP Tunnel path.
 
 ## Architecture
 

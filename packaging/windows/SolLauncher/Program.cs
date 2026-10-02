@@ -65,12 +65,16 @@ internal static class Program
     private static extern int MessageBox(IntPtr hWnd, string text, string caption, uint type);
 
     [STAThread]
-    private static async Task Main()
+    private static async Task Main(string[] args)
     {
+        var background = Array.Exists(args, value =>
+            string.Equals(value, "--background", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(value, "--no-open", StringComparison.OrdinalIgnoreCase));
+
         using var singleton = new Mutex(true, "Local\\SOL.Desktop.Singleton", out var firstInstance);
         if (!firstInstance)
         {
-            OpenBrowser("http://127.0.0.1:3000/v1/inputs/plugins/ui");
+            if (!background) OpenBrowser("http://127.0.0.1:3000/v1/inputs/plugins/ui");
             return;
         }
 
@@ -156,7 +160,7 @@ internal static class Program
                 {
                     lock (log) log.WriteLine($"[{DateTimeOffset.Now:O}] BRIDGE {bridgeStatus}");
                 }
-                OpenBrowser(baseUrl + "/v1/inputs/plugins/ui");
+                if (!background) OpenBrowser(baseUrl + "/v1/inputs/plugins/ui");
             }
             else
             {
