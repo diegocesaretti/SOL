@@ -9,7 +9,10 @@ export function startWindowsTray(): void {
   if (process.env.SOL_TRAY?.trim().toLowerCase() === "false") return;
   if (trayProcess && !trayProcess.killed) return;
   const script = join(config.repoRoot, "scripts", "windows", "sol-tray.ps1");
-  const args = ["-NoProfile", "-Sta", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-File", script, "-HostName", config.host, "-Port", String(config.port), "-DataDir", config.dataDir];
+  // The server may bind to 0.0.0.0 for LAN access, but a local tray must
+  // always navigate through loopback. 0.0.0.0 is a bind address, not a
+  // user-facing destination.
+  const args = ["-NoProfile", "-Sta", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-File", script, "-HostName", "127.0.0.1", "-Port", String(config.port), "-DataDir", config.dataDir];
   const launcherPid = process.env.SOL_LAUNCHER_PID?.trim();
   if (launcherPid && /^\d+$/.test(launcherPid)) args.push("-LauncherPid", launcherPid);
   trayProcess = spawn(

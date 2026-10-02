@@ -4,6 +4,7 @@ import type { AuthPrincipal } from "../auth/session.js";
 import { renderPluginsPage } from "../../ui/plugins.js";
 import { renderSystemPage } from "../../ui/system.js";
 import { prepareSystemUpdate, systemUpdateStatus } from "../system-update/service.js";
+import { getWindowsAutostart, setWindowsAutostart } from "../../windows/autostart.js";
 import { downloadGithubPlugin, inspectGithubPlugin } from "./github.js";
 import { pluginManager, pluginPackageMaxBytes } from "./runtime.js";
 import type { SolPluginSettingDefinition, SolPluginSettingOption, SolPluginSettingValue } from "./types.js";
@@ -190,6 +191,33 @@ export async function handlePluginsApi(
 
   if (path === "/v1/plugins/extensions/ui" && request.method === "GET") {
     sendHtml(response, 200, renderPluginsPage());
+    return true;
+  }
+
+  if (path === "/v1/plugins/windows-autostart" && request.method === "GET") {
+    const status = await getWindowsAutostart();
+    sendJson(response, 200, { ...status, canManage: canManageCore(principal) });
+    return true;
+  }
+
+  if (path === "/v1/plugins/windows-autostart" && request.method === "POST") {
+    if (!canManageCore(principal)) {
+      sendJson(response, 403, { error: "forbidden" });
+      return true;
+    }
+    try {
+      const body = await readJson<{ enabled?: unknown }>(request);
+      if (typeof body.enabled !== "boolean") {
+        sendJson(response, 400, { error: "enabled_boolean_required" });
+        return true;
+      }
+      sendJson(response, 200, {
+        ...(await setWindowsAutostart(body.enabled)),
+        canManage: true,
+      });
+    } catch (error) {
+      sendJson(response, 400, { error: error instanceof Error ? error.message : String(error) });
+    }
     return true;
   }
 

@@ -143,50 +143,76 @@ async function main(): Promise<void> {
   const gateway = gatewayUrl();
   const command = stdioCommand();
   const nexoCommand = nexoStdioCommand();
-  const client = new Client({ name: "sol-openai-plugin-bridge", version: "1.0.0" });
-  const transport = new StdioClientTransport({
-    command: command.command,
-    args: command.args,
-    env: inheritedEnv(token),
-  });
+  let client: Client | undefined;
   const nexoClient = new Client({ name: "sol-openai-plugin-bridge-nexo", version: "1.0.0" });
   const nexoTransport = new StdioClientTransport({
     command: nexoCommand.command,
     args: nexoCommand.args,
     env: inheritedEnv(token),
   });
-  await Promise.all([client.connect(transport), nexoClient.connect(nexoTransport)]);
+  await nexoClient.connect(nexoTransport);
 
-  const [listed, nexoListed]: any[] = await Promise.all([client.listTools(), nexoClient.listTools()]);
-  const providers = new Map<string, "core" | "nexo">();
-  const rawTools: any[] = [];
-  for (const tool of listed.tools ?? []) {
-    rawTools.push(tool);
-    providers.set(tool.name, "core");
+  let providers = new Map<string, "core" | "nexo">();
+  let tools: Array<Record<string, unknown>> = [];
+  let profile: Record<string, unknown> | undefined;
+
+  async function refreshLocalCatalog(): Promise<void> {
+    const nextClient = new Client({ name: "sol-openai-plugin-bridge", version: "1.0.0" });
+    const nextTransport = new StdioClientTransport({
+      command: command.command,
+      args: command.args,
+      env: inheritedEnv(token),
+    });
+
+    await nextClient.connect(nextTransport);
+    try {
+      const [listed, nexoListed]: any[] = await Promise.all([
+        nextClient.listTools(),
+        nexoClient.listTools(),
+      ]);
+      const nextProviders = new Map<string, "core" | "nexo">();
+      const rawTools: any[] = [];
+      for (const tool of listed.tools ?? []) {
+        rawTools.push(tool);
+        nextProviders.set(tool.name, "core");
+      }
+      for (const tool of nexoListed.tools ?? []) {
+        if (nextProviders.has(tool.name)) continue;
+        rawTools.push(tool);
+        nextProviders.set(tool.name, "nexo");
+      }
+      const nextTools = rawTools.map((tool: any) => ({
+        name: tool.name,
+        title: tool.title || title(tool.name),
+        description: tool.description || `SOL tool ${tool.name}`,
+        inputSchema: tool.inputSchema ?? { type: "object", properties: {} },
+        annotations: tool.annotations ?? undefined,
+        requiredScope: requiredScope(tool),
+      }));
+
+      const statusResult: any = await nextClient.callTool({ name: "sol_status", arguments: {} }).catch(() => undefined);
+      const status = parseTextResult(statusResult) as any;
+      const nextProfile = status && typeof status === "object" ? {
+        displayName: status.member?.displayName,
+        memberRole: status.member?.role,
+        solVersion: process.env.SOL_VERSION,
+      } : undefined;
+
+      const previous = client;
+      client = nextClient;
+      providers = nextProviders;
+      tools = nextTools;
+      profile = nextProfile;
+      if (previous) await previous.close().catch(() => undefined);
+
+      console.log(`SOL OpenAI bridge catalog: ${listed.tools?.length ?? 0} core + ${nexoListed.tools?.length ?? 0} Nexo = ${tools.length} unique tools`);
+    } catch (error) {
+      await nextClient.close().catch(() => undefined);
+      throw error;
+    }
   }
-  for (const tool of nexoListed.tools ?? []) {
-    if (providers.has(tool.name)) continue;
-    rawTools.push(tool);
-    providers.set(tool.name, "nexo");
-  }
-  const tools = rawTools.map((tool: any) => ({
-    name: tool.name,
-    title: tool.title || title(tool.name),
-    description: tool.description || `SOL tool ${tool.name}`,
-    inputSchema: tool.inputSchema ?? { type: "object", properties: {} },
-    annotations: tool.annotations ?? undefined,
-    requiredScope: requiredScope(tool),
-  }));
 
-  console.log(`SOL OpenAI bridge catalog: ${listed.tools?.length ?? 0} core + ${nexoListed.tools?.length ?? 0} Nexo = ${tools.length} unique tools`);
-
-  const statusResult: any = await client.callTool({ name: "sol_status", arguments: {} }).catch(() => undefined);
-  const status = parseTextResult(statusResult) as any;
-  const profile = status && typeof status === "object" ? {
-    displayName: status.member?.displayName,
-    memberRole: status.member?.role,
-    solVersion: process.env.SOL_VERSION,
-  } : undefined;
+  await refreshLocalCatalog();
 
   let state = await readOpenAiBridgeState();
   if (!state || state.gatewayUrl !== gateway) {
@@ -233,8 +259,9 @@ async function main(): Promise<void> {
     await writeOpenAiBridgeState(state);
   }
 
-  async function publishCatalog(): Promise<void> {
+  async function publishCatalog(refreshLocal = true): Promise<void> {
     await assertMcpAccessActive();
+    if (refreshLocal) await refreshLocalCatalog();
     await enroll();
     const response = await request("/bridge/catalog", {
       method: "POST",
@@ -268,6 +295,13 @@ async function main(): Promise<void> {
   }
 
   await enroll();
+  await publishCatalog(false);
+
+  // Plugins register their MCP tools shortly after Core becomes healthy.
+  // Republish once after a brief settle window before requesting a pairing
+  // code, because a cold Render request can take much longer than local
+  // plugin registration and must not delay the complete tool catalog.
+  await new Promise((resolve) => setTimeout(resolve, 5_000));
   await publishCatalog();
   await refreshPairCode();
 
@@ -279,7 +313,7 @@ async function main(): Promise<void> {
     console.log(`Received ${signal}; stopping SOL OpenAI bridge`);
     stop.abort();
     await Promise.all([
-      client.close().catch(() => undefined),
+      client?.close().catch(() => undefined),
       nexoClient.close().catch(() => undefined),
     ]);
     process.exit(0);
@@ -323,7 +357,7 @@ async function main(): Promise<void> {
     } catch (cause) {
       console.error(cause instanceof Error ? cause.message : String(cause));
       await Promise.all([
-        client.close().catch(() => undefined),
+        client?.close().catch(() => undefined),
         nexoClient.close().catch(() => undefined),
       ]);
       process.exit(2);
@@ -335,6 +369,7 @@ async function main(): Promise<void> {
       const provider = providers.get(job.tool);
       if (!provider) throw new Error(`Unknown SOL bridge tool: ${job.tool}`);
       const activeClient = provider === "nexo" ? nexoClient : client;
+      if (!activeClient) throw new Error("SOL Core MCP client is not connected");
       result = await activeClient.callTool({ name: job.tool, arguments: job.arguments ?? {} });
     } catch (cause) {
       ok = false;

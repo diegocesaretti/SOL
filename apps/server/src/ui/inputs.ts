@@ -33,7 +33,7 @@ export function renderInputsPage(): string {
       <div class="callout small" style="margin-bottom:14px"><strong>Una Persona, muchas identidades.</strong> WhatsApp, Home Assistant, una futura voz reconocida por Audio Remote y otras cuentas pueden apuntar al mismo humano. Vincular una identidad <strong>no otorga acceso ni permisos</strong> a SOL.</div>
       <div class="grid">
         <section class="card span4"><div class="row between"><div><div class="kicker">Acceso</div><h2 style="margin-top:4px">Miembros del hogar</h2></div><span class="badge" id="member-count">—</span></div><p class="muted small">Personas con login y rol de permisos. Esto es independiente de sus identidades externas.</p><div class="divider"></div><div id="members"><div class="empty">Cargando…</div></div></section>
-        <section class="card span8"><div class="row between"><div><div class="kicker">Identidad canónica</div><h2 style="margin-top:4px">Personas e identidades vinculadas</h2></div><span class="badge" id="known-count">—</span></div><p class="muted small">Cada identidad externa pertenece a una sola Persona; una Persona puede tener muchas identidades de distintos plugins.</p><div class="divider"></div><div id="known-people"><div class="empty">Cargando…</div></div></section>
+        <section class="card span8"><div class="row between"><div><div class="kicker">Identidad canónica</div><h2 style="margin-top:4px">Personas e identidades vinculadas</h2></div><span class="badge" id="known-count">—</span></div><p class="muted small">Cada identidad externa pertenece a una sola Persona; una Persona puede tener muchas identidades de distintos plugins. Para unificar, usá el desplegable <strong>Unificar con…</strong> de cada identidad de WhatsApp o Home Assistant.</p><div class="divider"></div><div id="known-people"><div class="empty">Cargando…</div></div></section>
         <section class="card span12"><div class="row between"><div><div class="kicker">Regla de seguridad</div><h2 style="margin-top:4px">Reconocer no es autenticar</h2></div></div><div class="divider"></div><div class="grid"><div class="span4"><h3>Nexo / WhatsApp</h3><p class="muted small">Un teléfono puede vincularse a una Persona canónica. Nexo sigue decidiendo por separado quién puede conversar por WhatsApp.</p><button data-open-plugin="nexo">Abrir Nexo</button></div><div class="span4"><h3>Home Assistant</h3><p class="muted small">Las entidades <code>person.*</code> pueden vincularse a la misma Persona que un teléfono u otra identidad.</p><a class="button" href="/v1/inputs/plugins/ui">Configurar plugin</a></div><div class="span4"><h3>Audio Remote</h3><p class="muted small">Una futura huella de voz podrá resolver a esta misma Persona, pero por sí sola no concederá login, rol ni autorización.</p><a class="button" href="/v1/inputs/plugins/ui">Configurar plugin</a></div></div></section>
       </div>
     </div>
@@ -58,9 +58,17 @@ async function api(path,o={}){
 const state={inputs:[],plugins:[],people:[],canManagePlugins:false};
 function fmt(v){if(!v)return 'sin actividad';try{return new Intl.DateTimeFormat('es-AR',{dateStyle:'short',timeStyle:'short'}).format(new Date(v))}catch{return String(v)}}
 function statusClass(s){return s==='connected'||s==='open'||s==='running'?'good':s==='error'||s==='unhealthy'?'bad':'warn'}
+function localUiUrl(value){
+  if(!value)return null;
+  try{
+    const u=new URL(String(value),location.origin);
+    if(u.hostname==='0.0.0.0'||u.hostname==='::'||u.hostname==='[::]')u.hostname='127.0.0.1';
+    return u.toString();
+  }catch{return null}
+}
 function pluginPanelUrl(p){
   const m=p.manifest||{},d=p.healthDetails||p.details||{};
-  const reported=d.bridgeUrl||d.dashboardUrl||d.uiUrl;
+  const reported=localUiUrl(d.bridgeUrl||d.dashboardUrl||d.uiUrl);
   if(reported)return reported;
   if(m.id==='nexo-whatsapp')return 'http://127.0.0.1:'+(Number(p.settings?.port)||3210)+'/';
   return null;
@@ -83,7 +91,8 @@ async function showItems(id,label){document.getElementById('items-title').textCo
 document.getElementById('items-close').onclick=()=>document.getElementById('items-dialog').close();
 function memberRow(m){return '<div class="accountline"><div><strong>'+esc(m.displayName)+'</strong><div class="small muted" style="margin-top:4px">'+esc(m.role)+' · '+esc(m.loginName||'sin login visible')+'</div></div><span class="badge">miembro</span></div>'}
 function identitySource(i){return i.pluginId||i.provider||'identidad'}
-function identityRow(i,current,people){const options=people.filter(p=>p.id!==current.id).map(p=>'<option value="'+esc(p.id)+'">'+esc(p.name)+'</option>').join('');return '<div style="padding:10px 0;border-top:1px solid var(--line)"><div class="row between"><div><div class="row"><span class="badge">'+esc(identitySource(i))+'</span><strong>'+esc(i.label||i.externalValue)+'</strong></div><div class="small muted" style="margin-top:4px">'+esc(i.kind)+' · '+esc(i.externalValue)+'</div></div>'+(options?'<select data-link-identity="'+esc(i.id)+'" data-current-person="'+esc(current.name)+'" style="width:210px"><option value="">Vincular a otra persona…</option>'+options+'</select>':'')+'</div></div>'}
+function personSources(p){return [...new Set((p.identities||[]).map(identitySource).filter(Boolean))].join(' + ')||'sin identidades'}
+function identityRow(i,current,people){const options=people.filter(p=>p.id!==current.id).map(p=>'<option value="'+esc(p.id)+'">'+esc(p.name)+' · '+esc(personSources(p))+'</option>').join('');return '<div style="padding:10px 0;border-top:1px solid var(--line)"><div class="row between"><div><div class="row"><span class="badge">'+esc(identitySource(i))+'</span><strong>'+esc(i.label||i.externalValue)+'</strong></div><div class="small muted" style="margin-top:4px">'+esc(i.kind)+' · '+esc(i.externalValue)+'</div></div>'+(options?'<label style="width:280px">Unificar con…<select data-link-identity="'+esc(i.id)+'" data-current-person="'+esc(current.name)+'"><option value="">Elegir Persona destino…</option>'+options+'</select></label>':'')+'</div></div>'}
 function personRow(p,people){const ids=p.identities||[];return '<div class="card soft" style="margin-bottom:10px"><div class="row between"><div><strong>'+esc(p.name||'Persona')+'</strong><div class="small muted" style="margin-top:4px">'+esc(p.visibility||'contexto')+(p.ownerMemberId?' · vinculada a miembro SOL':'')+'</div></div><span class="badge">'+ids.length+' identidad'+(ids.length===1?'':'es')+'</span></div>'+(ids.length?ids.map(i=>identityRow(i,p,people)).join(''):'<div class="small muted" style="margin-top:10px">Sin identidades externas vinculadas.</div>')+'</div>'}
 async function linkIdentity(identityId,currentName,targetId){
   if(!targetId)return;
