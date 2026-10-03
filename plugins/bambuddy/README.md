@@ -11,6 +11,7 @@ Integración nativa de Bambuddy para SOL.
 - acceso de lectura al OpenAPI de Bambuddy;
 - fallback genérico de lectura/acción para endpoints `/api/v1/`;
 - verificación y reparación idempotente de dos parches de compatibilidad de Bambuddy.
+- Obico ML nativo administrado por el plugin, con GPU NVIDIA, watchdog y bootstrap reproducible sin Docker.
 
 ## Parches mantenidos
 
@@ -33,3 +34,8 @@ Los backups y estados viven en `SOL_PLUGIN_DATA_DIR`, fuera del paquete del plug
 El plugin se publica como `Bambuddy.solplugin` en el release `bambuddy-plugin-latest` del repositorio `diegocesaretti/SOL`.
 
 SOL conserva settings y `plugin-data` al actualizar/reinstalar en el lugar. No se versionan códigos de acceso de impresoras, API keys, cachés ni otros secretos.
+## Obico ML nativo
+
+El plugin puede administrar un ML API de Obico nativo para Windows en `SOL_PLUGIN_DATA_DIR/obico-ml`. El código del plugin fija el commit upstream, el modelo ONNX y su SHA-256, las dependencias GPU y los dos parches mínimos de compatibilidad Windows. El modelo y CUDA no se guardan en GitHub: `obico-ml/bootstrap.ps1` los reconstruye y verifica.
+
+El runtime se enlaza a `127.0.0.1:3333`, usa ONNX Runtime GPU/CUDA cuando está disponible y queda supervisado por el plugin. Bambuddy conserva su propia sensibilidad/acción; el plugin sólo asegura que la integración esté habilitada y apunte al ML local.

@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "id": "bambuddy",
   "name": "Bambuddy",
-  "version": "0.2.1",
-  "description": "Native SOL integration for Bambuddy LAN/Developer Mode printers with cached SD files, resilient direct SD printing and self-repairing compatibility patches.",
+  "version": "0.3.0",
+  "description": "Native SOL integration for Bambuddy LAN/Developer Mode printers with cached SD files, resilient direct SD printing, managed native Obico GPU failure detection and self-repairing compatibility patches.",
   "runtime": "node",
   "entry": "entry.mjs",
   "args": [],
@@ -12,7 +12,8 @@
   "capabilities": [
     "mcp.bambuddy",
     "tool.bambuddy",
-    "printer.farm"
+    "printer.farm",
+    "ml.obico"
   ],
   "requires": [
     "plugin-api.v1",
@@ -85,6 +86,43 @@
       "env": "BAMBUDDY_SOL_ALLOW_CONTROL",
       "required": false,
       "default": true
+    },
+    {
+      "key": "obico_managed",
+      "label": "Obico ML nativo administrado por el plugin",
+      "type": "boolean",
+      "description": "Arranca y supervisa el Obico ML nativo almacenado en plugin-data de Bambuddy.",
+      "env": "BAMBUDDY_OBICO_MANAGED",
+      "required": false,
+      "default": true
+    },
+    {
+      "key": "obico_port",
+      "label": "Puerto local de Obico ML",
+      "type": "number",
+      "env": "BAMBUDDY_OBICO_PORT",
+      "required": false,
+      "default": 3333,
+      "min": 1024,
+      "max": 65535
+    },
+    {
+      "key": "obico_auto_configure",
+      "label": "Configurar Bambuddy para usar Obico ML local",
+      "type": "boolean",
+      "description": "Mantiene Bambuddy apuntando al ML API local sin sobrescribir sensibilidad ni acción configuradas.",
+      "env": "BAMBUDDY_OBICO_AUTO_CONFIGURE",
+      "required": false,
+      "default": true
+    },
+    {
+      "key": "obico_auto_bootstrap",
+      "label": "Reconstruir Obico automáticamente si falta",
+      "type": "boolean",
+      "description": "Si está activo y falta el runtime, lanza el bootstrap reproducible al iniciar. Puede descargar más de 1 GB de dependencias/modelos.",
+      "env": "BAMBUDDY_OBICO_AUTO_BOOTSTRAP",
+      "required": false,
+      "default": false
     }
   ],
   "distribution": {

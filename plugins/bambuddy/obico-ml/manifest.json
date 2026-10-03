@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "upstream": {
+    "repository": "TheSpaghettiDetective/obico-server",
+    "commit": "6f938964c63892df2b6d5b68d99ea783fc1a7c78",
+    "archiveUrl": "https://github.com/TheSpaghettiDetective/obico-server/archive/6f938964c63892df2b6d5b68d99ea783fc1a7c78.zip"
+  },
+  "model": {
+    "format": "onnx",
+    "url": "https://www.obico.io/static_pub/ml-models/model-weights-5a6b1be1fa.onnx",
+    "sha256": "0a6ebd8e30dbf6a450c50f9c0a5406f04ba7eb1c99fd5996e888c78bb383b9aa",
+    "sizeBytes": 202223918
+  },
+  "runtime": {
+    "pythonPreferred": "3.11.15",
+    "onnxruntimeGpu": "1.30.0",
+    "opencv": "4.12.0.88",
+    "server": "waitress 3.0.2",
+    "port": 3333,
+    "bind": "127.0.0.1"
+  },
+  "windowsPatches": [
+    "server.py: accept ML_MODEL_PATH and pass it to load_net()",
+    "lib/onnx.py: preload NVIDIA pip DLLs before creating CUDAExecutionProvider"
+  ]
+}

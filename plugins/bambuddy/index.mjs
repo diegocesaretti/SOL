@@ -3,6 +3,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { inspectBambuddyPatches, launchBambuddyPatch } from "./lib/bambuddy-patcher.mjs";
+import { createObicoMlManager } from "./lib/obico-ml-manager.mjs";
 import { SolPluginClientCore } from "./lib/sol-client-core.mjs";
 
 function boolEnv(name, fallback = false) {
@@ -36,13 +37,19 @@ const config = {
   allowControl: boolEnv("BAMBUDDY_SOL_ALLOW_CONTROL", true),
   filesCacheHours: numberEnv("BAMBUDDY_FILES_CACHE_HOURS", 24, 1, 168),
   bambuddyInstallDir: process.env.BAMBUDDY_INSTALL_DIR?.trim() || "C:\\Program Files\\Bambuddy",
-  maintainPatches: boolEnv("BAMBUDDY_MAINTAIN_PATCHES", true)
+  maintainPatches: boolEnv("BAMBUDDY_MAINTAIN_PATCHES", true),
+  managedObico: boolEnv("BAMBUDDY_OBICO_MANAGED", true),
+  obicoPort: numberEnv("BAMBUDDY_OBICO_PORT", 3333, 1024, 65535),
+  obicoAutoConfigure: boolEnv("BAMBUDDY_OBICO_AUTO_CONFIGURE", true),
+  obicoAutoBootstrap: boolEnv("BAMBUDDY_OBICO_AUTO_BOOTSTRAP", false)
 };
 
 const pluginDataDir = process.env.SOL_PLUGIN_DATA_DIR?.trim()
   || join(process.env.SOL_PLUGIN_ROOT?.trim() || process.cwd(), ".data");
 const filesCachePath = join(pluginDataDir, "files-cache.json");
 const filesCacheTtlMs = config.filesCacheHours * 60 * 60 * 1000;
+const obicoMl = createObicoMlManager({ dataDir: pluginDataDir, port: config.obicoPort, enabled: config.managedObico });
+let obicoGuardSuppressed = false;
 
 const sol = new SolPluginClientCore();
 const pluginId = process.env.SOL_PLUGIN_ID?.trim() || "bambuddy";
@@ -95,6 +102,44 @@ async function api(path, { method = "GET", query, body, timeout = 45000 } = {}) 
     throw error;
   }
   return sanitize(payload);
+}
+
+async function configureManagedObico() {
+  if (!config.managedObico || !config.obicoAutoConfigure) {
+    return { ok: false, skipped: "obico_auto_configure_disabled" };
+  }
+  const ml = await obicoMl.status();
+  if (!ml.health.ok) return { ok: false, skipped: "obico_ml_not_healthy", ml };
+
+  const current = await api("/api/v1/settings");
+  const desiredUrl = `http://127.0.0.1:${config.obicoPort}`;
+  const patch = {};
+  if (current?.obico_enabled !== true) patch.obico_enabled = true;
+  if (String(current?.obico_ml_url || "") !== desiredUrl) patch.obico_ml_url = desiredUrl;
+  if (String(current?.obico_ml_token || "") !== "") patch.obico_ml_token = "";
+
+  let updated = current;
+  if (Object.keys(patch).length) {
+    updated = await api("/api/v1/settings", { method: "PATCH", body: patch });
+  }
+
+  const detection = await api("/api/v1/obico/status").catch((error) => ({
+    error: error?.message || String(error)
+  }));
+  return {
+    ok: true,
+    changed: Object.keys(patch),
+    ml,
+    bambuddy: {
+      enabled: Boolean(updated?.obico_enabled),
+      mlUrl: updated?.obico_ml_url || "",
+      sensitivity: updated?.obico_sensitivity || null,
+      action: updated?.obico_action || null,
+      pollInterval: updated?.obico_poll_interval ?? null,
+      externalUrlConfigured: Boolean(updated?.external_url)
+    },
+    detection
+  };
 }
 
 async function listPrinters() {
@@ -342,6 +387,26 @@ const tools = [
     requiredScope: "actions"
   },
   {
+    name: "bambuddy_obico_status",
+    description: "Read the managed native Obico ML runtime status, GPU provider state and Bambuddy failure-detection status.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    requiredScope: "read"
+  },
+  {
+    name: "bambuddy_obico_control",
+    description: "Manage the native Obico ML runtime bundled with the Bambuddy SOL plugin (start, stop, restart, configure or bootstrap). Requires explicit user confirmation.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        confirmedByUser: { type: "boolean", description: "Optional compatibility flag. SOL enforces confirmation at sol_run_action." },
+        operation: { type: "string", enum: ["start", "stop", "restart", "configure", "bootstrap"] }
+      },
+      required: ["operation"],
+      additionalProperties: false
+    },
+    requiredScope: "actions"
+  },
+  {
     name: "bambuddy_list_printers",
     description: "List printers configured in Bambuddy. This is SOL's primary backend for LAN/Developer Mode Bambu printers.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
@@ -504,7 +569,7 @@ function requireApiPath(path) {
 
 async function dispatchTool(tool, args) {
   if (tool === "bambuddy_health") {
-    const [auth, printers, , patchStatus] = await Promise.all([
+    const [auth, printers, , patchStatus, obicoStatus] = await Promise.all([
       api("/api/v1/auth/status").catch((error) => ({ error: error.message })),
       listPrinters().catch(() => []),
       loadFilesCache(),
@@ -513,6 +578,10 @@ async function dispatchTool(tool, args) {
         complete: false,
         compatible: false,
         error: error?.message || String(error)
+      })),
+      obicoMl.status().catch((error) => ({
+        enabled: config.managedObico,
+        health: { ok: false, error: error?.message || String(error) }
       }))
     ]);
     return {
@@ -526,7 +595,9 @@ async function dispatchTool(tool, args) {
       filesCacheUpdatedAt: filesCache.updatedAt,
       cachedPrinterCount: Object.keys(filesCache.printers || {}).length,
       maintainPatches: config.maintainPatches,
-      patchStatus
+      patchStatus,
+      managedObico: config.managedObico,
+      obico: obicoStatus
     };
   }
   if (tool === "bambuddy_patch_status") {
@@ -537,6 +608,51 @@ async function dispatchTool(tool, args) {
     return await launchBambuddyPatch(config.bambuddyInstallDir, pluginDataDir, {
       force: args.force === undefined ? true : Boolean(args.force)
     });
+  }
+  if (tool === "bambuddy_obico_status") {
+    const [runtime, detection, settings] = await Promise.all([
+      obicoMl.status(),
+      api("/api/v1/obico/status").catch((error) => ({ error: error?.message || String(error) })),
+      api("/api/v1/settings").catch((error) => ({ error: error?.message || String(error) }))
+    ]);
+    return {
+      runtime,
+      detection,
+      bambuddy: settings?.error ? settings : {
+        enabled: Boolean(settings?.obico_enabled),
+        mlUrl: settings?.obico_ml_url || "",
+        sensitivity: settings?.obico_sensitivity || null,
+        action: settings?.obico_action || null,
+        pollInterval: settings?.obico_poll_interval ?? null,
+        externalUrl: settings?.external_url || ""
+      }
+    };
+  }
+  if (tool === "bambuddy_obico_control") {
+    requireControl();
+    const op = String(args.operation || "").toLowerCase();
+    if (op === "start") {
+      obicoGuardSuppressed = false;
+      const result = await obicoMl.start();
+      if (result.ok) result.configuration = await configureManagedObico().catch((error) => ({ ok: false, error: error?.message || String(error) }));
+      return result;
+    }
+    if (op === "stop") {
+      obicoGuardSuppressed = true;
+      return await obicoMl.stop();
+    }
+    if (op === "restart") {
+      obicoGuardSuppressed = false;
+      const result = await obicoMl.restart();
+      if (result.ok) result.configuration = await configureManagedObico().catch((error) => ({ ok: false, error: error?.message || String(error) }));
+      return result;
+    }
+    if (op === "configure") return await configureManagedObico();
+    if (op === "bootstrap") {
+      obicoGuardSuppressed = false;
+      return await obicoMl.bootstrap();
+    }
+    throw new Error("invalid_obico_operation");
   }
   if (tool === "bambuddy_list_printers") return { printers: await listPrinters() };
   if (tool === "bambuddy_printer_status") return await printerStatus(args.printer);
@@ -730,6 +846,47 @@ const retry = setInterval(() => {
 }, 15000);
 retry.unref?.();
 
+let obicoMaintaining = false;
+async function maintainManagedObico(reason) {
+  if (!config.managedObico || obicoGuardSuppressed || obicoMaintaining) return;
+  obicoMaintaining = true;
+  try {
+    let status = await obicoMl.status();
+    if (!status.installed) {
+      if (config.obicoAutoBootstrap && reason === "startup" && status.bootstrapAvailable) {
+        const boot = await obicoMl.bootstrap();
+        console.log(JSON.stringify({ type: "bambuddy.obico.bootstrap", reason, ...boot }));
+      } else {
+        console.warn("Managed Obico ML runtime is not installed; bootstrap is available through bambuddy_obico_control.");
+      }
+      return;
+    }
+    if (!status.health.ok) {
+      const started = await obicoMl.start();
+      console.log(JSON.stringify({ type: "bambuddy.obico.start", reason, ok: started.ok, alreadyRunning: started.alreadyRunning || false }));
+      status = await obicoMl.status();
+    }
+    if (status.health.ok && config.obicoAutoConfigure) {
+      const configured = await configureManagedObico();
+      console.log(JSON.stringify({ type: "bambuddy.obico.configure", reason, ok: configured.ok, changed: configured.changed || [] }));
+    }
+  } catch (error) {
+    console.warn(`Managed Obico ML ${reason} check failed: ${error?.message || error}`);
+  } finally {
+    obicoMaintaining = false;
+  }
+}
+
+const initialObicoStart = setTimeout(() => {
+  void maintainManagedObico("startup");
+}, 1500);
+initialObicoStart.unref?.();
+
+const obicoGuard = setInterval(() => {
+  void maintainManagedObico("watchdog");
+}, 60 * 1000);
+obicoGuard.unref?.();
+
 const initialPatchCheck = setTimeout(() => {
   if (!config.maintainPatches) return;
   void inspectBambuddyPatches(config.bambuddyInstallDir, pluginDataDir)
@@ -768,6 +925,8 @@ async function shutdown(signal) {
   if (stopping) return;
   stopping = true;
   clearInterval(retry);
+  clearTimeout(initialObicoStart);
+  clearInterval(obicoGuard);
   clearTimeout(initialPatchCheck);
   clearTimeout(initialCacheRefresh);
   clearInterval(filesCacheRefresh);
