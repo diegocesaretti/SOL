@@ -1,0 +1,62 @@
+name: Bambuddy SOL plugin
+
+on:
+  pull_request:
+    paths:
+      - "plugins/bambuddy/**"
+      - "scripts/pack-sol-plugin.mjs"
+      - ".github/workflows/bambuddy-plugin.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "plugins/bambuddy/**"
+      - "scripts/pack-sol-plugin.mjs"
+      - ".github/workflows/bambuddy-plugin.yml"
+    tags:
+      - "bambuddy-plugin-v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test-package:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Syntax check runtime
+        shell: pwsh
+        run: |
+          Get-ChildItem plugins/bambuddy -Recurse -Filter *.mjs |
+            ForEach-Object { node --check $_.FullName }
+
+      - name: Package .solplugin
+        run: node scripts/pack-sol-plugin.mjs plugins/bambuddy dist/Bambuddy.solplugin
+
+      - name: Upload package artifact
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: Bambuddy-solplugin
+          path: dist/Bambuddy.solplugin
+          if-no-files-found: error
+
+      - name: Publish stable plugin release
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/bambuddy-plugin-v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/Bambuddy.solplugin
+          tag_name: bambuddy-plugin-latest
+          target_commitish: ${{ github.sha }}
+          name: Bambuddy SOL plugin
+          body: "Latest Bambuddy plugin package for SOL."
+          prerelease: false
+          overwrite_files: true
