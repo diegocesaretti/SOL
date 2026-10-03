@@ -7,6 +7,7 @@ Integración nativa de Bambuddy para SOL.
 - estado y control de impresoras Bambu configuradas en Bambuddy;
 - listado persistente de archivos SD con caché de 24 horas y refresh en vivo;
 - impresión directa de archivos `.3mf` ya presentes en la raíz de la SD;
+- fallback de impresión para clientes con catálogo MCP viejo: los listados incluyen una ruta alternativa mediante `bambuddy_api_action` + `/print-sd`;
 - acceso de lectura al OpenAPI de Bambuddy;
 - fallback genérico de lectura/acción para endpoints `/api/v1/`;
 - verificación y reparación idempotente de dos parches de compatibilidad de Bambuddy.

@@ -175,6 +175,31 @@ async function refreshAllFilesCache() {
   }
   return results;
 }
+function printActionHints(printer) {
+  return {
+    preferred: {
+      tool: "bambuddy_print_sd",
+      via: "sol_run_action",
+      confirmedByUser: true,
+      arguments: {
+        printer: printer.name,
+        file: "<exact .3mf filename from files[]>"
+      }
+    },
+    fallbackWhenDirectToolIsMissing: {
+      tool: "bambuddy_api_action",
+      confirmedByUser: true,
+      method: "POST",
+      path: `/api/v1/printers/${printer.id}/print-sd`,
+      query: {
+        filename: "<exact .3mf filename from files[]>",
+        plate_id: 1
+      },
+      note: "Use this fallback when the client/chat catalog does not expose bambuddy_print_sd. Add use_ams=true and ams_mapping only when AMS printing is intended."
+    }
+  };
+}
+
 async function filesForPrinter(printer, { path = "/", refresh = false } = {}) {
   const normalizedPath = String(path || "/");
   if (normalizedPath !== "/") {
@@ -192,7 +217,8 @@ async function filesForPrinter(printer, { path = "/", refresh = false } = {}) {
       warnings: cached.warnings || [],
       source: "cache",
       cacheUpdatedAt: cached.updatedAt,
-      cacheAgeSeconds: Math.max(0, Math.round((Date.now() - Date.parse(cached.updatedAt)) / 1000))
+      cacheAgeSeconds: Math.max(0, Math.round((Date.now() - Date.parse(cached.updatedAt)) / 1000)),
+      actionHints: printActionHints(printer)
     };
   }
 
@@ -205,7 +231,8 @@ async function filesForPrinter(printer, { path = "/", refresh = false } = {}) {
       warnings: fresh.warnings || [],
       source: "live",
       cacheUpdatedAt: fresh.updatedAt,
-      cacheAgeSeconds: 0
+      cacheAgeSeconds: 0,
+      actionHints: printActionHints(printer)
     };
   } catch (error) {
     if (cached) {
@@ -216,7 +243,8 @@ async function filesForPrinter(printer, { path = "/", refresh = false } = {}) {
         warnings: [...(cached.warnings || []), `Live refresh failed: ${error?.message || error}`],
         source: "cache-stale",
         cacheUpdatedAt: cached.updatedAt,
-        cacheAgeSeconds: Math.max(0, Math.round((Date.now() - Date.parse(cached.updatedAt)) / 1000))
+        cacheAgeSeconds: Math.max(0, Math.round((Date.now() - Date.parse(cached.updatedAt)) / 1000)),
+        actionHints: printActionHints(printer)
       };
     }
     throw error;

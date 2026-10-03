@@ -1,97 +1,95 @@
 {
-    "schemaVersion":  2,
-    "id":  "bambuddy",
-    "name":  "Bambuddy",
-    "version":  "0.2.0",
-    "description":  "Native SOL integration for Bambuddy LAN/Developer Mode printers with cached SD files, direct SD printing and self-repairing compatibility patches.",
-    "runtime":  "node",
-    "entry":  "entry.mjs",
-    "args":  [
-
-             ],
-    "autoStart":  true,
-    "restartPolicy":  "on-failure",
-    "capabilities":  [
-                         "mcp.bambuddy",
-                         "tool.bambuddy",
-                         "printer.farm"
-                     ],
-    "requires":  [
-                     "plugin-api.v1",
-                     "mcp.register",
-                     "filesystem.plugin-data"
-                 ],
-    "permissions":  [
-                        "mcp.register",
-                        "network.local",
-                        "filesystem.plugin-data"
-                    ],
-    "settings":  [
-                     {
-                         "key":  "base_url",
-                         "label":  "Bambuddy URL",
-                         "type":  "text",
-                         "env":  "BAMBUDDY_URL",
-                         "required":  false,
-                         "default":  "http://127.0.0.1:8000"
-                     },
-                     {
-                         "key":  "api_key",
-                         "label":  "Bambuddy API key",
-                         "type":  "secret",
-                         "env":  "BAMBUDDY_API_KEY",
-                         "required":  false
-                     },
-                     {
-                         "key":  "api_port",
-                         "label":  "Puerto API local del plugin",
-                         "type":  "number",
-                         "env":  "BAMBUDDY_SOL_API_PORT",
-                         "required":  false,
-                         "default":  8770,
-                         "min":  1024,
-                         "max":  65535
-                     },
-                     {
-                         "key":  "bambuddy_install_dir",
-                         "label":  "Carpeta de instalación de Bambuddy",
-                         "type":  "path",
-                         "description":  "Ruta donde está instalado Bambuddy. Se usa para verificar y reparar los parches de compatibilidad.",
-                         "env":  "BAMBUDDY_INSTALL_DIR",
-                         "required":  false,
-                         "default":  "C:\\Program Files\\Bambuddy"
-                     },
-                     {
-                         "key":  "maintain_patches",
-                         "label":  "Mantener parches de Bambuddy aplicados",
-                         "type":  "boolean",
-                         "description":  "Al iniciar, verifica los parches de Model Files y de impresión directa desde SD. Si una actualización los quitó, prepara backup y solicita UAC para reaplicarlos.",
-                         "env":  "BAMBUDDY_MAINTAIN_PATCHES",
-                         "required":  false,
-                         "default":  true
-                     },
-                     {
-                         "key":  "files_cache_hours",
-                         "label":  "Horas de validez de la cachÃ© de archivos",
-                         "type":  "number",
-                         "env":  "BAMBUDDY_FILES_CACHE_HOURS",
-                         "required":  false,
-                         "default":  24,
-                         "min":  1,
-                         "max":  168
-                     },
-                     {
-                         "key":  "allow_control",
-                         "label":  "Permitir control completo de Bambuddy desde SOL",
-                         "type":  "boolean",
-                         "env":  "BAMBUDDY_SOL_ALLOW_CONTROL",
-                         "required":  false,
-                         "default":  true
-                     }
-                 ],
-    "distribution":  {
-                         "type":  "github-release",
-                         "asset":  "Bambuddy.solplugin",
-                         "tag":  "bambuddy-plugin-latest"
-                     }
+  "schemaVersion": 2,
+  "id": "bambuddy",
+  "name": "Bambuddy",
+  "version": "0.2.1",
+  "description": "Native SOL integration for Bambuddy LAN/Developer Mode printers with cached SD files, resilient direct SD printing and self-repairing compatibility patches.",
+  "runtime": "node",
+  "entry": "entry.mjs",
+  "args": [],
+  "autoStart": true,
+  "restartPolicy": "on-failure",
+  "capabilities": [
+    "mcp.bambuddy",
+    "tool.bambuddy",
+    "printer.farm"
+  ],
+  "requires": [
+    "plugin-api.v1",
+    "mcp.register",
+    "filesystem.plugin-data"
+  ],
+  "permissions": [
+    "mcp.register",
+    "network.local",
+    "filesystem.plugin-data"
+  ],
+  "settings": [
+    {
+      "key": "base_url",
+      "label": "Bambuddy URL",
+      "type": "text",
+      "env": "BAMBUDDY_URL",
+      "required": false,
+      "default": "http://127.0.0.1:8000"
+    },
+    {
+      "key": "api_key",
+      "label": "Bambuddy API key",
+      "type": "secret",
+      "env": "BAMBUDDY_API_KEY",
+      "required": false
+    },
+    {
+      "key": "api_port",
+      "label": "Puerto API local del plugin",
+      "type": "number",
+      "env": "BAMBUDDY_SOL_API_PORT",
+      "required": false,
+      "default": 8770,
+      "min": 1024,
+      "max": 65535
+    },
+    {
+      "key": "bambuddy_install_dir",
+      "label": "Carpeta de instalación de Bambuddy",
+      "type": "path",
+      "description": "Ruta donde está instalado Bambuddy. Se usa para verificar y reparar los parches de compatibilidad.",
+      "env": "BAMBUDDY_INSTALL_DIR",
+      "required": false,
+      "default": "C:\\Program Files\\Bambuddy"
+    },
+    {
+      "key": "maintain_patches",
+      "label": "Mantener parches de Bambuddy aplicados",
+      "type": "boolean",
+      "description": "Al iniciar, verifica los parches de Model Files y de impresión directa desde SD. Si una actualización los quitó, prepara backup y solicita UAC para reaplicarlos.",
+      "env": "BAMBUDDY_MAINTAIN_PATCHES",
+      "required": false,
+      "default": true
+    },
+    {
+      "key": "files_cache_hours",
+      "label": "Horas de validez de la caché de archivos",
+      "type": "number",
+      "env": "BAMBUDDY_FILES_CACHE_HOURS",
+      "required": false,
+      "default": 24,
+      "min": 1,
+      "max": 168
+    },
+    {
+      "key": "allow_control",
+      "label": "Permitir control completo de Bambuddy desde SOL",
+      "type": "boolean",
+      "env": "BAMBUDDY_SOL_ALLOW_CONTROL",
+      "required": false,
+      "default": true
+    }
+  ],
+  "distribution": {
+    "type": "github-release",
+    "asset": "Bambuddy.solplugin",
+    "tag": "bambuddy-plugin-latest"
+  }
 }
