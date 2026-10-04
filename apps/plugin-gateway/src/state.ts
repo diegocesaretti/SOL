@@ -261,7 +261,7 @@ export function updateBridgeCatalog(
   instanceId: string,
   input: { tools?: unknown; profile?: unknown },
 ): BridgeCatalog {
-  if (!Array.isArray(input.tools) || input.tools.length > 80) throw new Error("tools_invalid");
+  if (!Array.isArray(input.tools) || input.tools.length > 160) throw new Error("tools_invalid");
   const tools: RemoteToolDefinition[] = input.tools.map((raw, index) => {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error(`tool_${index}_invalid`);
     const item = raw as Record<string, unknown>;

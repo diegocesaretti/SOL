@@ -4,6 +4,8 @@ import { appendFile, mkdir, readdir, readFile, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { SolPluginClientCore } from "./lib/sol-client-core.mjs";
+import { createMercadoLibreApi } from "./lib/mercadolibre-api.mjs";
+import { createMercadoLibreTools } from "./lib/mercadolibre-tools.mjs";
 
 function numberEnv(name, fallback, min, max) {
   const value = Number(process.env[name] ?? fallback);
@@ -37,13 +39,24 @@ const config = {
   clientId: process.env.BWA3D_ML_CLIENT_ID?.trim() || "",
   clientSecret: process.env.BWA3D_ML_CLIENT_SECRET?.trim() || "",
   redirectUri: process.env.BWA3D_ML_REDIRECT_URI?.trim() || "",
-  allowWrite: boolEnv("BWA3D_ML_ALLOW_WRITE", false)
+  allowWrite: boolEnv("BWA3D_ML_ALLOW_WRITE", false),
+  pkce: boolEnv("BWA3D_ML_PKCE", false)
 };
 
 const pluginDataDir = process.env.SOL_PLUGIN_DATA_DIR?.trim()
   || join(process.env.SOL_PLUGIN_ROOT?.trim() || process.cwd(), ".data");
 const authDir = join(pluginDataDir, "mercadolibre-mcp-auth");
 const loginLogPath = join(pluginDataDir, "mercadolibre-mcp-login.log");
+const mercadoLibreApi = createMercadoLibreApi({
+  dataDir: pluginDataDir,
+  site: config.site,
+  clientId: config.clientId,
+  clientSecret: config.clientSecret,
+  redirectUri: config.redirectUri,
+  allowWrite: config.allowWrite,
+  pkce: config.pkce
+});
+const mercadoLibreToolset = createMercadoLibreTools(mercadoLibreApi);
 
 const sol = new SolPluginClientCore();
 const pluginId = process.env.SOL_PLUGIN_ID?.trim() || "bwa-3d";
@@ -370,23 +383,22 @@ const tools = [
     requiredScope: "read"
   }
 ];
+tools.push(...mercadoLibreToolset.tools);
 
 async function dispatchTool(tool, args) {
   if (tool === "bwa_3d_status") {
     return {
       ok: true,
       plugin: "bwa-3d",
-      version: "0.1.0",
+      version: "0.2.0",
       modules: {
         mercadolibre: {
           mcp: await mcpStatus({ probe: Boolean(args.probe) }),
           sellerApi: {
-            prepared: true,
-            clientIdConfigured: Boolean(config.clientId),
-            clientSecretConfigured: Boolean(config.clientSecret),
-            redirectUriConfigured: Boolean(config.redirectUri),
+            ...(await mercadoLibreApi.oauthStatus()),
+            implemented: true,
             allowWrite: config.allowWrite,
-            note: "The official DevSite MCP is documentation-only. Private seller operations will use Mercado Libre API OAuth with this plugin's own app credentials."
+            capabilities: ["seller_profile", "items", "prices", "orders", "shipments", "questions", "post_sale_messages", "claims", "generic_api"]
           }
         },
         correo: {
@@ -436,17 +448,22 @@ async function dispatchTool(tool, args) {
     return compactMcpResult(result);
   }
 
+  const mercadoLibreApiResult = await mercadoLibreToolset.dispatch(tool, args);
+  if (mercadoLibreApiResult !== undefined) return mercadoLibreApiResult;
+
   throw new Error("tool_not_found");
 }
 
 let toolsRegistered = false;
+let registeredToolNames = [];
 let lastRegistrationError = null;
 
 async function registerTools() {
   if (!sol.enabled) return;
   try {
-    await sol.registerMcpTools(callbackUrl, tools);
-    toolsRegistered = true;
+    const registered = await sol.registerMcpTools(callbackUrl, tools);
+    registeredToolNames = registered.map((item) => item.name);
+    toolsRegistered = registeredToolNames.length === tools.length;
     lastRegistrationError = null;
   } catch (error) {
     toolsRegistered = false;
@@ -464,6 +481,8 @@ const server = createServer(async (request, response) => {
         ...status,
         solEnabled: sol.enabled,
         toolsRegistered,
+        registeredToolCount: registeredToolNames.length,
+        registeredToolNames,
         registrationError: lastRegistrationError
       });
       return;
@@ -493,7 +512,8 @@ const server = createServer(async (request, response) => {
   } catch (error) {
     const message = error?.message || String(error);
     const status = message.includes("login_required") ? 401
-      : message.includes("required") || message.includes("invalid") ? 400
+      : message.includes("write_disabled") ? 403
+      : message.includes("required") || message.includes("invalid") || message.includes("mismatch") || message.includes("expired") ? 400
       : 502;
     sendJson(response, status, { error: message });
   }

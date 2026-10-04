@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "id": "bwa-3d",
   "name": "BWA 3D",
-  "version": "0.1.0",
-  "description": "SOL business plugin for BWA 3D. First module: Mercado Libre official DevSite MCP with persistent OAuth, documentation tools, and seller-API OAuth settings prepared for later account operations.",
+  "version": "0.2.0",
+  "description": "SOL business plugin for BWA 3D with Mercado Libre DevSite MCP plus full seller API OAuth, auto-refresh, publications, prices, orders, shipments, questions, messages, claims and guarded generic API access.",
   "runtime": "node",
   "entry": "entry.mjs",
   "args": [],
@@ -79,10 +79,19 @@
       "required": false
     },
     {
+      "key": "mercadolibre_pkce",
+      "label": "Usar PKCE en OAuth de Mercado Libre",
+      "type": "boolean",
+      "description": "Activar solo si PKCE también está habilitado en la aplicación de Mercado Libre.",
+      "env": "BWA3D_ML_PKCE",
+      "required": false,
+      "default": false
+    },
+    {
       "key": "mercadolibre_allow_write",
       "label": "Permitir operaciones de escritura en Mercado Libre",
       "type": "boolean",
-      "description": "Queda apagado hasta implementar y validar publicaciones, ventas, reclamos y demás acciones.",
+      "description": "Control maestro de escrituras sobre Mercado Libre. Permanece apagado por defecto; activalo sólo después de validar OAuth y lecturas. Cada acción además requiere confirmación explícita en SOL.",
       "env": "BWA3D_ML_ALLOW_WRITE",
       "required": false,
       "default": false
