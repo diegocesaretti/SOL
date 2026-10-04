@@ -1,7 +1,11 @@
 import { createHash, randomBytes } from "node:crypto";
+import { setDefaultResultOrder } from "node:dns";
 import { spawn } from "node:child_process";
+import https from "node:https";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+
+setDefaultResultOrder("ipv4first");
 
 const API_BASE = "https://api.mercadolibre.com";
 const AUTH_BASE = "https://auth.mercadolibre.com.ar/authorization";
@@ -103,6 +107,7 @@ class DpapiTokenStore {
   async save(value) {
     const json = JSON.stringify(value);
     const script = [
+      "Add-Type -AssemblyName System.Security;",
       "$plain=[Console]::In.ReadToEnd();",
       "$bytes=[Text.Encoding]::UTF8.GetBytes($plain);",
       "$enc=[Security.Cryptography.ProtectedData]::Protect($bytes,$null,[Security.Cryptography.DataProtectionScope]::CurrentUser);",
@@ -122,6 +127,7 @@ class DpapiTokenStore {
     }
     if (!encrypted) return null;
     const script = [
+      "Add-Type -AssemblyName System.Security;",
       "$b64=[Console]::In.ReadToEnd().Trim();",
       "$enc=[Convert]::FromBase64String($b64);",
       "$bytes=[Security.Cryptography.ProtectedData]::Unprotect($enc,$null,[Security.Cryptography.DataProtectionScope]::CurrentUser);",
@@ -241,17 +247,40 @@ export function createMercadoLibreApi({ dataDir, site = "MLA", clientId = "", cl
   }
 
   async function tokenRequest(params) {
-    const response = await fetch(API_BASE + "/oauth/token", {
-      method: "POST",
-      headers: {
-        accept: "application/json",
-        "content-type": "application/x-www-form-urlencoded"
-      },
-      body: new URLSearchParams(params),
-      signal: AbortSignal.timeout(30000)
+    const body = new URLSearchParams(params).toString();
+    const result = await new Promise((resolve, reject) => {
+      const req = https.request({
+        protocol: "https:",
+        hostname: "api.mercadolibre.com",
+        port: 443,
+        path: "/oauth/token",
+        method: "POST",
+        family: 4,
+        timeout: 8000,
+        headers: {
+          accept: "application/json",
+          "content-type": "application/x-www-form-urlencoded",
+          "content-length": Buffer.byteLength(body),
+          "user-agent": "SOL-BWA3D/0.2"
+        }
+      }, (res) => {
+        let text = "";
+        res.setEncoding("utf8");
+        res.on("data", (chunk) => { text += chunk; });
+        res.on("end", () => resolve({
+          status: Number(res.statusCode || 0),
+          requestId: res.headers["x-request-id"] || null,
+          text
+        }));
+      });
+      req.on("timeout", () => req.destroy(new Error("mercadolibre_token_request_timeout")));
+      req.on("error", reject);
+      req.end(body);
     });
-    const payload = await response.json().catch(async () => await response.text().catch(() => ""));
-    if (!response.ok) throw errorFromPayload(response.status, payload, response.headers.get("x-request-id"));
+    let payload;
+    try { payload = result.text ? JSON.parse(result.text) : {}; }
+    catch { payload = result.text || ""; }
+    if (result.status < 200 || result.status >= 300) throw errorFromPayload(result.status, payload, result.requestId);
     return payload;
   }
 
@@ -305,16 +334,10 @@ export function createMercadoLibreApi({ dataDir, site = "MLA", clientId = "", cl
     const token = await persistToken(payload);
     await rm(oauthStatePath, { force: true });
 
-    const profilePath = token.user_id ? "/users/" + encodeURIComponent(String(token.user_id)) : "/users/me";
-    const me = await request(profilePath, { authToken: token.access_token, retry401: false });
-    if (me?.id && String(me.id) !== String(token.user_id || me.id)) {
-      token.user_id = me.id;
-      await tokenStore.save(token);
-    }
     return {
       ok: true,
       authenticated: true,
-      user: me,
+      userId: token.user_id ?? null,
       expiresAt: token.expires_at,
       refreshTokenPresent: Boolean(token.refresh_token)
     };
