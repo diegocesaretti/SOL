@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 2,
+  "id": "bwa-3d",
+  "name": "BWA 3D",
+  "version": "0.1.0",
+  "description": "SOL business plugin for BWA 3D. First module: Mercado Libre official DevSite MCP with persistent OAuth, documentation tools, and seller-API OAuth settings prepared for later account operations.",
+  "runtime": "node",
+  "entry": "entry.mjs",
+  "args": [],
+  "autoStart": true,
+  "restartPolicy": "on-failure",
+  "capabilities": [
+    "mcp.bwa3d",
+    "tool.mercadolibre",
+    "business.bwa3d"
+  ],
+  "requires": [
+    "plugin-api.v1",
+    "mcp.register",
+    "filesystem.plugin-data"
+  ],
+  "permissions": [
+    "mcp.register",
+    "network.internet",
+    "filesystem.plugin-data"
+  ],
+  "settings": [
+    {
+      "key": "api_port",
+      "label": "Puerto API local",
+      "type": "number",
+      "env": "BWA3D_SOL_API_PORT",
+      "required": false,
+      "default": 8781,
+      "min": 1024,
+      "max": 65535
+    },
+    {
+      "key": "mercadolibre_site",
+      "label": "Sitio Mercado Libre",
+      "type": "select",
+      "env": "BWA3D_ML_SITE",
+      "required": false,
+      "default": "MLA",
+      "options": [
+        { "value": "MLA", "label": "Argentina (MLA)" }
+      ]
+    },
+    {
+      "key": "mercadolibre_mcp_url",
+      "label": "MCP oficial de Mercado Libre",
+      "type": "text",
+      "env": "BWA3D_ML_MCP_URL",
+      "required": false,
+      "default": "https://mcp.mercadolibre.com/devsite/v1/mcp"
+    },
+    {
+      "key": "mercadolibre_client_id",
+      "label": "Mercado Libre App ID",
+      "type": "text",
+      "description": "Se usará para la API privada del seller. No hace falta para consultar documentación mediante el MCP oficial.",
+      "env": "BWA3D_ML_CLIENT_ID",
+      "required": false
+    },
+    {
+      "key": "mercadolibre_client_secret",
+      "label": "Mercado Libre Client Secret",
+      "type": "secret",
+      "description": "Credencial de la aplicación propia BWA 3D para operaciones privadas del seller.",
+      "env": "BWA3D_ML_CLIENT_SECRET",
+      "required": false
+    },
+    {
+      "key": "mercadolibre_redirect_uri",
+      "label": "Mercado Libre Redirect URI",
+      "type": "text",
+      "description": "Debe coincidir exactamente con la URI HTTPS registrada en DevCenter.",
+      "env": "BWA3D_ML_REDIRECT_URI",
+      "required": false
+    },
+    {
+      "key": "mercadolibre_allow_write",
+      "label": "Permitir operaciones de escritura en Mercado Libre",
+      "type": "boolean",
+      "description": "Queda apagado hasta implementar y validar publicaciones, ventas, reclamos y demás acciones.",
+      "env": "BWA3D_ML_ALLOW_WRITE",
+      "required": false,
+      "default": false
+    }
+  ]
+}
