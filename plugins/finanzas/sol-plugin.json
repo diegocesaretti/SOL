@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 2,
+  "id": "finanzas",
+  "name": "Finanzas",
+  "version": "0.1.0",
+  "description": "Registro estructurado de vencimientos y documentación financiera para SOL. Mantiene deduplicación, estado de pago y referencias a Gmail, Drive y Calendar; la automatización externa realiza la lectura/archivo/agendado.",
+  "runtime": "node",
+  "entry": "entry.mjs",
+  "args": [],
+  "autoStart": true,
+  "restartPolicy": "on-failure",
+  "capabilities": [
+    "mcp.finanzas",
+    "finance.due-dates",
+    "finance.documents"
+  ],
+  "requires": [
+    "plugin-api.v1",
+    "mcp.register",
+    "filesystem.plugin-data"
+  ],
+  "permissions": [
+    "mcp.register",
+    "filesystem.plugin-data"
+  ],
+  "settings": [
+    {
+      "key": "api_port",
+      "label": "Puerto API local",
+      "type": "number",
+      "env": "FINANZAS_SOL_API_PORT",
+      "required": false,
+      "default": 8782,
+      "min": 1024,
+      "max": 65535
+    },
+    {
+      "key": "default_currency",
+      "label": "Moneda por defecto",
+      "type": "text",
+      "env": "FINANZAS_DEFAULT_CURRENCY",
+      "required": false,
+      "default": "ARS"
+    },
+    {
+      "key": "archive_root",
+      "label": "Carpeta lógica de archivo en Drive",
+      "type": "text",
+      "description": "Ruta que debe usar la automatización al archivar documentos en Google Drive.",
+      "env": "FINANZAS_ARCHIVE_ROOT",
+      "required": false,
+      "default": "SOL/Finanzas"
+    },
+    {
+      "key": "reminder_days",
+      "label": "Recordatorios sugeridos (días antes)",
+      "type": "text",
+      "description": "Lista separada por comas para que la automatización configure Calendar, por ejemplo 3,1.",
+      "env": "FINANZAS_REMINDER_DAYS",
+      "required": false,
+      "default": "3,1"
+    }
+  ]
+}
