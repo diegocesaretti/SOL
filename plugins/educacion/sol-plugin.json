@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 2,
+  "id": "educacion",
+  "name": "Educación",
+  "version": "0.1.0",
+  "description": "Biblioteca escolar SOL: sincronización Moodle de cursos, unidades, apuntes, tareas y calendario, con proveedores extensibles para Google Classroom.",
+  "runtime": "node",
+  "entry": "entry.mjs",
+  "args": [],
+  "autoStart": true,
+  "restartPolicy": "on-failure",
+  "capabilities": [
+    "mcp.educacion",
+    "education.materials",
+    "education.assignments"
+  ],
+  "requires": [
+    "plugin-api.v1",
+    "mcp.register",
+    "filesystem.plugin-data"
+  ],
+  "permissions": [
+    "mcp.register",
+    "filesystem.plugin-data",
+    "network.internet"
+  ],
+  "settings": [
+    {
+      "key": "api_port",
+      "label": "Puerto API local",
+      "type": "number",
+      "env": "EDUCACION_API_PORT",
+      "required": false,
+      "default": 8783,
+      "min": 1024,
+      "max": 65535
+    },
+    {
+      "key": "moodle_site",
+      "label": "Dirección Moodle",
+      "type": "text",
+      "env": "EDUCACION_MOODLE_SITE",
+      "required": false,
+      "default": "https://campusisco.com.ar"
+    },
+    {
+      "key": "moodle_token",
+      "label": "Token Moodle del alumno (no publicar)",
+      "type": "secret",
+      "env": "EDUCACION_MOODLE_TOKEN",
+      "required": false,
+      "description": "Token generado para moodle_mobile_app. Se almacena en configuración privada de SOL."
+    },
+    {
+      "key": "student_name",
+      "label": "Alumno asociado a Moodle",
+      "type": "text",
+      "env": "EDUCACION_STUDENT_NAME",
+      "required": false,
+      "default": "Luca"
+    },
+    {
+      "key": "sync_hours",
+      "label": "Sincronización cada N horas",
+      "type": "number",
+      "env": "EDUCACION_SYNC_HOURS",
+      "required": false,
+      "default": 6,
+      "min": 1,
+      "max": 168
+    },
+    {
+      "key": "max_file_mb",
+      "label": "Límite de descarga por archivo (MB)",
+      "type": "number",
+      "env": "EDUCACION_MAX_FILE_MB",
+      "required": false,
+      "default": 25,
+      "min": 1,
+      "max": 100
+    }
+  ]
+}
