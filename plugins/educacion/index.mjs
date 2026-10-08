@@ -285,7 +285,7 @@ const tools=[
  {name:"educacion_sincronizar",description:"Sincroniza todas las materias, archivos, actividades y eventos de Moodle. Requiere autorización explícita.",inputSchema:{type:"object",properties:{confirmedByUser:{type:"boolean",const:true}},required:["confirmedByUser"],additionalProperties:false},requiredScope:"submit"},
  {name:"educacion_agente_estado",description:"Estado del agente Codex Educación y su revisión diaria de todos los chats INPUT de Nexo.",inputSchema:{type:"object",properties:{},additionalProperties:false},requiredScope:"read"},
  {name:"educacion_evaluaciones",description:"Lista evaluaciones y borradores de guías del agente escolar, sin reenviar mensajes privados.",inputSchema:{type:"object",properties:{limit:{type:"integer",minimum:1,maximum:100}},additionalProperties:false},requiredScope:"read"},
- {name:"educacion_agente_ejecutar",description:"Iniciar ahora el análisis educativo de todos los chats INPUT de Nexo y preparar guías pendientes de revisión. No envía WhatsApp.",inputSchema:{type:"object",properties:{confirmedByUser:{type:"boolean",const:true}},required:["confirmedByUser"],additionalProperties:false},requiredScope:"submit"}
+ {name:"educacion_agente_ejecutar",description:"Iniciar ahora el análisis educativo de todos los chats INPUT de Nexo y preparar guías pendientes de revisión. No envía WhatsApp.",inputSchema:{type:"object",properties:{confirmedByUser:{type:"boolean",const:true}},required:["confirmedByUser"],additionalProperties:false},requiredScope:"actions"}
 ];
 async function dispatch(name,args={}) {
   if (name==="educacion_agente_estado") return await agentStatus();

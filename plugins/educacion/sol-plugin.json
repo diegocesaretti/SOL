@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "id": "educacion",
   "name": "Educación",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "SOL Educación: Moodle y agente Codex que revisa Nexo a diario y prepara guías PDF sujetas a revisión.",
   "runtime": "node",
   "entry": "entry.mjs",

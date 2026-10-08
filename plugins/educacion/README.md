@@ -37,3 +37,5 @@ Codex interpreta solamente fragmentos preseleccionados con indicios escolares, c
 Herramientas MCP: educacion_agente_estado (read), educacion_evaluaciones (read), educacion_agente_ejecutar (submit con confirmación). Los mensajes citados se identifican por el ID original de Nexo. Deduplicación por materia, fecha y tema. Los errores quedan registrados en agente.json.
 
 Google Classroom para Cruz permanece pendiente de una integración independiente.
+
+Las pruebas probables con temario conocido también generan un borrador preventivo aunque la fecha sea incierta. El envío se mantiene sujeto a revisión. La herramienta de ejecución manual usa scope actions y requiere confirmedByUser.

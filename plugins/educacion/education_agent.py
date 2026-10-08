@@ -226,6 +226,20 @@ def run():
                 except Exception as e:ev["observacion"]="Generación fallida: "+str(e)[:250]
             state["events"].append(ev)
             created+=1
+        # Borradores preventivos para pruebas probables con temas conocidos,
+        # aunque la fecha todavía no esté confirmada.
+        for ev in state["events"]:
+            if ev["estado"]!="por_confirmar" or ev.get("certeza") not in ("media","alta"):
+                continue
+            subject=norm(ev.get("temas",""))
+            if len(subject)<20 or "no especificad" in subject or "sin temario" in subject:
+                continue
+            try:
+                generate(ev,catalog)
+                if ev["estado"]=="pendiente_revision" and not ev.get("fecha"):
+                    ev["observacion"]="Guía preventiva: fecha de evaluación no confirmada"
+            except Exception as err:
+                ev["observacion"]="Guía pendiente: "+str(err)[:180]
         state["lastRun"]=dt.datetime.now(dt.timezone.utc).isoformat()
         state["lastLocalDay"]=date
         state["lastError"]=None
