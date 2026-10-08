@@ -113,6 +113,23 @@ async function download(item, existing) {
       parts.push(part);
     }
     const bytes=Buffer.concat(parts);
+    // Moodle puede responder errores JSON con HTTP 200: no guardarlos como apuntes.
+    if (bytes.length && bytes[0] === 123) {
+      try {
+        const maybeError = JSON.parse(bytes.toString("utf8"));
+        if (maybeError?.errorcode || maybeError?.exception || maybeError?.error) {
+          throw new Error("moodle_file_" + clean(maybeError.errorcode || maybeError.exception || "error", 80));
+        }
+      } catch (error) {
+        if (String(error.message).startsWith("moodle_file_")) throw error;
+      }
+    }
+    if (extension === ".pdf" && !bytes.subarray(0, 1024).includes(Buffer.from("%PDF-"))) {
+      throw new Error("invalid_pdf_response");
+    }
+    if ([".docx",".pptx",".xlsx"].includes(extension) && !bytes.subarray(0, 8).includes(Buffer.from("PK"))) {
+      throw new Error("invalid_office_response");
+    }
     const temp=output+"."+process.pid+".tmp";
     await writeFile(temp,bytes); await rename(temp,output);
     const extracted=await extractText(output);
