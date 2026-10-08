@@ -218,12 +218,23 @@ def run():
             if len(topic)<3:continue
             # Una referencia sin temario a la misma prueba no es otra evaluación.
             unknown_new=norm(topic).startswith(("no informad","no especificad","sin temario"))
+            # Reutilizar la misma prueba cuando aparece otro mensaje incompleto:
+            # nunca desconfirmar una fecha que informó la familia.
             existing=next((x for x in state["events"] if x.get("courseId")==course_id
-                           and not x.get("fecha") and not due
-                           and (unknown_new or norm(x.get("temas","")).startswith(("no informad","no especificad","sin temario")))),None)
+                           and x.get("tipo","evaluacion")=="evaluacion"
+                           and (
+                               (due and x.get("fecha")==due)
+                               or ((not due or not x.get("fecha")) and (
+                                   norm(x.get("temas",""))==norm(topic)
+                                   or (not x.get("fecha") and (unknown_new or norm(x.get("temas","")).startswith(("no informad","no especificad","sin temario"))))
+                               ))
+                           )),None)
             if existing:
                 existing["evidencias"]=list(dict.fromkeys(existing.get("evidencias",[])+refs))[:15]
-                if not unknown_new:
+                if due and not existing.get("fecha") and item.get("certeza")=="alta":
+                    existing["fecha"]=due
+                    existing["fechaFuente"]="nexo_confirmado"
+                if not unknown_new and (not existing.get("temas") or norm(existing.get("temas","")).startswith(("no informad","no especificad","sin temario"))):
                     existing["temas"]=topic
                 continue
             key=hashlib.sha256(("%s|%s|%s"%(course_id,due,norm(topic)[:90])).encode()).hexdigest()[:24]

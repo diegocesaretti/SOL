@@ -308,6 +308,61 @@ function searchMaterials(args={}) {
     .map(({text,sha256,signature,url,...safe})=>({...safe,
       textPreview:clean(text,integer(args.previewChars,800,0,3000)),hasText:!!String(text || "").trim(),sha256}));
 }
+// La agenda reúne pruebas detectadas por Nexo, confirmaciones familiares y fechas Moodle.
+// MCP devuelve una vista corta: no obliga al asistente a inferir fechas de archivos adjuntos.
+async function nextAssessments(args={}) {
+  const state=await agentState();
+  const clock=localDayHour();
+  const today=clock.day;
+  const days=integer(args.days,45,1,365);
+  const cutoff=new Date(Date.parse(today+"T12:00:00Z")+days*86400000).toISOString().slice(0,10);
+  const normalized=(state.events||[]).map(ev=>({
+    id:ev.id,student:config.student,subject:ev.materia,courseId:ev.courseId,
+    kind:ev.tipo||"evaluacion",date:ev.fecha||null,topics:ev.temas||null,
+    confidence:ev.certeza||"media",status:ev.estado||"por_confirmar",
+    dateSource:ev.fechaFuente||ev.fuente||null,
+    evidenceCount:(ev.evidencias||[]).length,guideReady:!!ev.guia?.pdf,
+    guidePath:ev.guia?.pdf||null,notes:ev.observacion||null,
+    calendarEventId:ev.calendarEventId||null
+  }));
+  const confirmed=normalized.filter(x=>x.date&&x.date>=today&&x.date<=cutoff)
+    .sort((a,b)=>a.date.localeCompare(b.date));
+  const undated=normalized.filter(x=>!x.date);
+  return {asOf:today,timezone:"America/Argentina/Buenos_Aires",student:config.student,
+    confirmed,needsConfirmation:args.includeUnconfirmed===false?[]:undated,
+    confirmedCount:confirmed.length,unconfirmedCount:undated.length,lastSync:state.lastRun||null};
+}
+async function confirmAssessment(args={}) {
+  if(args.confirmedByUser!==true) throw new Error("confirmedByUser_required");
+  if(agentRunning||deliveryRunning)throw new Error("education_busy_retry");
+  const id=clean(args.id,100);
+  if(!id)throw new Error("assessment_id_required");
+  if(!args.date&&!args.topics)throw new Error("date_or_topics_required");
+  const state=await agentState();
+  const matching=(state.events||[]).filter(ev=>ev.id===id);
+  if(matching.length!==1)throw new Error("assessment_not_found");
+  const item=matching[0];
+  if(args.date){
+    const date=clean(args.date,10);
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||Number.isNaN(Date.parse(date+"T12:00:00Z")))
+      throw new Error("invalid_date");
+    item.fecha=date;
+    item.fechaFuente="confirmacion_familiar_mcp";
+    item.certeza="alta";
+  }
+  if(args.topics){
+    const topics=clean(args.topics,500);
+    if(topics.length<4)throw new Error("topics_too_short");
+    item.temas=topics;item.temasFuente="confirmacion_familiar_mcp";
+  }
+  item.actualizadoEn=new Date().toISOString();
+  const file=agentStatePath+".tmp."+process.pid;
+  await writeFile(file,JSON.stringify(state,null,2),"utf8");
+  await rename(file,agentStatePath);
+  return {ok:true,student:config.student,id:item.id,subject:item.materia,
+    date:item.fecha||null,topics:item.temas||null,status:item.estado,
+    dateSource:item.fechaFuente||null,guideReady:!!item.guia?.pdf};
+}
 const limitTool={type:"integer",minimum:1,maximum:100};
 const tools=[
  {name:"educacion_estado",description:"Estado del plugin Educación, sincronización Moodle, alumnos y biblioteca escolar.",inputSchema:{type:"object",properties:{},additionalProperties:false},requiredScope:"read"},
@@ -318,10 +373,14 @@ const tools=[
  {name:"educacion_calendario",description:"Eventos del calendario de Moodle del alumno.",inputSchema:{type:"object",properties:{limit:limitTool},additionalProperties:false},requiredScope:"read"},
  {name:"educacion_sincronizar",description:"Sincroniza todas las materias, archivos, actividades y eventos de Moodle. Requiere autorización explícita.",inputSchema:{type:"object",properties:{confirmedByUser:{type:"boolean",const:true}},required:["confirmedByUser"],additionalProperties:false},requiredScope:"submit"},
  {name:"educacion_agente_estado",description:"Estado del agente Codex Educación y su revisión diaria de todos los chats INPUT de Nexo.",inputSchema:{type:"object",properties:{},additionalProperties:false},requiredScope:"read"},
- {name:"educacion_evaluaciones",description:"Lista evaluaciones y borradores de guías del agente escolar, sin reenviar mensajes privados.",inputSchema:{type:"object",properties:{limit:{type:"integer",minimum:1,maximum:100}},additionalProperties:false},requiredScope:"read"},
+ {name:"educacion_evaluaciones",description:"Lista evaluaciones, pruebas, lecciones y trabajos de Luca con fechas confirmadas o pendientes, temas y guías. Consultá esta herramienta para responder cuándo tiene una prueba Luca.",inputSchema:{type:"object",properties:{limit:{type:"integer",minimum:1,maximum:100}},additionalProperties:false},requiredScope:"read"},
+ {name:"educacion_proximas_evaluaciones",description:"AGENDA ESCOLAR DE LUCA: próxima prueba, examen, lección o trabajo; fecha, materia, temas y pendientes de confirmar. Es la herramienta principal cuando el usuario pregunta de qué tiene prueba mañana, esta semana o qué evaluaciones vienen.",inputSchema:{type:"object",properties:{days:{type:"integer",minimum:1,maximum:365},includeUnconfirmed:{type:"boolean"}},additionalProperties:false},requiredScope:"read"},
+ {name:"educacion_evaluacion_confirmar",description:"Confirmar o corregir fecha (YYYY-MM-DD) o temario de una evaluación escolar de Luca mediante autorización explícita del familiar, sin duplicados. Actualiza la agenda usada en WhatsApp y recordatorios.",inputSchema:{type:"object",properties:{id:{type:"string",minLength:8,maxLength:100},date:{type:"string",pattern:"^\\d{4}-\\d{2}-\\d{2}$"},topics:{type:"string",minLength:4,maxLength:500},confirmedByUser:{type:"boolean",const:true}},required:["id","confirmedByUser"],additionalProperties:false},requiredScope:"actions"},
  {name:"educacion_agente_ejecutar",description:"Iniciar ahora el análisis educativo de todos los chats INPUT de Nexo y preparar guías pendientes de revisión. No envía WhatsApp.",inputSchema:{type:"object",properties:{confirmedByUser:{type:"boolean",const:true}},required:["confirmedByUser"],additionalProperties:false},requiredScope:"actions"}
 ];
 async function dispatch(name,args={}) {
+  if (name==="educacion_proximas_evaluaciones")return await nextAssessments(args);
+  if (name==="educacion_evaluacion_confirmar")return await confirmAssessment(args);
   if (name==="educacion_agente_estado") return await agentStatus();
   if (name==="educacion_evaluaciones") {
     const x=await agentState();return {lastRun:x.lastRun,events:(x.events||[]).slice(-integer(args.limit,30,1,100)).reverse()};

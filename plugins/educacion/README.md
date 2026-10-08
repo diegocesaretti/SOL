@@ -45,3 +45,11 @@ Las pruebas probables con temario conocido también generan un borrador preventi
 education_delivery.py verifica cada 5 minutos la base escolar y las respuestas directas recibidas por Nexo. Usa el permiso familiar recurrente guardado únicamente en SOL_PLUGIN_DATA_DIR/educacion/delivery-policy.json; envía WhatsApp a padre y alumno, nunca a otros contactos. Si faltan fecha o temas, hace preguntas con la referencia EDU CODIGO FECHA DD/MM o EDU CODIGO TEMAS texto. Con las respuestas actualiza la evaluación y su guía sin crear duplicados. Los recordatorios por WhatsApp se envían en los dos días previos (D-2 y D-1). Los PDF se copian al directorio privado de intercambio de Nexo, que está fuera de GitHub. delivery-ledger.json registra cada entrega.
 
 Google Calendar Familia se sincroniza con una automatización de ChatGPT independiente y vinculada a la cuenta de Google autorizada, sin intentar acceder a credenciales privadas de Calendar desde el HTPC. Solo se agendan fechas confirmadas.
+
+## Consulta y confirmación MCP de la agenda escolar
+
+educacion_proximas_evaluaciones: lectura de próximas pruebas confirmadas con fechas y actividades pendientes. Debe consultarse antes de responder preguntas como qué examen tiene Luca mañana. Usa horario argentino.
+
+educacion_evaluacion_confirmar: acción protegida por autorización explícita para completar fecha YYYY-MM-DD o temario, conservando el identificador existente. Los avisos y recordatorios consumen el mismo registro.
+
+El modelo de ChatGPT/MCP debe elegir invocar la herramienta: registrar herramientas NO asegura que toda sesión de ChatGPT las llame automáticamente. Moodle no hereda los recuerdos de otros chats; las fechas familiares deben incorporarse al registro.

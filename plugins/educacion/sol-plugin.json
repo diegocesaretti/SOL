@@ -1,115 +1,113 @@
 {
-    "schemaVersion":  2,
-    "id":  "educacion",
-    "name":  "EducaciÃ³n",
-    "version":  "0.3.0",
-    "description":  "SOL EducaciÃ³n: Moodle y agente Codex que revisa Nexo a diario y prepara guÃ­as PDF sujetas a revisiÃ³n.",
-    "runtime":  "node",
-    "entry":  "entry.mjs",
-    "args":  [
-
-             ],
-    "autoStart":  true,
-    "restartPolicy":  "on-failure",
-    "capabilities":  [
-                         "mcp.educacion",
-                         "education.materials",
-                         "education.assignments",
-                         "education.agent",
-                         "education.exam-detection",
-                         "education.study-guides"
-                     ],
-    "requires":  [
-                     "plugin-api.v1",
-                     "mcp.register",
-                     "filesystem.plugin-data"
-                 ],
-    "permissions":  [
-                        "mcp.register",
-                        "filesystem.plugin-data",
-                        "network.internet"
-                    ],
-    "settings":  [
-                     {
-                         "key":  "api_port",
-                         "label":  "Puerto API local",
-                         "type":  "number",
-                         "env":  "EDUCACION_API_PORT",
-                         "required":  false,
-                         "default":  8783,
-                         "min":  1024,
-                         "max":  65535
-                     },
-                     {
-                         "key":  "moodle_site",
-                         "label":  "DirecciÃ³n Moodle",
-                         "type":  "text",
-                         "env":  "EDUCACION_MOODLE_SITE",
-                         "required":  false,
-                         "default":  "https://campusisco.com.ar"
-                     },
-                     {
-                         "key":  "moodle_token",
-                         "label":  "Token Moodle del alumno (no publicar)",
-                         "type":  "secret",
-                         "env":  "EDUCACION_MOODLE_TOKEN",
-                         "required":  false,
-                         "description":  "Token generado para moodle_mobile_app. Se almacena en configuraciÃ³n privada de SOL."
-                     },
-                     {
-                         "key":  "student_name",
-                         "label":  "Alumno asociado a Moodle",
-                         "type":  "text",
-                         "env":  "EDUCACION_STUDENT_NAME",
-                         "required":  false,
-                         "default":  "Luca"
-                     },
-                     {
-                         "key":  "sync_hours",
-                         "label":  "SincronizaciÃ³n cada N horas",
-                         "type":  "number",
-                         "env":  "EDUCACION_SYNC_HOURS",
-                         "required":  false,
-                         "default":  6,
-                         "min":  1,
-                         "max":  168
-                     },
-                     {
-                         "key":  "max_file_mb",
-                         "label":  "LÃ­mite de descarga por archivo (MB)",
-                         "type":  "number",
-                         "env":  "EDUCACION_MAX_FILE_MB",
-                         "required":  false,
-                         "default":  25,
-                         "min":  1,
-                         "max":  100
-                     },
-                     {
-                         "key":  "agent_hour",
-                         "label":  "Hora de anÃ¡lisis diario (Argentina 0-23)",
-                         "type":  "number",
-                         "env":  "EDUCACION_AGENT_HOUR",
-                         "default":  18,
-                         "required":  false,
-                         "min":  0,
-                         "max":  23
-                     },
-                     {
-                         "key":  "nexo_port",
-                         "label":  "Puerto de Nexo",
-                         "type":  "number",
-                         "env":  "EDUCACION_NEXO_PORT",
-                         "default":  3210,
-                         "required":  false,
-                         "min":  1024,
-                         "max":  65535
-                     },
-                     {
-                         "key":  "codex_path",
-                         "label":  "Ruta del CLI Codex (opcional)",
-                         "type":  "text",
-                         "env":  "EDUCACION_CODEX_PATH",
-                         "required":  false
-                     }
-                 ]
+  "schemaVersion": 2,
+  "id": "educacion",
+  "name": "EducaciÃ³n",
+  "version": "0.2.3",
+  "description": "Plugin Educación SOL: Moodle, agente escolar Codex, Nexo, agenda MCP de pruebas y lecciones, confirmaciones familiares y guías PDF.",
+  "runtime": "node",
+  "entry": "entry.mjs",
+  "args": [],
+  "autoStart": true,
+  "restartPolicy": "on-failure",
+  "capabilities": [
+    "mcp.educacion",
+    "education.materials",
+    "education.assignments",
+    "education.agent",
+    "education.exam-detection",
+    "education.study-guides"
+  ],
+  "requires": [
+    "plugin-api.v1",
+    "mcp.register",
+    "filesystem.plugin-data"
+  ],
+  "permissions": [
+    "mcp.register",
+    "filesystem.plugin-data",
+    "network.internet"
+  ],
+  "settings": [
+    {
+      "key": "api_port",
+      "label": "Puerto API local",
+      "type": "number",
+      "env": "EDUCACION_API_PORT",
+      "required": false,
+      "default": 8783,
+      "min": 1024,
+      "max": 65535
+    },
+    {
+      "key": "moodle_site",
+      "label": "DirecciÃ³n Moodle",
+      "type": "text",
+      "env": "EDUCACION_MOODLE_SITE",
+      "required": false,
+      "default": "https://campusisco.com.ar"
+    },
+    {
+      "key": "moodle_token",
+      "label": "Token Moodle del alumno (no publicar)",
+      "type": "secret",
+      "env": "EDUCACION_MOODLE_TOKEN",
+      "required": false,
+      "description": "Token generado para moodle_mobile_app. Se almacena en configuraciÃ³n privada de SOL."
+    },
+    {
+      "key": "student_name",
+      "label": "Alumno asociado a Moodle",
+      "type": "text",
+      "env": "EDUCACION_STUDENT_NAME",
+      "required": false,
+      "default": "Luca"
+    },
+    {
+      "key": "sync_hours",
+      "label": "SincronizaciÃ³n cada N horas",
+      "type": "number",
+      "env": "EDUCACION_SYNC_HOURS",
+      "required": false,
+      "default": 6,
+      "min": 1,
+      "max": 168
+    },
+    {
+      "key": "max_file_mb",
+      "label": "LÃ­mite de descarga por archivo (MB)",
+      "type": "number",
+      "env": "EDUCACION_MAX_FILE_MB",
+      "required": false,
+      "default": 25,
+      "min": 1,
+      "max": 100
+    },
+    {
+      "key": "agent_hour",
+      "label": "Hora de anÃ¡lisis diario (Argentina 0-23)",
+      "type": "number",
+      "env": "EDUCACION_AGENT_HOUR",
+      "default": 18,
+      "required": false,
+      "min": 0,
+      "max": 23
+    },
+    {
+      "key": "nexo_port",
+      "label": "Puerto de Nexo",
+      "type": "number",
+      "env": "EDUCACION_NEXO_PORT",
+      "default": 3210,
+      "required": false,
+      "min": 1024,
+      "max": 65535
+    },
+    {
+      "key": "codex_path",
+      "label": "Ruta del CLI Codex (opcional)",
+      "type": "text",
+      "env": "EDUCACION_CODEX_PATH",
+      "required": false
+    }
+  ]
 }
