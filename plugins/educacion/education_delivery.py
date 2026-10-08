@@ -138,13 +138,14 @@ def run(dry=False):
         subject=ev.get("materia","Materia sin confirmar")
         day=date_parse(ev.get("fecha"))
         topics=ev.get("temas","").strip()
-        unknown_topics=not topics or "no especificad" in topics.lower() or "sin temario" in topics.lower()
+        unknown_topics=not topics or any(x in topics.lower() for x in ("no especificad","no informad","sin temario","desconocido"))
         missing=[]
         if not day:missing.append("la FECHA")
         if unknown_topics:missing.append("los TEMAS")
         if missing:
+            deadline_hint=(f" Moodle muestra {ev['fechaReferencialMoodle']} como fecha referencial, pero puede ser un plazo administrativo; ¿cuándo corresponde realmente?" if ev.get("fechaReferencialMoodle") and not day else "")
             question=(f"📚 SOL Educación · Luca\n"
-                f"Hay un indicio de evaluación o trabajo de {subject}, pero me falta {' y '.join(missing)}. "
+                f"Hay un indicio de evaluación o trabajo de {subject}, pero me falta {' y '.join(missing)}.{deadline_hint} "
                 f"¿Lo saben? Respondan a SOL con:\n"
                 +(f"EDU {code} FECHA DD/MM\n" if not day else "")
                 +(f"EDU {code} TEMAS temas que entran\n" if unknown_topics else "")
