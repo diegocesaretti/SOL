@@ -28,6 +28,57 @@ let registered = [], registrationError = null, syncing = false, lastError = null
 let snapshot = { version: 1, provider: "moodle", student: config.student, userId: null, lastSync: null, courses: [], materials: [], assignments: [], events: [], statistics: {} };
 let latestSync = null;
 
+// Agente especializado escolar: solo lectura Nexo/Moodle y borradores revisables.
+let agentRunning = false, agentLastAttempt = null, agentLastResult = null, agentLastLocalDay = null;
+const agentStatePath = join(dataRoot, "agente.json");
+const agentPath = join(import.meta.dirname, "education_agent.py");
+const AGENT_HOUR = integer(process.env.EDUCACION_AGENT_HOUR, 18, 0, 23);
+function localDayHour() {
+  const items = new Intl.DateTimeFormat("en-CA", {timeZone:"America/Argentina/Buenos_Aires", year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",hourCycle:"h23"}).formatToParts(new Date());
+  const v=Object.fromEntries(items.map(x=>[x.type,x.value]));
+  return {day:v.year+"-"+v.month+"-"+v.day,hour:Number(v.hour)};
+}
+async function agentState(){
+  try {return JSON.parse(await readFile(agentStatePath,"utf8"));}
+  catch(error){if(error.code==="ENOENT")return {lastRun:null,lastLocalDay:null,events:[],lastError:null};throw error;}
+}
+async function agentStatus(){
+  const s=await agentState();
+  return {running:agentRunning,scope:"todos los chats INPUT disponibles en Nexo",
+    schedule:"diario "+AGENT_HOUR+":00",timezone:"America/Argentina/Buenos_Aires",
+    lastAttempt:agentLastAttempt,lastRun:s.lastRun,lastError:s.lastError,
+    stats:s.stats||null,drafts:s.events?.filter(x=>x.estado==="pendiente_revision").length||0,
+    suspects:s.events?.filter(x=>x.estado==="por_confirmar").length||0,
+    automaticSend:false,lastExecution:agentLastResult};
+}
+async function runAgent(){
+  if(agentRunning)return {started:false,error:"agent_running"};
+  if(!snapshot.lastSync)return {started:false,error:"moodle_not_synced"};
+  agentRunning=true;agentLastAttempt=new Date().toISOString();agentLastLocalDay=localDayHour().day;
+  const child=spawn("python",[agentPath],{cwd:import.meta.dirname,windowsHide:true,
+    env:{...process.env,SOL_PLUGIN_DATA_DIR:process.env.SOL_PLUGIN_DATA_DIR||join(process.cwd(),".data")},
+    stdio:["ignore","pipe","pipe"]});
+  let out="",err="";
+  child.stdout.on("data",buf=>{out=(out+String(buf)).slice(-10000);});
+  child.stderr.on("data",buf=>{err=(err+String(buf)).slice(-1500);});
+  child.on("error",e=>{agentLastResult={ok:false,error:e.message};agentRunning=false;});
+  child.on("exit",code=>{
+    try{agentLastResult=JSON.parse(out.trim().split(/\r?\n/).at(-1)||"{}");}
+    catch{agentLastResult={ok:false,error:"python_exit_"+code+":"+err.slice(-300)};}
+    agentRunning=false;
+  });
+  return {started:true,at:agentLastAttempt};
+}
+let agentScheduleTimer=null;
+async function agentDailyTick(){
+  const clock=localDayHour();
+  if(clock.hour<AGENT_HOUR||agentRunning)return;
+  const s=await agentState();
+  if(s.lastLocalDay===clock.day || agentLastLocalDay===clock.day)return;
+  await runAgent();
+}
+
+
 function safeName(value) {
   return clean(value, 140).replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").replace(/^\.+/, "_") || "archivo";
 }
@@ -231,9 +282,20 @@ const tools=[
  {name:"educacion_material_leer",description:"Lee texto extraído de un material Moodle indexado por id; informa si es un PDF escaneado.",inputSchema:{type:"object",properties:{id:{type:"string",minLength:1,maxLength:100},maxChars:{type:"integer",minimum:1000,maximum:60000}},required:["id"],additionalProperties:false},requiredScope:"read"},
  {name:"educacion_tareas",description:"Tareas y fechas de entrega de las materias escolares.",inputSchema:{type:"object",properties:{materia:{type:"string",maxLength:200},limit:limitTool},additionalProperties:false},requiredScope:"read"},
  {name:"educacion_calendario",description:"Eventos del calendario de Moodle del alumno.",inputSchema:{type:"object",properties:{limit:limitTool},additionalProperties:false},requiredScope:"read"},
- {name:"educacion_sincronizar",description:"Sincroniza todas las materias, archivos, actividades y eventos de Moodle. Requiere autorización explícita.",inputSchema:{type:"object",properties:{confirmedByUser:{type:"boolean",const:true}},required:["confirmedByUser"],additionalProperties:false},requiredScope:"submit"}
+ {name:"educacion_sincronizar",description:"Sincroniza todas las materias, archivos, actividades y eventos de Moodle. Requiere autorización explícita.",inputSchema:{type:"object",properties:{confirmedByUser:{type:"boolean",const:true}},required:["confirmedByUser"],additionalProperties:false},requiredScope:"submit"},
+ {name:"educacion_agente_estado",description:"Estado del agente Codex Educación y su revisión diaria de todos los chats INPUT de Nexo.",inputSchema:{type:"object",properties:{},additionalProperties:false},requiredScope:"read"},
+ {name:"educacion_evaluaciones",description:"Lista evaluaciones y borradores de guías del agente escolar, sin reenviar mensajes privados.",inputSchema:{type:"object",properties:{limit:{type:"integer",minimum:1,maximum:100}},additionalProperties:false},requiredScope:"read"},
+ {name:"educacion_agente_ejecutar",description:"Iniciar ahora el análisis educativo de todos los chats INPUT de Nexo y preparar guías pendientes de revisión. No envía WhatsApp.",inputSchema:{type:"object",properties:{confirmedByUser:{type:"boolean",const:true}},required:["confirmedByUser"],additionalProperties:false},requiredScope:"submit"}
 ];
 async function dispatch(name,args={}) {
+  if (name==="educacion_agente_estado") return await agentStatus();
+  if (name==="educacion_evaluaciones") {
+    const x=await agentState();return {lastRun:x.lastRun,events:(x.events||[]).slice(-integer(args.limit,30,1,100)).reverse()};
+  }
+  if (name==="educacion_agente_ejecutar") {
+    if(args.confirmedByUser!==true)throw new Error("confirmedByUser_required");
+    return await runAgent();
+  }
   if (name==="educacion_estado") return publicStatus();
   if (name==="educacion_materias") return {student:config.student,lastSync:snapshot.lastSync,courses:snapshot.courses};
   if (name==="educacion_materiales_buscar") return {student:config.student,lastSync:snapshot.lastSync,results:searchMaterials(args)};
@@ -282,13 +344,15 @@ server.listen(config.port,"127.0.0.1",async()=>{
  console.log(JSON.stringify({type:"sol.plugin.ready",health:"healthy",details:{provider:"educacion",port:config.port,configured:!!config.token}}));
  await register();
  if(config.token) void synchronize();
+ agentScheduleTimer=setInterval(()=>void agentDailyTick().catch(e=>console.warn("Education agent schedule:",e.message)),5*60000);
+ agentScheduleTimer.unref?.();
 });
 const timer=setInterval(()=>{if(config.token) void synchronize();if(registered.length!==tools.length) void register();},config.syncMs);
 const retry=setInterval(()=>{if(registered.length!==tools.length)void register();},15000);
 timer.unref?.();retry.unref?.();
 let stopping=false;
 async function shutdown(){
- if(stopping)return;stopping=true;clearInterval(timer);clearInterval(retry);
+ if(stopping)return;stopping=true;clearInterval(timer);clearInterval(retry);if(agentScheduleTimer)clearInterval(agentScheduleTimer);
  if(sol.enabled)await sol.registerMcpTools(callbackUrl,[]).catch(()=>{});
  server.close();process.exit(0);
 }

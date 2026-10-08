@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "id": "educacion",
   "name": "Educación",
-  "version": "0.1.0",
-  "description": "Biblioteca escolar SOL: sincronización Moodle de cursos, unidades, apuntes, tareas y calendario, con proveedores extensibles para Google Classroom.",
+  "version": "0.2.0",
+  "description": "SOL Educación: Moodle y agente Codex que revisa Nexo a diario y prepara guías PDF sujetas a revisión.",
   "runtime": "node",
   "entry": "entry.mjs",
   "args": [],
@@ -12,7 +12,10 @@
   "capabilities": [
     "mcp.educacion",
     "education.materials",
-    "education.assignments"
+    "education.assignments",
+    "education.agent",
+    "education.exam-detection",
+    "education.study-guides"
   ],
   "requires": [
     "plugin-api.v1",
@@ -78,6 +81,33 @@
       "default": 25,
       "min": 1,
       "max": 100
+    },
+    {
+      "key": "agent_hour",
+      "label": "Hora de análisis diario (Argentina 0-23)",
+      "type": "number",
+      "env": "EDUCACION_AGENT_HOUR",
+      "default": 18,
+      "required": false,
+      "min": 0,
+      "max": 23
+    },
+    {
+      "key": "nexo_port",
+      "label": "Puerto de Nexo",
+      "type": "number",
+      "env": "EDUCACION_NEXO_PORT",
+      "default": 3210,
+      "required": false,
+      "min": 1024,
+      "max": 65535
+    },
+    {
+      "key": "codex_path",
+      "label": "Ruta del CLI Codex (opcional)",
+      "type": "text",
+      "env": "EDUCACION_CODEX_PATH",
+      "required": false
     }
   ]
 }

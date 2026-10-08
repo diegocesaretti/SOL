@@ -27,3 +27,13 @@ Los datos se guardan localmente en archivos no versionados. No se envían docume
 ## OCR de imágenes y PDF escaneados
 
 El extractor Python usa Tesseract local si está disponible. Acepta PNG, JPEG, TIFF, WebP y PDF escaneados, además de los PDF con texto y Office. Para español, colocar `spa.traineddata` y `eng.traineddata` en `SOL_PLUGIN_DATA_DIR/educacion/tessdata` (o configurar `EDUCACION_TESSDATA_DIR`). Sin Tesseract, se preservan originales y se muestra una nota de extracción pendiente. Los archivos que ya están en caché pero no tenían texto se reindexan en la siguiente sincronización. No incluir modelos OCR, tokens ni documentos escolares en Git.
+
+## Agente diario de Educación
+
+Se ejecuta a las 18:00 hora argentina todos los días mientras SOL esté encendido. También se puede iniciar desde educacion_agente_ejecutar. Consulta sin filtros de cuenta ni grupo todos los chats INPUT accesibles desde Nexo. La API de Nexo limita a 100 mensajes recientes y 80 coincidencias por búsqueda; se usan diversas búsquedas y el registro muestra los límites de cobertura, por lo que no se garantiza lectura exhaustiva de enormes historiales.
+
+Codex interpreta solamente fragmentos preseleccionados con indicios escolares, comprueba relación con Luca, materia, fecha y temas, y utiliza los apuntes Moodle sincronizados para crear una guía Markdown y PDF. Las guías se almacenan en SOL_PLUGIN_DATA_DIR/educacion/guias, fuera de Git. No envía WhatsApp automáticamente: los PDF quedan pendientes de revisión por un adulto.
+
+Herramientas MCP: educacion_agente_estado (read), educacion_evaluaciones (read), educacion_agente_ejecutar (submit con confirmación). Los mensajes citados se identifican por el ID original de Nexo. Deduplicación por materia, fecha y tema. Los errores quedan registrados en agente.json.
+
+Google Classroom para Cruz permanece pendiente de una integración independiente.
