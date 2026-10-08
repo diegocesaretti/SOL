@@ -49,7 +49,7 @@ async function agentStatus(){
     lastAttempt:agentLastAttempt,lastRun:s.lastRun,lastError:s.lastError,
     stats:s.stats||null,drafts:s.events?.filter(x=>x.estado==="pendiente_revision").length||0,
     suspects:s.events?.filter(x=>x.estado==="por_confirmar").length||0,
-    automaticSend:false,lastExecution:agentLastResult};
+    automaticSend:(await deliveryStatus()).enabled,lastExecution:agentLastResult,delivery:await deliveryStatus()};
 }
 async function runAgent(){
   if(agentRunning)return {started:false,error:"agent_running"};
@@ -68,6 +68,40 @@ async function runAgent(){
     agentRunning=false;
   });
   return {started:true,at:agentLastAttempt};
+}
+// Envíos autorizados, recordatorios y consultas de datos faltantes.
+let deliveryRunning=false, deliveryResult=null, deliveryScheduleTimer=null;
+const deliveryScript=join(import.meta.dirname,"education_delivery.py");
+async function deliveryStatus(){
+  const policyPath=join(dataRoot,"delivery-policy.json");
+  const ledgerPath=join(dataRoot,"delivery-ledger.json");
+  let enabled=false, sentCount=0, lastDeliveryRun=null, lastError=null;
+  try {const p=JSON.parse(await readFile(policyPath,"utf8"));enabled=p.enabled===true&&p.standingAuthorization===true;}
+  catch(error){if(error.code!=="ENOENT")lastError=clean(error.message,180);}
+  try {const l=JSON.parse(await readFile(ledgerPath,"utf8"));sentCount=Object.keys(l.sent||{}).length;
+    lastDeliveryRun=l.lastRun||null;lastError=l.lastError?.[0]||lastError;}
+  catch(error){if(error.code!=="ENOENT")lastError=clean(error.message,180);}
+  return {enabled,running:deliveryRunning,sentCount,lastDeliveryRun,lastError,automaticSend:enabled,
+    reminderDays:[2,1],channels:["WhatsApp padre","WhatsApp alumno"],calendar:"puente Google Calendar separado"};
+}
+async function runDelivery(){
+  if(deliveryRunning || agentRunning)return {started:false,reason:"busy"};
+  const policy=await deliveryStatus();
+  if(!policy.enabled)return {started:false,reason:"policy_missing"};
+  deliveryRunning=true;
+  const proc=spawn("python",[deliveryScript],{cwd:import.meta.dirname,windowsHide:true,
+     env:{...process.env,SOL_PLUGIN_DATA_DIR:process.env.SOL_PLUGIN_DATA_DIR||join(process.cwd(),".data")},
+     stdio:["ignore","pipe","pipe"]});
+  let output="",error="";
+  proc.stdout.on("data",b=>{output=(output+String(b)).slice(-12000);});
+  proc.stderr.on("data",b=>{error=(error+String(b)).slice(-1500);});
+  proc.on("error",e=>{deliveryResult={ok:false,error:e.message};deliveryRunning=false;});
+  proc.on("exit",code=>{
+     try{deliveryResult=JSON.parse(output.trim().split(/\r?\n/).at(-1)||"{}");}
+     catch{deliveryResult={ok:false,error:"delivery_exit_"+code+":"+error.slice(-300)};}
+     deliveryRunning=false;
+  });
+  return {started:true};
 }
 let agentScheduleTimer=null;
 async function agentDailyTick(){
@@ -346,13 +380,16 @@ server.listen(config.port,"127.0.0.1",async()=>{
  if(config.token) void synchronize();
  agentScheduleTimer=setInterval(()=>void agentDailyTick().catch(e=>console.warn("Education agent schedule:",e.message)),5*60000);
  agentScheduleTimer.unref?.();
+ deliveryScheduleTimer=setInterval(()=>void runDelivery().catch(e=>console.warn("Education delivery:",e.message)),5*60000);
+ deliveryScheduleTimer.unref?.();
+ setTimeout(()=>void runDelivery().catch(e=>console.warn("Education delivery initial:",e.message)),15000).unref?.();
 });
 const timer=setInterval(()=>{if(config.token) void synchronize();if(registered.length!==tools.length) void register();},config.syncMs);
 const retry=setInterval(()=>{if(registered.length!==tools.length)void register();},15000);
 timer.unref?.();retry.unref?.();
 let stopping=false;
 async function shutdown(){
- if(stopping)return;stopping=true;clearInterval(timer);clearInterval(retry);if(agentScheduleTimer)clearInterval(agentScheduleTimer);
+ if(stopping)return;stopping=true;clearInterval(timer);clearInterval(retry);if(agentScheduleTimer)clearInterval(agentScheduleTimer);if(deliveryScheduleTimer)clearInterval(deliveryScheduleTimer);
  if(sol.enabled)await sol.registerMcpTools(callbackUrl,[]).catch(()=>{});
  server.close();process.exit(0);
 }
