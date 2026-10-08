@@ -23,3 +23,7 @@ Los datos se guardan localmente en archivos no versionados. No se envían docume
 
 ## Comprobación
 `GET http://127.0.0.1:8783/health` devuelve resumen sanitizado. Para producción, usar SOL MCP y permisos del miembro, no exponer el puerto a la red.
+
+## OCR de imágenes y PDF escaneados
+
+El extractor Python usa Tesseract local si está disponible. Acepta PNG, JPEG, TIFF, WebP y PDF escaneados, además de los PDF con texto y Office. Para español, colocar `spa.traineddata` y `eng.traineddata` en `SOL_PLUGIN_DATA_DIR/educacion/tessdata` (o configurar `EDUCACION_TESSDATA_DIR`). Sin Tesseract, se preservan originales y se muestra una nota de extracción pendiente. Los archivos que ya están en caché pero no tenían texto se reindexan en la siguiente sincronización. No incluir modelos OCR, tokens ni documentos escolares en Git.

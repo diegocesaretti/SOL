@@ -72,7 +72,7 @@ async function moodle(functionName, params={}) {
   return payload;
 }
 async function extractText(filePath) {
-  const allowed = [".pdf",".docx",".pptx",".xlsx",".txt",".csv",".md",".html",".htm"];
+  const allowed = [".pdf",".docx",".pptx",".xlsx",".txt",".csv",".md",".html",".htm",".png",".jpg",".jpeg",".webp",".bmp",".tif",".tiff"];
   if (!allowed.includes(extname(filePath).toLowerCase())) return {text:"",note:"formato no extraíble"};
   return new Promise(resolve => {
     const child = spawn("python", [join(import.meta.dirname, "extract_text.py"), filePath, "60000"], {
@@ -81,7 +81,7 @@ async function extractText(filePath) {
     let text = "", errors = "";
     child.stdout.on("data",b=>{text += String(b).slice(0, Math.max(0, 65000-text.length));});
     child.stderr.on("data",b=>{errors += String(b).slice(0, 500);});
-    const timer=setTimeout(()=>child.kill(),45000);
+    const timer=setTimeout(()=>child.kill(),120000);
     child.on("error", e=>{clearTimeout(timer); resolve({text:"",note:"Extractor no disponible: "+e.code});});
     child.on("close",code=>{clearTimeout(timer); resolve(code===0
       ? {text:text.slice(0,60000),note:text.trim() ? null : "Sin texto seleccionable; posiblemente PDF escaneado"}
@@ -97,8 +97,16 @@ async function download(item, existing) {
   const output = join(docsDir, name);
   const signature = hash([item.url,item.fileSize,item.modified,item.fileName].join("|"));
   if (existing?.signature === signature && existing?.localPath) {
-    try { await stat(existing.localPath); return {...item,signature,localPath:existing.localPath,text:existing.text || "",note:existing.note || null,sha256:existing.sha256}; }
-    catch {}
+    try {
+      await stat(existing.localPath);
+      const stale = !String(existing.text || "").trim() && (
+        /Sin texto|formato no extra|EXTRACTION_ERROR|Extractor no disponible/i.test(existing.note || "")
+      );
+      const reindexed = stale ? await extractText(existing.localPath) : null;
+      return {...item,signature,localPath:existing.localPath,
+        text:reindexed ? reindexed.text : (existing.text || ""),
+        note:reindexed ? reindexed.note : (existing.note || null),sha256:existing.sha256};
+    } catch {}
   }
   target.searchParams.set("token", config.token);
   try {
@@ -213,7 +221,7 @@ function searchMaterials(args={}) {
     (!q || norm([m.course,m.section,m.title,m.fileName,m.text].join(" ")).includes(q)))
     .slice(0,integer(args.limit,30,1,100))
     .map(({text,sha256,signature,url,...safe})=>({...safe,
-      textPreview:clean(text,integer(args.previewChars,800,0,3000)),hasText:!!text,sha256}));
+      textPreview:clean(text,integer(args.previewChars,800,0,3000)),hasText:!!String(text || "").trim(),sha256}));
 }
 const limitTool={type:"integer",minimum:1,maximum:100};
 const tools=[
