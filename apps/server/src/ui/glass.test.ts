@@ -18,6 +18,9 @@ test("Liquid Glass enhancement script parses without changing real services", ()
   assert.match(script, /sol-glass-palette/);
   assert.match(script, /MutationObserver/);
   assert.match(script, /decorateHome/);
+  assert.match(script, /\/v1\/inputs\/plugins\/extensions\/ui/);
+  assert.match(script, /\/v1\/inputs\/plugins\/ui/);
+  assert.doesNotMatch(script, /href:'\/system'/);
   assert.doesNotMatch(script, /fetch\s*\(/);
   assert.doesNotMatch(script, /\.submit\s*\(/);
 });
