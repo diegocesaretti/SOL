@@ -2,10 +2,13 @@ import { createHash } from "node:crypto";
 import { db } from "../../database/client.js";
 import { aiProvider } from "../ai/runtime.js";
 import type { AuthPrincipal } from "../auth/session.js";
-import { listTimeline, type TimelineItem } from "../life/timeline.js";
+import { listTimeline, type TimelineItem, type TimelineCursor } from "../life/timeline.js";
 
 const DEFAULT_ZONE = "America/Argentina/Buenos_Aires";
 export type DigestSlot = "08" | "12" | "18" | "manual";
+export const MAX_DAY_RECORDS = 50_000;
+const PAGE_SIZE = 500;
+const LOOKBACK_MS = 8 * 60 * 60 * 1000;
 
 interface EditionRow {
   id: string; local_date: string | Date; slot: DigestSlot; as_of: Date;
@@ -100,6 +103,39 @@ function fallbackNarrative(day:string, previous:string, updates:TimelineItem[], 
   const note=" Este relato se basa únicamente en "+all.length+" registros accesibles en SOL y puede ser incompleto si alguna fuente no sincronizó.";
   return (previous?previous.trim()+"\n\n":"")+intro+content+note;
 }
+/** Read every visible Life entry in bounded pages, not only the newest 500.
+ * The composite cursor preserves rows sharing an identical timestamp.
+ * Later editions scan an eight-hour lookback to catch late arrivals and
+ * use evidence keys from the previous edition to avoid rewriting old facts.
+ */
+export async function collectDayEvidence(
+  principal:AuthPrincipal, after:Date, before:Date, fetchPage:typeof listTimeline=listTimeline,
+):Promise<{items:TimelineItem[]; truncated:boolean; pages:number}> {
+  const items:TimelineItem[]=[];
+  let cursor:TimelineCursor|undefined;
+  let pages=0;
+  let truncated=false;
+  while(items.length < MAX_DAY_RECORDS) {
+    const left=Math.min(PAGE_SIZE,MAX_DAY_RECORDS-items.length);
+    const next=await fetchPage(principal,{
+      after:after.toISOString(),before:before.toISOString(),limit:left,cursor,
+    });
+    pages++;
+    items.push(...next.items);
+    if(!next.nextCursor)break;
+    if(cursor && next.nextCursor.occurredAt===cursor.occurredAt &&
+      next.nextCursor.type===cursor.type && next.nextCursor.id===cursor.id)
+      throw new Error("panorama_cursor_did_not_advance");
+    cursor=next.nextCursor;
+    if(items.length>=MAX_DAY_RECORDS){truncated=true;break;}
+  }
+  return {items,truncated,pages};
+}
+export function mergeSourceCounts(previous:Record<string,number>, fresh:TimelineItem[]):Record<string,number> {
+  const sum={...previous};
+  for(const item of fresh)sum[source(item)]=(sum[source(item)]||0)+1;
+  return sum;
+}
 async function memberZone(principal:AuthPrincipal):Promise<string> {
   const r=await db.query<{timezone:string|null}>(
     "SELECT COALESCE(NULLIF(m.timezone,''),NULLIF(h.timezone,'')) AS timezone FROM members m JOIN households h ON h.id=m.household_id WHERE m.id=$2 AND m.household_id=$1 AND m.status='active'",
@@ -144,20 +180,28 @@ export async function generateEdition(principal:AuthPrincipal,date:string,slot:D
     // A historical manual edition covers the entire selected day. A live edition
     // covers the evidence visible at its generation time.
     const asOf=date===today?now:localInstant(date,24,zone);
-    const from=new Date(localInstant(date,0,zone).getTime()-1);
-    const events=await listTimeline(principal,{after:from.toISOString(),before:new Date(asOf.getTime()+1).toISOString(),limit:500});
-    const items=events.items;
     const earlier=await db.query<EditionRow>(
       "SELECT * FROM panorama_daily_editions WHERE household_id=$1 AND member_id=$2 AND local_date=$3::date AND as_of < $4 ORDER BY as_of DESC LIMIT 1",
       [principal.householdId,principal.memberId,date,asOf],
     );
     const prior=earlier.rows[0];
+    const firstMoment=new Date(localInstant(date,0,zone).getTime()-1);
+    // Revisit the whole day for a manual upgrade of a legacy 500-item,
+    // structured edition. Other editions scan only changes + an overlap.
+    const rebuild=slot==="manual" && prior?.provider==="structured" && prior.event_count>=500;
+    const from=prior && !rebuild
+      ? new Date(Math.max(firstMoment.getTime(),prior.as_of.getTime()-LOOKBACK_MS))
+      : firstMoment;
+    const scan=await collectDayEvidence(principal,from,new Date(asOf.getTime()+1));
+    const items=scan.items;
     const seen=new Set(prior?.evidence_keys||[]);
     const fresh=items.filter(item=>!seen.has(evidenceKey(item)));
-    const stats=counts(items);
+    const stats=mergeSourceCounts(prior?.source_stats||{},fresh);
+    const allKeys=[...new Set([...(prior?.evidence_keys||[]),...items.map(evidenceKey)])];
+    const eventTotal=(prior?.event_count||0)+fresh.length;
     let narrative="";
     let provider="";
-    if(!fresh.length&&prior){narrative=prior.narrative;provider="previous-edition";}
+    if(!fresh.length&&prior&&prior.provider!=="structured"){narrative=prior.narrative;provider="previous-edition";}
     else {
       try{
         const answer=await aiProvider.reason({
@@ -172,8 +216,9 @@ export async function generateEdition(principal:AuthPrincipal,date:string,slot:D
           ].join("\n"),
           context:{
             date,slot,zone,asOf:asOf.toISOString(),previousNarrative:prior?.narrative||null,
-            previousAsOf:prior?.as_of.toISOString()||null,eventCount:items.length,newCount:fresh.length,
-            sourceCounts:stats,truncated:items.length>=500,sampledFresh:Math.min(85,fresh.length),
+            previousAsOf:prior?.as_of.toISOString()||null,eventCount:eventTotal,newCount:fresh.length,
+            sourceCounts:stats,truncated:scan.truncated,sampledFresh:Math.min(85,fresh.length),
+            scannedNew:items.length,scanPages:scan.pages,refiningPreviousStructuredEdition:prior?.provider==="structured",
             newEvidence:selectBalanced(fresh).map(item=>({
               source:source(item),time:item.occurredAt,kind:item.type,title:item.title.slice(0,180),
               summary:item.summary?.slice(0,320),priority:item.metadata?.intelligencePriority==="high"?"high":undefined,
@@ -190,7 +235,7 @@ export async function generateEdition(principal:AuthPrincipal,date:string,slot:D
         provider="structured";
       }
     }
-    const args=[principal.householdId,principal.memberId,date,slot,asOf,zone,narrative,provider,JSON.stringify(stats),JSON.stringify(items.map(evidenceKey)),items.length,fresh.length];
+    const args=[principal.householdId,principal.memberId,date,slot,asOf,zone,narrative,provider,JSON.stringify(stats),JSON.stringify(allKeys),eventTotal,fresh.length];
     const inserted=await db.query<EditionRow>(
       "INSERT INTO panorama_daily_editions(household_id,member_id,local_date,slot,as_of,timezone,narrative,provider,source_stats,evidence_keys,event_count,new_count) VALUES ($1,$2,$3::date,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11,$12) ON CONFLICT(household_id,member_id,local_date,slot) DO NOTHING RETURNING *",args
     );
@@ -239,7 +284,10 @@ export async function runScheduledEditions(now=new Date()):Promise<void> {
 }
 export function startDailyNarratives():void {
   if(scheduler)return;
-  void runScheduledEditions().catch(e=>console.error("[panorama] startup",e));
+  // Let the launcher start embedded Postgres, plugins and Codex before
+  // committing a structured fallback for the first scheduled edition.
+  const startup=setTimeout(()=>void runScheduledEditions().catch(e=>console.error("[panorama] startup",e)),30_000);
+  startup.unref?.();
   scheduler=setInterval(()=>void runScheduledEditions().catch(e=>console.error("[panorama] timer",e)),60_000);
   scheduler.unref?.();
 }

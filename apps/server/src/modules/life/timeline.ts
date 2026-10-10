@@ -49,15 +49,20 @@ function intelligenceMetadata(input: {
   };
 }
 
+export interface TimelineCursor { occurredAt: string; type: TimelineItemType; id: string; }
+
 export async function listTimeline(
   principal: AuthPrincipal,
-  options: { before?: string; after?: string; limit?: number } = {},
-): Promise<{ items: TimelineItem[]; nextBefore?: string }> {
+  options: { before?: string; after?: string; limit?: number; cursor?: TimelineCursor } = {},
+): Promise<{ items: TimelineItem[]; nextBefore?: string; nextCursor?: TimelineCursor }> {
   const limit = Math.max(10, Math.min(options.limit ?? 60, 500));
   const perType = Math.min(limit, 500);
   const before = safeBefore(options.before);
   const after = safeBefore(options.after);
   const role = principal.role;
+  const cursorAt = safeBefore(options.cursor?.occurredAt);
+  const cursorType = options.cursor?.type ?? null;
+  const cursorId = options.cursor?.id ?? null;
 
   const [sources, events, tasks] = await Promise.all([
     db.query<{
@@ -79,6 +84,11 @@ export async function listTimeline(
          AND si.deleted_at IS NULL
          AND ($4::timestamptz IS NULL OR si.occurred_at < $4)
          AND ($6::timestamptz IS NULL OR si.occurred_at > $6)
+         AND ($7::timestamptz IS NULL OR si.occurred_at < $7 OR (
+           si.occurred_at = $7 AND (
+             'source'::text < $8::text OR ('source'::text = $8::text AND si.id::text < $9::text)
+           )
+         ))
          AND (
            si.owner_member_id = $2
            OR (si.visibility = 'family' AND $3::text <> 'guest')
@@ -91,9 +101,9 @@ export async function listTimeline(
                AND vg.member_id = $2 AND vg.can_read = true
            ))
          )
-       ORDER BY si.occurred_at DESC
+       ORDER BY si.occurred_at DESC, si.id::text DESC
        LIMIT $5`,
-      [principal.householdId, principal.memberId, role, before, perType, after],
+      [principal.householdId, principal.memberId, role, before, perType, after, cursorAt, cursorType, cursorId],
     ),
     db.query<{
       id: string;
@@ -111,6 +121,11 @@ export async function listTimeline(
        WHERE le.household_id = $1
          AND ($4::timestamptz IS NULL OR le.starts_at < $4)
          AND ($6::timestamptz IS NULL OR le.starts_at > $6)
+         AND ($7::timestamptz IS NULL OR le.starts_at < $7 OR (
+           le.starts_at = $7 AND (
+             'event'::text < $8::text OR ('event'::text = $8::text AND le.id::text < $9::text)
+           )
+         ))
          AND (
            le.owner_member_id = $2
            OR (le.visibility = 'family' AND $3::text <> 'guest')
@@ -123,9 +138,9 @@ export async function listTimeline(
                AND vg.member_id = $2 AND vg.can_read = true
            ))
          )
-       ORDER BY le.starts_at DESC
+       ORDER BY le.starts_at DESC, le.id::text DESC
        LIMIT $5`,
-      [principal.householdId, principal.memberId, role, before, perType, after],
+      [principal.householdId, principal.memberId, role, before, perType, after, cursorAt, cursorType, cursorId],
     ),
     db.query<{
       id: string;
@@ -143,6 +158,11 @@ export async function listTimeline(
        WHERE t.household_id = $1
          AND ($4::timestamptz IS NULL OR COALESCE(t.due_at, t.created_at) < $4)
          AND ($6::timestamptz IS NULL OR COALESCE(t.due_at, t.created_at) > $6)
+         AND ($7::timestamptz IS NULL OR COALESCE(t.due_at, t.created_at) < $7 OR (
+           COALESCE(t.due_at, t.created_at) = $7 AND (
+             'task'::text < $8::text OR ('task'::text = $8::text AND t.id::text < $9::text)
+           )
+         ))
          AND (
            t.owner_member_id = $2
            OR (t.visibility = 'family' AND $3::text <> 'guest')
@@ -155,9 +175,9 @@ export async function listTimeline(
                AND vg.member_id = $2 AND vg.can_read = true
            ))
          )
-       ORDER BY COALESCE(t.due_at, t.created_at) DESC
+       ORDER BY COALESCE(t.due_at, t.created_at) DESC, t.id::text DESC
        LIMIT $5`,
-      [principal.householdId, principal.memberId, role, before, perType, after],
+      [principal.householdId, principal.memberId, role, before, perType, after, cursorAt, cursorType, cursorId],
     ),
   ]);
 
@@ -201,9 +221,14 @@ export async function listTimeline(
       metadata: { status: row.status, dueAt: row.due_at?.toISOString() ?? null },
     })),
   ]
-    .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt))
+    .sort((a,b) =>
+      b.occurredAt.localeCompare(a.occurredAt) ||
+      b.type.localeCompare(a.type) || b.id.localeCompare(a.id)
+    )
     .slice(0, limit);
 
   const nextBefore = items.length === limit ? items[items.length - 1]?.occurredAt : undefined;
-  return { items, nextBefore };
+  const last = items.length === limit ? items[items.length - 1] : undefined;
+  const nextCursor = last ? { occurredAt:last.occurredAt, type:last.type, id:last.id } : undefined;
+  return { items, nextBefore, nextCursor };
 }
