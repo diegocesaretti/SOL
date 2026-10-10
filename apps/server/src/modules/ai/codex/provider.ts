@@ -154,14 +154,7 @@ export class CodexProvider implements AiProvider {
         threadId,
         input: [{ type: "text", text: buildPrompt(request) }],
         approvalPolicy: "never",
-        sandboxPolicy: {
-          type: "readOnly",
-          access: {
-            type: "restricted",
-            includePlatformDefaults: true,
-            readableRoots: [],
-          },
-        },
+        sandboxPolicy: { type: "readOnly" },
         summary: "concise",
       });
       turnId = turnResult.turn.id;
