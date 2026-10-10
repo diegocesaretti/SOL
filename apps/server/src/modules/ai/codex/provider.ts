@@ -93,7 +93,7 @@ export class CodexProvider implements AiProvider {
         model_verbosity: SOL_CODEX_VERBOSITY,
       },
       approvalPolicy: "never",
-      sandbox: "readOnly",
+      sandbox: "read-only",
       serviceName: "sol_core",
     });
     const threadId = threadResult.thread.id;
@@ -155,7 +155,7 @@ export class CodexProvider implements AiProvider {
         input: [{ type: "text", text: buildPrompt(request) }],
         approvalPolicy: "never",
         sandboxPolicy: {
-          type: "read-only",
+          type: "readOnly",
           access: {
             type: "restricted",
             includePlatformDefaults: true,
