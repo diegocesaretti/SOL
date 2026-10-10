@@ -51,11 +51,12 @@ function intelligenceMetadata(input: {
 
 export async function listTimeline(
   principal: AuthPrincipal,
-  options: { before?: string; limit?: number } = {},
+  options: { before?: string; after?: string; limit?: number } = {},
 ): Promise<{ items: TimelineItem[]; nextBefore?: string }> {
-  const limit = Math.max(10, Math.min(options.limit ?? 60, 120));
-  const perType = Math.min(limit, 80);
+  const limit = Math.max(10, Math.min(options.limit ?? 60, 500));
+  const perType = Math.min(limit, 500);
   const before = safeBefore(options.before);
+  const after = safeBefore(options.after);
   const role = principal.role;
 
   const [sources, events, tasks] = await Promise.all([
@@ -77,6 +78,7 @@ export async function listTimeline(
        WHERE si.household_id = $1
          AND si.deleted_at IS NULL
          AND ($4::timestamptz IS NULL OR si.occurred_at < $4)
+         AND ($6::timestamptz IS NULL OR si.occurred_at > $6)
          AND (
            si.owner_member_id = $2
            OR (si.visibility = 'family' AND $3::text <> 'guest')
@@ -91,7 +93,7 @@ export async function listTimeline(
          )
        ORDER BY si.occurred_at DESC
        LIMIT $5`,
-      [principal.householdId, principal.memberId, role, before, perType],
+      [principal.householdId, principal.memberId, role, before, perType, after],
     ),
     db.query<{
       id: string;
@@ -108,6 +110,7 @@ export async function listTimeline(
        FROM life_events le
        WHERE le.household_id = $1
          AND ($4::timestamptz IS NULL OR le.starts_at < $4)
+         AND ($6::timestamptz IS NULL OR le.starts_at > $6)
          AND (
            le.owner_member_id = $2
            OR (le.visibility = 'family' AND $3::text <> 'guest')
@@ -122,7 +125,7 @@ export async function listTimeline(
          )
        ORDER BY le.starts_at DESC
        LIMIT $5`,
-      [principal.householdId, principal.memberId, role, before, perType],
+      [principal.householdId, principal.memberId, role, before, perType, after],
     ),
     db.query<{
       id: string;
@@ -139,6 +142,7 @@ export async function listTimeline(
        FROM tasks t
        WHERE t.household_id = $1
          AND ($4::timestamptz IS NULL OR COALESCE(t.due_at, t.created_at) < $4)
+         AND ($6::timestamptz IS NULL OR COALESCE(t.due_at, t.created_at) > $6)
          AND (
            t.owner_member_id = $2
            OR (t.visibility = 'family' AND $3::text <> 'guest')
@@ -153,7 +157,7 @@ export async function listTimeline(
          )
        ORDER BY COALESCE(t.due_at, t.created_at) DESC
        LIMIT $5`,
-      [principal.householdId, principal.memberId, role, before, perType],
+      [principal.householdId, principal.memberId, role, before, perType, after],
     ),
   ]);
 

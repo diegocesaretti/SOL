@@ -28,6 +28,8 @@ import { listSourceAccounts } from "./modules/identity/source-accounts.js";
 import { handleInputsApi } from "./modules/inputs/routes.js";
 import { handlePluginInputApi } from "./modules/ingestion/plugin-input-routes.js";
 import { handleLifeApi } from "./modules/life/routes.js";
+import { handlePanoramaDailyApi } from "./modules/panorama/routes.js";
+import { startDailyNarratives, stopDailyNarratives } from "./modules/panorama/daily.js";
 import { registerCandidateProcessor } from "./modules/knowledge/candidate-processor.js";
 import { handleKnowledgeApi } from "./modules/knowledge/routes.js";
 import { handleMcpApi } from "./modules/mcp/routes.js";
@@ -43,7 +45,7 @@ import { renderInputsPage } from "./ui/inputs.js";
 import { renderLifePage } from "./ui/life.js";
 import { renderMcpPage } from "./ui/mcp.js";
 import { renderOnboardingPage } from "./ui/onboarding.js";
-import { renderPanoramaPage } from "./ui/panorama.js";
+import { renderDailyPanoramaPage } from "./ui/panorama-daily.js";
 import { renderOutputsPage } from "./ui/outputs.js";
 import { startWindowsTray, stopWindowsTray } from "./windows/tray.js";
 
@@ -158,7 +160,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     return;
   }
   if (request.method === "GET" && path === "/panorama") {
-    sendHtml(response, 200, renderPanoramaPage());
+    sendHtml(response, 200, renderDailyPanoramaPage());
     return;
   }
   if (request.method === "GET" && path === "/inputs") {
@@ -349,6 +351,11 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     if (!principal) return;
     if (await handleAiApi(path, request, response, principal)) return;
   }
+  if (path.startsWith("/v1/panorama/digest/")) {
+    const principal = await principalFor(request, response);
+    if (!principal) return;
+    if (await handlePanoramaDailyApi(path, request, response, principal)) return;
+  }
   if (path.startsWith("/v1/life/")) {
     const principal = await principalFor(request, response);
     if (!principal) return;
@@ -455,6 +462,7 @@ server.listen(config.port, config.host, () => {
   startWindowsTray();
   outboxDispatcher.start();
   startCloudSync();
+  startDailyNarratives();
   console.log("External sources are plugin-only; install providers from Services.");
   if (config.host !== "127.0.0.1" && config.host !== "localhost") {
     console.warn(
@@ -468,6 +476,7 @@ async function shutdown(signal: string): Promise<void> {
   stopWindowsTray();
   outboxDispatcher.stop();
   stopCloudSync();
+  stopDailyNarratives();
   unregisterCandidateProcessor();
   await codexAppServer.stop().catch(() => undefined);
   server.close(async () => {
