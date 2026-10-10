@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { readJsonBody, sendJson } from "../../http.js";
 import type { AuthPrincipal } from "../auth/session.js";
-import { calendarDays, dailyEditions, generateEdition, validDate } from "./daily.js";
+import { getCalendar as calendarDays, getEditions as dailyEditions, generateEdition, validDate } from "./daily.js";
 
 export async function handlePanoramaDailyApi(
   path:string, request:IncomingMessage,response:ServerResponse,principal:AuthPrincipal,
