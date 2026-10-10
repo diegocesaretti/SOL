@@ -109,7 +109,7 @@ function fallbackNarrative(day:string, previous:string, updates:TimelineItem[], 
  * use evidence keys from the previous edition to avoid rewriting old facts.
  */
 export async function collectDayEvidence(
-  principal:AuthPrincipal, after:Date, before:Date,
+  principal:AuthPrincipal, after:Date, before:Date, fetchPage:typeof listTimeline=listTimeline,
 ):Promise<{items:TimelineItem[]; truncated:boolean; pages:number}> {
   const items:TimelineItem[]=[];
   let cursor:TimelineCursor|undefined;
@@ -117,7 +117,7 @@ export async function collectDayEvidence(
   let truncated=false;
   while(items.length < MAX_DAY_RECORDS) {
     const left=Math.min(PAGE_SIZE,MAX_DAY_RECORDS-items.length);
-    const next=await listTimeline(principal,{
+    const next=await fetchPage(principal,{
       after:after.toISOString(),before:before.toISOString(),limit:left,cursor,
     });
     pages++;
