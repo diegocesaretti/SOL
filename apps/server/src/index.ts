@@ -43,6 +43,7 @@ import { renderInputsPage } from "./ui/inputs.js";
 import { renderLifePage } from "./ui/life.js";
 import { renderMcpPage } from "./ui/mcp.js";
 import { renderOnboardingPage } from "./ui/onboarding.js";
+import { renderPanoramaPage } from "./ui/panorama.js";
 import { renderOutputsPage } from "./ui/outputs.js";
 import { startWindowsTray, stopWindowsTray } from "./windows/tray.js";
 
@@ -154,6 +155,10 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
 
   if (request.method === "GET" && path === "/") {
     sendHtml(response, 200, renderOnboardingPage());
+    return;
+  }
+  if (request.method === "GET" && path === "/panorama") {
+    sendHtml(response, 200, renderPanoramaPage());
     return;
   }
   if (request.method === "GET" && path === "/inputs") {

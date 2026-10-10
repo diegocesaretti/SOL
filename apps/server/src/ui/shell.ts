@@ -22,7 +22,7 @@ function primarySection(active: SolSection): "home" | "connections" | "people" |
 export function solSidebar(active: SolSection): string {
   const current = primarySection(active);
   const links: Array<[typeof current,string,string,string]> = [
-    ["home","/","⌂","Inicio"],
+    ["home","/panorama","⌂","Panorama"],
     ["connections","/inputs","⌁","Conexiones"],
     ["people","/inputs?view=people","◎","Personas"],
     ["life","/life","◫","Actividad"],
