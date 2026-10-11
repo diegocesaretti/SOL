@@ -5,6 +5,7 @@ import "./database/auto-migrate.js";
 import { InMemoryEventBus } from "./core/event-bus.js";
 import { OutboxDispatcher } from "./core/outbox-dispatcher.js";
 import { checkDatabase, closeDatabase, databaseRuntimeMode } from "./database/client.js";
+import { startLocalPostgresWatchdog, stopLocalPostgresWatchdog } from "./database/local-postgres.js";
 import { cloudSyncStatus, retryCloudSeed, startCloudSync, stopCloudSync } from "./database/cloud-sync.js";
 import { readJsonBody, sendHtml, sendJson } from "./http.js";
 import {
@@ -461,6 +462,7 @@ server.listen(config.port, config.host, () => {
   console.log(`SOL Core listening on http://${config.host}:${config.port}`);
   startWindowsTray();
   outboxDispatcher.start();
+  startLocalPostgresWatchdog();
   startCloudSync();
   startDailyNarratives();
   console.log("External sources are plugin-only; install providers from Services.");
@@ -475,6 +477,7 @@ async function shutdown(signal: string): Promise<void> {
   console.log(`Received ${signal}; shutting down SOL Core`);
   stopWindowsTray();
   outboxDispatcher.stop();
+  stopLocalPostgresWatchdog();
   stopCloudSync();
   stopDailyNarratives();
   unregisterCandidateProcessor();
