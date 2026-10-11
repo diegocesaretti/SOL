@@ -7,7 +7,7 @@ import { selectEditorialEvidence, type FamilyParticipant } from "./editor.js";
 import { visibleFamilyParticipants, schoolContextFor, type SchoolAgendaEntry } from "./family-school.js";
 
 const DEFAULT_ZONE = "America/Argentina/Buenos_Aires";
-export type DigestSlot = "08" | "12" | "18" | "manual";
+export type DigestSlot = "08" | "12" | "18" | "manual" | "review";
 export const MAX_DAY_RECORDS = 50_000;
 const PAGE_SIZE = 500;
 const LOOKBACK_MS = 8 * 60 * 60 * 1000;
@@ -158,12 +158,13 @@ export async function getCalendar(principal:AuthPrincipal,month:string):Promise<
 }
 const flights=new Map<string,Promise<DailyEdition>>();
 export async function generateEdition(principal:AuthPrincipal,date:string,slot:DigestSlot,now=new Date()):Promise<DailyEdition> {
-  if(!validDate(date)||!["08","12","18","manual"].includes(slot))throw Error("invalid_digest_request");
+  if(!validDate(date)||!["08","12","18","manual","review"].includes(slot))throw Error("invalid_digest_request");
   const zone=await memberZone(principal);
   const today=localClock(now,zone).date;
   const age=(Date.parse(today+"T12:00:00Z")-Date.parse(date+"T12:00:00Z"))/86400000;
   if(date>today||age>180)throw Error("digest_outside_allowed_range");
-  if(slot!=="manual"&&date!==today)throw Error("digest_scheduled_today_only");
+  if(slot!=="manual"&&slot!=="review"&&date!==today)throw Error("digest_scheduled_today_only");
+  if(slot==="review"&&date!==today)throw Error("digest_review_today_only");
   const key=[principal.householdId,principal.memberId,date,slot].join(":");
   const pending=flights.get(key);
   if(pending)return pending;
@@ -188,7 +189,7 @@ export async function generateEdition(principal:AuthPrincipal,date:string,slot:D
     const firstMoment=new Date(localInstant(date,0,zone).getTime()-1);
     // Revisit the whole day for a manual upgrade of a legacy 500-item,
     // structured edition. Other editions scan only changes + an overlap.
-    const rebuild=slot==="manual" && prior?.provider==="structured" && prior.event_count>=500;
+    const rebuild=(slot==="manual"||slot==="review") && prior?.provider==="structured" && prior.event_count>=500;
     const from=prior && !rebuild
       ? new Date(Math.max(firstMoment.getTime(),prior.as_of.getTime()-LOOKBACK_MS))
       : firstMoment;
