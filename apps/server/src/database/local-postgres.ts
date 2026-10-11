@@ -250,6 +250,46 @@ async function startLocalPostgres(): Promise<LocalPostgresRuntime> {
   };
 }
 
+// Only SOL Core starts this watchdog. Auxiliary MCP/CLI processes must not
+// supervise or shut down the shared, persistent Windows database.
+let watchdogTimer: NodeJS.Timeout | undefined;
+let watchdogChecking = false;
+
+export function startLocalPostgresWatchdog(): void {
+  if (process.platform !== "win32" || config.databaseMode !== "hybrid" || watchdogTimer) return;
+
+  watchdogTimer = setInterval(() => {
+    if (watchdogChecking) return;
+    watchdogChecking = true;
+    void (async () => {
+      try {
+        const state = await loadOrCreateState();
+        const pgCtl = windowsPgCtlPath();
+        const result = await runProcess(pgCtl, ["status", "-D", clusterDir], {
+          allowExitCodes: [0, 3, 4],
+          timeoutMs: 10_000,
+        });
+        if (result.code !== 0) {
+          console.warn("[database] Shared PostgreSQL stopped; attempting recovery");
+          await startWindowsPostgres(state);
+          await ensureSolDatabase(state);
+          console.log("[database] Shared PostgreSQL automatically recovered");
+        }
+      } catch (error) {
+        console.error("[database] PostgreSQL watchdog recovery failed", error);
+      } finally {
+        watchdogChecking = false;
+      }
+    })();
+  }, 30_000);
+  watchdogTimer.unref();
+}
+
+export function stopLocalPostgresWatchdog(): void {
+  if (watchdogTimer) clearInterval(watchdogTimer);
+  watchdogTimer = undefined;
+}
+
 export function ensureLocalPostgres(): Promise<LocalPostgresRuntime> {
   runtimePromise ??= startLocalPostgres();
   return runtimePromise;
