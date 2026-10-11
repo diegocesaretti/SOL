@@ -167,6 +167,20 @@ async function resetSequences(client: PoolClient, tables: string[]): Promise<voi
   }
 }
 
+async function assertDestinationHasNoUserData(target: PoolClient): Promise<void> {
+  // The old sync routine TRUNCATEs complete tables. Never allow it to delete
+  // historical/cloud-only records until a non-destructive merge exists.
+  for (const table of await publicTables(target)) {
+    if (table === "schema_migrations") continue;
+    const result = await target.query<{ occupied: boolean }>(
+      `SELECT EXISTS (SELECT 1 FROM ${quoteIdent(table)}) AS occupied`,
+    );
+    if (result.rows[0]?.occupied) {
+      throw new Error(`Refusing destructive full-copy: destination table ${table} already contains user data; merge is required`);
+    }
+  }
+}
+
 async function replaceDatabaseContents(sourcePool: Pool, targetPool: Pool): Promise<void> {
   const source = await sourcePool.connect();
   const target = await targetPool.connect();
@@ -175,6 +189,7 @@ async function replaceDatabaseContents(sourcePool: Pool, targetPool: Pool): Prom
     const tables = await publicTables(source);
     const ordered = await dependencyOrderedTables(source, tables);
 
+    await assertDestinationHasNoUserData(target);
     await target.query("BEGIN");
     if (tables.length) {
       await target.query(
