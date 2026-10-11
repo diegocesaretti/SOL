@@ -132,11 +132,15 @@ async function copyTable(source: PoolClient, target: PoolClient, table: string):
   if (!rows.rows.length) return;
 
   const quotedColumns = columns.map((column) => quoteIdent(column.column_name)).join(", ");
-  for (const row of rows.rows) {
-    const values = columns.map((column) => row[column.column_name]);
-    const placeholders = values.map((_, index) => `$${index + 1}`).join(", ");
+  const batchSize = Math.min(100, Math.max(1, Math.floor(30000 / columns.length)));
+  for (let offset = 0; offset < rows.rows.length; offset += batchSize) {
+    const batch = rows.rows.slice(offset, offset + batchSize);
+    const values = batch.flatMap((row) => columns.map((column) => row[column.column_name]));
+    const placeholders = batch.map((_, rowIndex) =>
+      "(" + columns.map((_, colIndex) => "$" + (rowIndex * columns.length + colIndex + 1)).join(", ") + ")",
+    ).join(", ");
     await target.query(
-      `INSERT INTO ${quoteIdent(table)} (${quotedColumns}) VALUES (${placeholders})`,
+      "INSERT INTO " + quoteIdent(table) + " (" + quotedColumns + ") VALUES " + placeholders,
       values,
     );
   }
@@ -167,17 +171,40 @@ async function resetSequences(client: PoolClient, tables: string[]): Promise<voi
   }
 }
 
-async function assertDestinationHasNoUserData(target: PoolClient): Promise<void> {
-  // The old sync routine TRUNCATEs complete tables. Never allow it to delete
-  // historical/cloud-only records until a non-destructive merge exists.
+async function assertDestinationSubsetOfSource(source: PoolClient, target: PoolClient): Promise<void> {
+  // A full-copy is permissible only if it will not erase destination-only keys.
+  // The destination is held under an exclusive table lock by the caller.
   for (const table of await publicTables(target)) {
-    if (table === "schema_migrations") continue;
-    const result = await target.query<{ occupied: boolean }>(
-      `SELECT EXISTS (SELECT 1 FROM ${quoteIdent(table)}) AS occupied`,
+    const keys = await target.query<{ column_name: string }>(
+      "SELECT kcu.column_name FROM information_schema.table_constraints tc " +
+      "JOIN information_schema.key_column_usage kcu ON kcu.constraint_name = tc.constraint_name " +
+      "AND kcu.table_schema = tc.table_schema AND kcu.table_name = tc.table_name " +
+      "WHERE tc.table_schema = 'public' AND tc.table_name = $1 AND tc.constraint_type = 'PRIMARY KEY' " +
+      "ORDER BY kcu.ordinal_position",
+      [table],
     );
-    if (result.rows[0]?.occupied) {
-      throw new Error(`Refusing destructive full-copy: destination table ${table} already contains user data; merge is required`);
+    const columns = keys.rows.map((row) => row.column_name);
+    if (!columns.length) {
+      const existing = await target.query<{ occupied: boolean }>(
+        "SELECT EXISTS (SELECT 1 FROM " + quoteIdent(table) + ") AS occupied",
+      );
+      if (existing.rows[0]?.occupied)
+        throw new Error("Refusing full-copy: destination table " + table + " has data but no primary key");
+      continue;
     }
+    const sql = "SELECT " + columns.map(quoteIdent).join(", ") + " FROM " + quoteIdent(table);
+    const [sourceRows, targetRows] = await Promise.all([
+      source.query<Record<string, unknown>>(sql),
+      target.query<Record<string, unknown>>(sql),
+    ]);
+    const sourceKeys = new Set(sourceRows.rows.map((row) =>
+      JSON.stringify(columns.map((column) => row[column])),
+    ));
+    const missing = targetRows.rows.filter((row) =>
+      !sourceKeys.has(JSON.stringify(columns.map((column) => row[column]))),
+    ).length;
+    if (missing)
+      throw new Error("Refusing full-copy: destination table " + table + " has " + missing + " destination-only rows");
   }
 }
 
@@ -189,8 +216,11 @@ async function replaceDatabaseContents(sourcePool: Pool, targetPool: Pool): Prom
     const tables = await publicTables(source);
     const ordered = await dependencyOrderedTables(source, tables);
 
-    await assertDestinationHasNoUserData(target);
     await target.query("BEGIN");
+    if (tables.length) {
+      await target.query("LOCK TABLE " + tables.map(quoteIdent).join(", ") + " IN ACCESS EXCLUSIVE MODE");
+    }
+    await assertDestinationSubsetOfSource(source, target);
     if (tables.length) {
       await target.query(
         `TRUNCATE TABLE ${tables.map(quoteIdent).join(", ")} RESTART IDENTITY CASCADE`,
