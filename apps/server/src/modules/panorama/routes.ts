@@ -29,14 +29,15 @@ export async function handlePanoramaDailyApi(
         if(same.host!==request.headers.host){sendJson(response,403,{error:"same_origin_required"});return true;}
       }catch{sendJson(response,403,{error:"same_origin_required"});return true;}
     }
-    const body=await readJsonBody<{date?:unknown}>(request,4096);
+    const body=await readJsonBody<{date?:unknown;mode?:unknown}>(request,4096);
     if(typeof body.date!=="string"||!validDate(body.date)){sendJson(response,400,{error:"invalid_digest_date"});return true;}
     try{
-      const digest=await generateEdition(principal,body.date,"manual");
+      if(body.mode!==undefined&&body.mode!=="manual"&&body.mode!=="review"){sendJson(response,400,{error:"invalid_digest_mode"});return true;}
+      const digest=await generateEdition(principal,body.date,body.mode==="review"?"review":"manual");
       sendJson(response,200,{edition:digest});
     }catch(error){
       const message=error instanceof Error?error.message:String(error);
-      if(message==="digest_outside_allowed_range"||message==="member_not_active")sendJson(response,400,{error:message});
+      if(message==="digest_outside_allowed_range"||message==="member_not_active"||message==="digest_review_today_only")sendJson(response,400,{error:message});
       else throw error;
     }
     return true;
