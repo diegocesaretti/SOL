@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { Pool, PoolClient } from "pg";
 import { config } from "../config.js";
+import { sourceCopySelection, type CopyColumn } from "./copy-values.js";
 import { cloudDb, db, databaseRuntimeMode } from "./client.js";
 import { migrateDatabase } from "./migration-runner.js";
 
@@ -78,14 +79,14 @@ async function publicTables(client: PoolClient): Promise<string[]> {
   return result.rows.map((row) => row.tablename);
 }
 
-async function tableColumns(client: PoolClient, table: string): Promise<string[]> {
-  const result = await client.query<{ column_name: string }>(`
-    SELECT column_name
+async function tableColumns(client: PoolClient, table: string): Promise<CopyColumn[]> {
+  const result = await client.query<CopyColumn>(`
+    SELECT column_name, udt_name
     FROM information_schema.columns
     WHERE table_schema = 'public' AND table_name = $1
     ORDER BY ordinal_position
   `, [table]);
-  return result.rows.map((row) => row.column_name);
+  return result.rows;
 }
 
 async function dependencyOrderedTables(client: PoolClient, tables: string[]): Promise<string[]> {
@@ -125,12 +126,14 @@ async function dependencyOrderedTables(client: PoolClient, tables: string[]): Pr
 async function copyTable(source: PoolClient, target: PoolClient, table: string): Promise<void> {
   const columns = await tableColumns(source, table);
   if (!columns.length) return;
-  const rows = await source.query(`SELECT * FROM ${quoteIdent(table)}`);
+  const rows = await source.query(
+    `SELECT ${sourceCopySelection(columns)} FROM ${quoteIdent(table)}`,
+  );
   if (!rows.rows.length) return;
 
-  const quotedColumns = columns.map(quoteIdent).join(", ");
+  const quotedColumns = columns.map((column) => quoteIdent(column.column_name)).join(", ");
   for (const row of rows.rows) {
-    const values = columns.map((column) => row[column]);
+    const values = columns.map((column) => row[column.column_name]);
     const placeholders = values.map((_, index) => `$${index + 1}`).join(", ");
     await target.query(
       `INSERT INTO ${quoteIdent(table)} (${quotedColumns}) VALUES (${placeholders})`,
