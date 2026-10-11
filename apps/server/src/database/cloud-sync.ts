@@ -256,7 +256,9 @@ export async function initializeCloudSync(): Promise<void> {
   if (state.seeded) {
     // Do not wake Neon merely because SOL started. The last known cloud status is
     // informational; scheduled sync will establish fresh reachability when needed.
-    state.state = state.cloudReachable === false ? "offline" : "ready";
+    // A persisted sync failure must remain visible until an actual successful
+    // transfer clears lastError. Cloud reachability alone is not sync health.
+    state.state = state.cloudReachable === false ? "offline" : state.lastError ? "error" : "ready";
     await saveState();
     return;
   }
