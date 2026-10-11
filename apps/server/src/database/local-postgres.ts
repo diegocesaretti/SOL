@@ -176,15 +176,13 @@ async function startWindowsPostgres(state: LocalPostgresState): Promise<() => Pr
     );
   }
 
+  // The embedded cluster is shared by SOL Core, MCP bridges, and short-lived
+  // administrative commands. A process that didn't start PostgreSQL must never
+  // stop it, and even the starter may exit while other clients still need it.
+  // Keep the persistent Windows cluster running until an explicit maintenance
+  // shutdown. A subsequent SOL startup reuses it via the pg_ctl status check.
   return async () => {
-    const current = await runProcess(pgCtl, ["status", "-D", clusterDir], {
-      allowExitCodes: [0, 3, 4],
-    }).catch(() => ({ code: 4, stdout: "", stderr: "" }));
-    if (current.code !== 0) return;
-
-    await runProcess(pgCtl, ["stop", "-w", "-D", clusterDir, "-m", "fast"], {
-      allowExitCodes: [0, 3, 4],
-    }).catch(() => undefined);
+    console.log("[database] Leaving shared embedded PostgreSQL running on Windows");
   };
 }
 
