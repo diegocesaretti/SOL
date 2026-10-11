@@ -83,7 +83,7 @@ export async function visibleFamilyParticipants(principal:AuthPrincipal):Promise
     "SELECT id,display_name FROM members WHERE household_id=$1 AND status='active' ORDER BY created_at LIMIT 30",
     [principal.householdId],
   );
-  const members=base.rows.map(p=>({name:clean(p.display_name,70),memberId:p.id}));
+  const members:FamilyParticipant[]=base.rows.map(p=>({name:clean(p.display_name,70),memberId:p.id}));
   const cfg=await readFamilyPanoramaConfig();
   if(cfg?.householdId!==principal.householdId)return members;
   const known=new Set(members.map(p=>p.name.toLowerCase()));
