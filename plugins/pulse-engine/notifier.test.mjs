@@ -1,11 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {localClock,quietHour,messageFor,digestText,sendWhatsApp} from "./notifier.mjs";
+import {localClock,quietHour,urgentAllowed,messageFor,digestText,sendWhatsApp} from "./notifier.mjs";
 const syntheticRecipient="5491100000000";
 test("quiet hours in Argentina",()=>{
  assert.equal(quietHour(new Date("2026-10-13T02:00:00Z")),true);
  assert.equal(quietHour(new Date("2026-10-12T17:00:00Z")),false);
  assert.equal(localClock(new Date("2026-10-12T17:00:00Z")).hour,14);
+});
+test("critical home alarms bypass quiet hours but routine events do not",()=>{
+ const night=new Date("2026-10-13T02:00:00Z");
+ assert.equal(urgentAllowed({type:"home.alarm.critical"},night),true);
+ assert.equal(urgentAllowed({type:"invoice.deadline.today"},night),false);
 });
 test("privacy-preserving notices and grouped digests",()=>{
  assert.match(messageFor({type:"order.cancelled",source:"mercadolibre"}),/una venta de Mercado Libre/);

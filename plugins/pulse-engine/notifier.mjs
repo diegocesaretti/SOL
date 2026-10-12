@@ -6,12 +6,17 @@ export function localClock(date=new Date()){
 export function quietHour(date=new Date()) {
   const {hour}=localClock(date);return hour>=22||hour<7;
 }
+export function urgentAllowed(event,now=new Date()){
+  return event?.type==="home.alarm.critical" || !quietHour(now);
+}
 export function messageFor(event) {
   const labels={
     "order.cancelled":"Se canceló una venta de Mercado Libre.",
     "printer.failure":"Hay una falla en una impresora.",
     "order.status.changed":"Cambió el estado de un pedido.",
-    "weather.storm":"Hay una alerta meteorológica importante."
+    "weather.storm":"Hay una alerta meteorológica importante.",
+    "invoice.deadline.today":"Hoy vence una obligación registrada en Finanzas.",
+    "invoice.deadline.overdue":"Hay un vencimiento reciente sin registrar como pagado en Finanzas."
   };
   const text=labels[event.type]||("Detecté un evento que necesita revisión: "+String(event.type||"evento").slice(0,80));
   return "SOL Pulse · Aviso importante\n"+text+"\nOrigen: "+String(event.source||"SOL")+"\nRevisá los detalles en SOL.";

@@ -1,32 +1,50 @@
-# SOL Pulse Engine 0.3.0
+# SOL Pulse Engine 0.5.0
 
-Motor proactivo residente, con events, deduplicación persistente, clasificación heurística y notificación WhatsApp opcional.
+Motor proactivo residente para SOL. Está preparado para funcionar como plugin SOL independiente, pero requiere instalación y autorización mediante el gestor oficial.
 
-## Arquitectura
+## Fuentes
 
-- BWA 3D 0.2.1 consulta la API ya autenticada de Mercado Libre cada 3 minutos.
-- La primera consulta establece una línea base: no genera alertas por pedidos pasados.
-- Los pedidos nuevos y cambios de estado generan eventos con claves idempotentes vía HTTP local autenticado.
-- Pulse archiva estado (JSON con escritura atómica) y expone `pulse_status`, `pulse_events`, `pulse_decisions` y `pulse_ingest_event`.
-- Eventos de prioridad >=80 generan un aviso individual. Eventos de prioridad media se agregan en resúmenes (08, 12 y 18, hora de Córdoba).
-- Máximo 8 avisos/día, silencio entre 22 y 07, sólo al WhatsApp explícitamente configurado para el propietario.
-- Los mensajes no incluyen datos privados ni información de compradores.
-- Se marca estado `sending` antes del HTTP a Nexo, y `accepted` después de que Nexo confirma envío. Ante error se marca `uncertain` y se evita el reenvío automático que podría duplicar mensajes.
-- `accepted` no representa prueba de lectura o entrega en el teléfono: sólo aceptación por Nexo.
+- **Mercado Libre**: BWA 3D 0.2.1 reutiliza su sesión de vendedor y publica pedidos nuevos y cambios relevantes. La primera lectura establece una línea base sin crear avisos retrospectivos.
+- **Finanzas**: Pulse consulta `finanzas_vencimientos_list` por la API MCP interna de SOL (`mcp.invoke.read`). Emite eventos para vencimientos activos a 2 días, 1 día, hoy y vencidos ayer. No publica importes ni datos de factura.
+- **Home Assistant**: consulta entidades seleccionadas desde el caché por `home_assistant_get_state` y compara cambios contra un checkpoint persistente. En el primer relevamiento no emite avisos viejos. La lista explícita admite solo climate, switch, light, sensor y binary_sensor; excluye person, device_tracker y cámaras.
 
-## Ajustes
+## Notificaciones
 
-Pulse: `PULSE_ENGINE_API_PORT` (8794), `PULSE_ENGINE_INGEST_TOKEN` (secreto), `PULSE_ENGINE_INGEST_OWNER_ID`, `PULSE_DELIVERY_ENABLED`, `PULSE_WHATSAPP_TO`, `PULSE_NEXO_PORT` (3210).
-BWA: `BWA3D_PULSE_ENABLED`, `BWA3D_PULSE_ENDPOINT`, `BWA3D_PULSE_TOKEN`, `BWA3D_PULSE_OWNER_ID`, `BWA3D_PULSE_POLL_MS`.
+- Se requiere opt-in con `PULSE_DELIVERY_ENABLED=true` y número de destino validado.
+- Incidentes importantes se notifican individualmente; los de prioridad media se agrupan en resúmenes.
+- Máximo 8 avisos al día, silencios 22:00–07:00 en Córdoba. Excepción: alertas críticas de Home Assistant si una entidad de seguridad autorizada cambia a "on".
+- Se registra el intento antes de contactar a Nexo; al confirmar Nexo pasa a estado `accepted`. Si hay incertidumbre se deja `uncertain` para revisión y no se reintenta ciegamente.
+- `accepted` significa aceptado por Nexo, no entregado ni leído en el teléfono.
+- No se ejecutan acciones sobre equipos, impresoras, publicaciones ni pagos.
 
-Ambos plugins deben compartir token de 32+ caracteres y ownerId autorizado; ninguna credencial OAuth de Mercado Libre se copia a Pulse. Todos los datos quedan restringidos al host y al propietario configurado.
+## Configuración
 
-## Estado funcional y límites
+Pulse: `PULSE_ENGINE_API_PORT` (8794), `PULSE_ENGINE_INGEST_TOKEN` (secreto compartido de 32+ caracteres), `PULSE_ENGINE_INGEST_OWNER_ID`, `PULSE_DELIVERY_ENABLED` (false), `PULSE_WHATSAPP_TO`, `PULSE_NEXO_PORT` (3210), `PULSE_FINANCE_ENABLED` (false), `PULSE_HOME_ENABLED` (false), `PULSE_HOME_ENTITIES` (cadena de entidades separadas por coma).
 
-- Activación independiente y con permisos. No controla impresoras, precios, publicaciones ni dispositivos.
-- Prioridades heurísticas: todavía no razona con un LLM ni correlaciona fuentes externas.
-- La detección de cambios se limita a los 100 pedidos más recientes en cada ciclo. Los pedidos antiguos fuera de esa ventana y picos masivos requieren reconciliación adicional o webhook oficial.
-- Si Nexo acepta un mensaje pero la conexión se corta antes de responder, el evento queda `uncertain` para revisión y no se reenvía a ciegas.
-- Home Assistant, calendario, clima, correos, noticias, educación y finanzas están contemplados como fuentes futuras, pero aún no conectados como productores residentes.
+BWA: `BWA3D_PULSE_ENABLED` (false), `BWA3D_PULSE_ENDPOINT=http://127.0.0.1:8794/v1/ingest`, `BWA3D_PULSE_TOKEN` (igual secreto de Pulse), `BWA3D_PULSE_OWNER_ID` (igual ownerId), `BWA3D_PULSE_POLL_MS` (180000).
 
-Pruebas: `node --test plugins/pulse-engine/*.test.mjs plugins/bwa-3d/pulse-publisher.test.mjs`.
+Al instalar Pulse, el gestor oficial debe autorizar explícitamente `mcp.register`, `filesystem.plugin-data`, `network.local` y `mcp.invoke.read`. El permiso de lectura MCP está limitado por SOL al miembro propietario del plugin y nunca permite escrituras en Finanzas ni en Home Assistant.
+
+## Diagnóstico
+
+- `GET http://127.0.0.1:8794/health`: eventos, decisiones, envío, errores de fuentes y disponibilidad.
+- `GET http://127.0.0.1:8781/health`: estado del publicador BWA 3D en `pulsePublisher`.
+- MCP: `pulse_status`, `pulse_events`, `pulse_decisions`, `pulse_ingest_event`.
+- Consulta y audita `uncertain` cuando Nexo no devuelve una aceptación inequívoca.
+
+## Pruebas
+
+```powershell
+node --test plugins/pulse-engine/*.test.mjs plugins/bwa-3d/pulse-publisher.test.mjs
+```
+
+El conjunto cubre ingestión HTTP autenticada, primera línea base, deduplicación, error de entrega, límites de entidades de hogar, lectura financiera, privacidad, horarios y envío a Nexo simulado.
+
+## Límites actuales
+
+- No está instalado en la instancia productiva de SOL solo por estar en el repositorio.
+- Mercado Libre se consulta por polling hasta 100 pedidos recientes; falta webhook y reconciliación paginada.
+- Clasificación determinista, todavía sin un motor LLM de evaluación contextual.
+- No existe una capa de permisos por destinatario distinta de la identidad propietaria.
+- Clima, calendario, noticias y correo aún requieren conectores específicos.
+- No debe sustituir sistemas de alarma certificados o avisos de emergencia existentes.

@@ -3,7 +3,9 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { SolPluginClientCore } from "./lib/sol-client-core.mjs";
-import { localClock, quietHour, messageFor, digestText, sendWhatsApp } from "./notifier.mjs";
+import { localClock, quietHour, urgentAllowed, messageFor, digestText, sendWhatsApp } from "./notifier.mjs";
+import { createFinanceSource } from "./finance-source.mjs";
+import { createHomeSource } from "./home-source.mjs";
 
 const pluginId = process.env.SOL_PLUGIN_ID?.trim() || "pulse-engine";
 const dataDir = process.env.SOL_PLUGIN_DATA_DIR?.trim() || join(process.env.SOL_PLUGIN_ROOT?.trim() || process.cwd(), ".data");
@@ -34,6 +36,8 @@ let store = {version:1, events:[], updatedAt:null};
 let writeChain = Promise.resolve();
 let toolsRegistered = false;
 let lastRegistrationError = null;
+const financeSource=createFinanceSource({sol,ownerId:allowedOwner,enabled:process.env.PULSE_FINANCE_ENABLED==="true",ingest});
+const homeSource=createHomeSource({sol,ownerId:allowedOwner,enabled:process.env.PULSE_HOME_ENABLED==="true",entityIds:process.env.PULSE_HOME_ENTITIES||"",dataDir,ingest});
 
 export function classify(e) {
   const critical = /security|smoke|fire|flood|emergency|critical/i.test(e.type);
@@ -100,14 +104,14 @@ export function listEvents(args={}) {
   return {ok:true,events:store.events.filter(x=>(!source||x.source===source)&&(!decision||x.decision===decision)).slice(-limit).reverse().map(publicEvent)};
 }
 export async function runNotificationCycle({now=new Date(),send=sendWhatsApp}={}) {
-  if(!deliveryReady||delivering||quietHour(now))return {skipped:"disabled_busy_or_quiet"};
+  if(!deliveryReady||delivering)return {skipped:"disabled_or_busy"};
   delivering=true;
   try {
     const clock=localClock(now);
     const sentToday=store.events.filter(e=>e.deliveryStatus==="accepted"&&e.deliveredAt&&localClock(new Date(e.deliveredAt)).day===clock.day).length
       + Object.entries(store.digests||{}).filter(([k,v])=>k.startsWith(clock.day+":")&&v.status!=="failed").length;
     if(sentToday>=maxDaily)return {skipped:"daily_limit"};
-    const urgent=store.events.find(e=>e.ownerId===allowedOwner&&e.decision==="review"&&e.importance>=80&&!e.deliveryStatus);
+    const urgent=store.events.find(e=>e.ownerId===allowedOwner&&e.decision==="review"&&e.importance>=80&&!e.deliveryStatus&&urgentAllowed(e,now));
     if(urgent){
       await mutate(async()=>{urgent.deliveryStatus="sending";urgent.deliveryAttemptAt=now.toISOString();await save();});
       try {
@@ -119,6 +123,7 @@ export async function runNotificationCycle({now=new Date(),send=sendWhatsApp}={}
         return {uncertain:true,eventId:urgent.id};
       }
     }
+    if(quietHour(now))return {skipped:"quiet_hours"};
     const slot=clock.hour>=18?"18":clock.hour>=12?"12":clock.hour>=8?"08":null;
     if(!slot)return {skipped:"outside_digest"};
     const key=clock.day+":"+slot;
@@ -144,7 +149,7 @@ export async function runNotificationCycle({now=new Date(),send=sendWhatsApp}={}
 function status() {
   const counts={review:0,digest:0,ignore:0};
   for(const e of store.events) counts[e.decision]=(counts[e.decision]||0)+1;
-  return {ok:true,plugin:pluginId,version:"0.3.0",events:store.events.length,counts,updatedAt:store.updatedAt,solEnabled:sol.enabled,toolsRegistered,lastRegistrationError,mode:deliveryReady?"notification":"observe_only",notificationsEnabled:deliveryReady,actionsEnabled:false,ingestEnabled,delivery:{ready:deliveryReady,maxDaily,recipientConfigured:Boolean(recipient),lastDigestKeys:Object.keys(store.digests||{}).slice(-4)}};
+  return {ok:true,plugin:pluginId,version:"0.5.0",events:store.events.length,counts,updatedAt:store.updatedAt,solEnabled:sol.enabled,toolsRegistered,lastRegistrationError,mode:deliveryReady?"notification":"observe_only",notificationsEnabled:deliveryReady,actionsEnabled:false,ingestEnabled,delivery:{ready:deliveryReady,maxDaily,recipientConfigured:Boolean(recipient),lastDigestKeys:Object.keys(store.digests||{}).slice(-4)},financeSource:financeSource.status(),homeSource:homeSource.status()};
 }
 const tools=[
 {name:"pulse_status",description:"Return Pulse Engine health and processing counters. Read-only.",requiredScope:"read",inputSchema:{type:"object",properties:{},additionalProperties:false}},
@@ -198,8 +203,10 @@ export async function start(){
   await new Promise(resolve=>server.listen(port,"127.0.0.1",resolve));
   console.log(JSON.stringify({type:"sol.plugin.ready",health:"healthy",details:{provider:pluginId,port,mode:"observe_only"}}));
   await register();
+  financeSource.start();
+  homeSource.start();
   const retry=setInterval(()=>{if(!toolsRegistered)void register();},15000);retry.unref?.();
   const notifierTimer=setInterval(()=>void runNotificationCycle().catch(error=>console.warn("Pulse notifier: "+String(error?.message||error))),30000);notifierTimer.unref?.();
-  for(const sig of ["SIGINT","SIGTERM"])process.once(sig,async()=>{clearInterval(retry);clearInterval(notifierTimer);if(sol.enabled)await sol.registerMcpTools(callbackUrl,[]).catch(()=>{});server.close();process.exit(0);});
+  for(const sig of ["SIGINT","SIGTERM"])process.once(sig,async()=>{clearInterval(retry);clearInterval(notifierTimer);financeSource.stop();homeSource.stop();if(sol.enabled)await sol.registerMcpTools(callbackUrl,[]).catch(()=>{});server.close();process.exit(0);});
 }
 if(process.argv[1]&&new URL(import.meta.url).pathname.replace(/^\//,"").toLowerCase().endsWith(process.argv[1].replaceAll("\\","/").toLowerCase()))await start();
