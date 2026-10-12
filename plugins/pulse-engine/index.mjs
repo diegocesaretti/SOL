@@ -153,13 +153,13 @@ export async function runNotificationCycle({now=new Date(),send=sendWhatsApp}={}
 function status() {
   const counts={review:0,digest:0,ignore:0};
   for(const e of store.events) counts[e.decision]=(counts[e.decision]||0)+1;
-  return {ok:true,plugin:pluginId,version:"0.7.0",events:store.events.length,counts,updatedAt:store.updatedAt,solEnabled:sol.enabled,toolsRegistered,lastRegistrationError,mode:deliveryReady?"notification":"observe_only",notificationsEnabled:deliveryReady,actionsEnabled:false,ingestEnabled,delivery:{ready:deliveryReady,maxDaily,recipientConfigured:Boolean(recipient),lastDigestKeys:Object.keys(store.digests||{}).slice(-4)},financeSource:financeSource.status(),homeSource:homeSource.status(),panoramaSource:panoramaSource.status()};
+  return {ok:true,plugin:pluginId,version:"0.7.1",events:store.events.length,counts,updatedAt:store.updatedAt,solEnabled:sol.enabled,toolsRegistered,lastRegistrationError,mode:deliveryReady?"notification":"observe_only",notificationsEnabled:deliveryReady,actionsEnabled:false,ingestEnabled,delivery:{ready:deliveryReady,maxDaily,recipientConfigured:Boolean(recipient),lastDigestKeys:Object.keys(store.digests||{}).slice(-4)},financeSource:financeSource.status(),homeSource:homeSource.status(),panoramaSource:panoramaSource.status()};
 }
 const tools=[
-{name:"pulse_status",description:"Return Pulse Engine health and processing counters. Read-only.",requiredScope:"read",inputSchema:{type:"object",properties:{},additionalProperties:false}},
-{name:"pulse_events",description:"List safe redacted event metadata for current SOL plugin scope. Does not return private payload.",requiredScope:"read",inputSchema:{type:"object",properties:{limit:{type:"integer",minimum:1,maximum:100},source:{type:"string"},decision:{type:"string",enum:["review","digest","ignore"]}},additionalProperties:false}},
-{name:"pulse_decisions",description:"Review events that merit human inspection; no automatic actions.",requiredScope:"read",inputSchema:{type:"object",properties:{limit:{type:"integer",minimum:1,maximum:100}},additionalProperties:false}},
-{name:"pulse_ingest_event",description:"Submit one authorized source event for durable deduplication and classification. Does not trigger messages or actions.",requiredScope:"submit",inputSchema:{type:"object",properties:{source:{type:"string",enum:[...SOURCES]},type:{type:"string",minLength:3,maxLength:90},sourceEventId:{type:"string",minLength:1,maxLength:160},ownerId:{type:"string",minLength:1,maxLength:120},title:{type:"string",maxLength:160},privacy:{type:"string",enum:["public","household","private","sensitive"]},importance:{type:"number",minimum:0,maximum:100},occurredAt:{type:"string",format:"date-time"}},required:["source","type","sourceEventId","ownerId"],additionalProperties:false}}
+{name:"pulse_engine_status",description:"Return Pulse Engine health and processing counters. Read-only.",requiredScope:"read",inputSchema:{type:"object",properties:{},additionalProperties:false}},
+{name:"pulse_engine_events",description:"List safe redacted event metadata for current SOL plugin scope. Does not return private payload.",requiredScope:"read",inputSchema:{type:"object",properties:{limit:{type:"integer",minimum:1,maximum:100},source:{type:"string"},decision:{type:"string",enum:["review","digest","ignore"]}},additionalProperties:false}},
+{name:"pulse_engine_decisions",description:"Review events that merit human inspection; no automatic actions.",requiredScope:"read",inputSchema:{type:"object",properties:{limit:{type:"integer",minimum:1,maximum:100}},additionalProperties:false}},
+{name:"pulse_engine_ingest_event",description:"Submit one authorized source event for durable deduplication and classification. Does not trigger messages or actions.",requiredScope:"submit",inputSchema:{type:"object",properties:{source:{type:"string",enum:[...SOURCES]},type:{type:"string",minLength:3,maxLength:90},sourceEventId:{type:"string",minLength:1,maxLength:160},ownerId:{type:"string",minLength:1,maxLength:120},title:{type:"string",maxLength:160},privacy:{type:"string",enum:["public","household","private","sensitive"]},importance:{type:"number",minimum:0,maximum:100},occurredAt:{type:"string",format:"date-time"}},required:["source","type","sourceEventId","ownerId"],additionalProperties:false}}
 ];
 async function register() {
   if(!sol.enabled) return;
@@ -193,10 +193,10 @@ export async function start(){
       if(body?.type!=="sol.plugin.mcp.invoke")return json(res,403,{error:"invalid_envelope"});
       const name=String(body.tool||"");const args=body.arguments||{};
       let output;
-      if(name==="pulse_status")output=status();
-      else if(name==="pulse_events")output=listEvents(args);
-      else if(name==="pulse_decisions")output=listEvents({...args,decision:"review"});
-      else if(name==="pulse_ingest_event"){
+      if(name==="pulse_engine_status")output=status();
+      else if(name==="pulse_engine_events")output=listEvents(args);
+      else if(name==="pulse_engine_decisions")output=listEvents({...args,decision:"review"});
+      else if(name==="pulse_engine_ingest_event"){
         if(!allowedOwner||args.ownerId!==allowedOwner)throw new Error("owner_not_authorized");
         output=await ingest(args);
       }
