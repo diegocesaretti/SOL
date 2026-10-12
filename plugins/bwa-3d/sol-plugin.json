@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "id": "bwa-3d",
   "name": "BWA 3D",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "SOL business plugin for BWA 3D with Mercado Libre DevSite MCP plus full seller API OAuth, auto-refresh, publications, prices, orders, shipments, questions, messages, claims and guarded generic API access.",
   "runtime": "node",
   "entry": "entry.mjs",
@@ -22,6 +22,7 @@
   "permissions": [
     "mcp.register",
     "network.internet",
+    "network.local",
     "filesystem.plugin-data"
   ],
   "settings": [

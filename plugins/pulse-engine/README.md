@@ -1,10 +1,10 @@
-# SOL Pulse Engine 0.5.0
+# SOL Pulse Engine 0.6.0
 
 Motor proactivo residente para SOL. Está preparado para funcionar como plugin SOL independiente, pero requiere instalación y autorización mediante el gestor oficial.
 
 ## Fuentes
 
-- **Mercado Libre**: BWA 3D 0.2.1 reutiliza su sesión de vendedor y publica pedidos nuevos y cambios relevantes. La primera lectura establece una línea base sin crear avisos retrospectivos.
+- **Mercado Libre**: BWA 3D 0.2.2 reutiliza su sesión de vendedor y publica pedidos nuevos y cambios relevantes. La primera lectura establece una línea base sin crear avisos retrospectivos.
 - **Finanzas**: Pulse consulta `finanzas_vencimientos_list` por la API MCP interna de SOL (`mcp.invoke.read`). Emite eventos para vencimientos activos a 2 días, 1 día, hoy y vencidos ayer. No publica importes ni datos de factura.
 - **Home Assistant**: consulta entidades seleccionadas desde el caché por `home_assistant_get_state` y compara cambios contra un checkpoint persistente. En el primer relevamiento no emite avisos viejos. La lista explícita admite solo climate, switch, light, sensor y binary_sensor; excluye person, device_tracker y cámaras.
 
@@ -48,3 +48,16 @@ El conjunto cubre ingestión HTTP autenticada, primera línea base, deduplicaci�
 - No existe una capa de permisos por destinatario distinta de la identidad propietaria.
 - Clima, calendario, noticias y correo aún requieren conectores específicos.
 - No debe sustituir sistemas de alarma certificados o avisos de emergencia existentes.
+
+## Entrega autorizada mediante Nexo 0.11.7
+
+Pulse 0.6.0 **no usa** el endpoint manual `/api/output/send` ni envía `confirmedByUser=true` en mensajes automáticos. Utiliza el endpoint dedicado `/api/automation/pulse/send`, que exige autorización persistente explícita en Nexo.
+
+Configurar, además de las opciones anteriores:
+- En Pulse: `PULSE_NEXO_AUTOMATION_TOKEN` (secreto de 32+ caracteres).
+- En Nexo: `NEXO_PULSE_ENABLED=true`, `NEXO_PULSE_TOKEN` (el mismo token), `NEXO_PULSE_TO` (el mismo número que `PULSE_WHATSAPP_TO`).
+- Nexo verifica también que ese número esté en su lista OUTPUT autorizada.
+
+El token de autorización para Nexo es distinto del token usado entre BWA 3D y Pulse para publicar eventos. Ambos se guardan como ajustes secretos en el gestor de SOL. Sin esta concesión explícita, las notificaciones permanecen inactivas.
+
+La protección en Nexo aplica clave de idempotencia por evento, evita envíos concurrentes duplicados y limita a 12 notificaciones diarias. Pulse mantiene un máximo propio de 8. Los informes de estado solamente indican aceptación por Nexo, nunca confirmación de lectura.

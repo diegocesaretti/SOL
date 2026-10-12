@@ -400,7 +400,7 @@ async function dispatchTool(tool, args) {
     return {
       ok: true,
       plugin: "bwa-3d",
-      version: "0.2.1",
+      version: "0.2.2",
       pulsePublisher: { ...pulsePublisher.status(),enabledByConfiguration:config.pulseEnabled },
       modules: {
         mercadolibre: {

@@ -26,18 +26,20 @@ export function digestText(events) {
   const lines=Object.entries(bySource).map(([s,n])=>"- "+s+": "+n+" novedad(es)");
   return "SOL Pulse · Resumen de actividad\n"+lines.join("\n")+"\nPodés consultarme los detalles cuando quieras.";
 }
-export async function sendWhatsApp({url,recipient,text,fetchImpl=fetch}){
-  if(!/^http:\/\/127\.0\.0\.1:(3210|[0-9]{4,5})\/api\/output\/send$/.test(url))throw new Error("invalid_nexo_local_url");
+export async function sendWhatsApp({url,recipient,text,token,eventId,fetchImpl=fetch}){
+  if(!/^http:\/\/127\.0\.0\.1:[0-9]{4,5}\/api\/automation\/pulse\/send$/.test(url))throw new Error("invalid_nexo_local_url");
   if(!/^[1-9]\d{9,14}$/.test(recipient))throw new Error("invalid_recipient");
-  if(!text||text.length>1800)throw new Error("invalid_notification_text");
+  if(typeof token!=="string"||token.length<32)throw new Error("pulse_automation_token_missing");
+  if(!/^[a-zA-Z0-9_.:-]{8,100}$/.test(eventId||""))throw new Error("pulse_event_id_invalid");
+  if(!text||text.length>1200)throw new Error("invalid_notification_text");
   const reply=await fetchImpl(url,{
     method:"POST",
-    headers:{"content-type":"application/json"},
-    body:JSON.stringify({to:recipient,text,reason:"sol-pulse:proactivity-opt-in",confirmedByUser:true}),
+    headers:{"content-type":"application/json",authorization:"Bearer "+token},
+    body:JSON.stringify({automation:"sol_pulse",eventId,to:recipient,text}),
     signal:AbortSignal.timeout(15000)
   });
   if(!reply.ok)throw new Error("nexo_http_"+reply.status);
   const data=await reply.json();
-  if(data?.sent!==true)throw new Error("nexo_send_unconfirmed");
-  return {accepted:true};
+  if(data?.sent!==true && data?.duplicate!==true)throw new Error("nexo_send_unconfirmed");
+  return {accepted:true,duplicate:data?.duplicate===true};
 }

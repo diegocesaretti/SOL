@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "id": "pulse-engine",
   "name": "SOL Pulse Engine",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Motor persistente de proactividad con eventos, decisiones, resúmenes y notificaciones controladas por WhatsApp opt-in.",
   "runtime": "node",
   "entry": "entry.mjs",
@@ -41,6 +41,7 @@
     { "key": "delivery_enabled", "label": "Permitir avisos por WhatsApp al propietario", "type": "boolean", "env": "PULSE_DELIVERY_ENABLED", "required": false, "default": false },
     { "key": "whatsapp_to", "label": "Número autorizado para avisos (con código de país)", "type": "text", "env": "PULSE_WHATSAPP_TO", "required": false },
     { "key": "nexo_port", "label": "Puerto local de Nexo", "type": "number", "env": "PULSE_NEXO_PORT", "required": false, "default": 3210, "min": 1024, "max": 65535 },
+    { "key": "nexo_automation_token", "label": "Token de autorización persistente de Nexo para Pulse", "type": "secret", "env": "PULSE_NEXO_AUTOMATION_TOKEN", "required": false },
     { "key": "finance_enabled", "label": "Monitorear vencimientos de Finanzas", "type": "boolean", "env": "PULSE_FINANCE_ENABLED", "required": false, "default": false },
     { "key": "home_enabled", "label": "Monitorear estados seleccionados de Home Assistant", "type": "boolean", "env": "PULSE_HOME_ENABLED", "required": false, "default": false },
     { "key": "home_entities", "label": "Entidades supervisadas (separadas por coma)", "type": "text", "env": "PULSE_HOME_ENTITIES", "required": false, "default": "" }

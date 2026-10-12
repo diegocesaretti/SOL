@@ -19,9 +19,10 @@ const allowedOwner = process.env.PULSE_ENGINE_INGEST_OWNER_ID?.trim() || "";
 const ingestEnabled = ingestToken.length >= 32 && allowedOwner.length > 0;
 const deliveryEnabled = process.env.PULSE_DELIVERY_ENABLED === "true";
 const recipient = String(process.env.PULSE_WHATSAPP_TO||"").trim();
-const nexoUrl = "http://127.0.0.1:"+(Number(process.env.PULSE_NEXO_PORT)||3210)+"/api/output/send";
+const nexoUrl = "http://127.0.0.1:"+(Number(process.env.PULSE_NEXO_PORT)||3210)+"/api/automation/pulse/send";
+const nexoToken=String(process.env.PULSE_NEXO_AUTOMATION_TOKEN||"").trim();
 const maxDaily = 8;
-const deliveryReady = deliveryEnabled && ingestEnabled && /^[1-9]\d{9,14}$/.test(recipient);
+const deliveryReady = deliveryEnabled && ingestEnabled && nexoToken.length>=32 && /^[1-9]\d{9,14}$/.test(recipient);
 let delivering = false;
 function authorized(req){
   if (!ingestEnabled) return false;
@@ -115,7 +116,7 @@ export async function runNotificationCycle({now=new Date(),send=sendWhatsApp}={}
     if(urgent){
       await mutate(async()=>{urgent.deliveryStatus="sending";urgent.deliveryAttemptAt=now.toISOString();await save();});
       try {
-        await send({url:nexoUrl,recipient,text:messageFor(urgent)});
+        await send({url:nexoUrl,recipient,text:messageFor(urgent),token:nexoToken,eventId:urgent.id});
         await mutate(async()=>{urgent.deliveryStatus="accepted";urgent.deliveredAt=new Date().toISOString();await save();});
         return {sent:"urgent",eventId:urgent.id};
       } catch(error) {
@@ -137,7 +138,7 @@ export async function runNotificationCycle({now=new Date(),send=sendWhatsApp}={}
       await save();
     });
     try{
-      await send({url:nexoUrl,recipient,text:digestText(candidates)});
+      await send({url:nexoUrl,recipient,text:digestText(candidates),token:nexoToken,eventId:key});
       await mutate(async()=>{store.digests[key].status="accepted";store.digests[key].deliveredAt=new Date().toISOString();await save();});
       return {sent:"digest",count:candidates.length};
     }catch(error){
@@ -149,7 +150,7 @@ export async function runNotificationCycle({now=new Date(),send=sendWhatsApp}={}
 function status() {
   const counts={review:0,digest:0,ignore:0};
   for(const e of store.events) counts[e.decision]=(counts[e.decision]||0)+1;
-  return {ok:true,plugin:pluginId,version:"0.5.0",events:store.events.length,counts,updatedAt:store.updatedAt,solEnabled:sol.enabled,toolsRegistered,lastRegistrationError,mode:deliveryReady?"notification":"observe_only",notificationsEnabled:deliveryReady,actionsEnabled:false,ingestEnabled,delivery:{ready:deliveryReady,maxDaily,recipientConfigured:Boolean(recipient),lastDigestKeys:Object.keys(store.digests||{}).slice(-4)},financeSource:financeSource.status(),homeSource:homeSource.status()};
+  return {ok:true,plugin:pluginId,version:"0.6.0",events:store.events.length,counts,updatedAt:store.updatedAt,solEnabled:sol.enabled,toolsRegistered,lastRegistrationError,mode:deliveryReady?"notification":"observe_only",notificationsEnabled:deliveryReady,actionsEnabled:false,ingestEnabled,delivery:{ready:deliveryReady,maxDaily,recipientConfigured:Boolean(recipient),lastDigestKeys:Object.keys(store.digests||{}).slice(-4)},financeSource:financeSource.status(),homeSource:homeSource.status()};
 }
 const tools=[
 {name:"pulse_status",description:"Return Pulse Engine health and processing counters. Read-only.",requiredScope:"read",inputSchema:{type:"object",properties:{},additionalProperties:false}},
