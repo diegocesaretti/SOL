@@ -10,6 +10,7 @@ export function urgentAllowed(event,now=new Date()){
   return event?.type==="home.alarm.critical" || !quietHour(now);
 }
 export function messageFor(event) {
+  if(event?.source==="panorama"&&event?.type==="panorama.investigation"&&typeof event.message==="string")return event.message.slice(0,1100);
   const labels={
     "order.cancelled":"Se canceló una venta de Mercado Libre.",
     "printer.failure":"Hay una falla en una impresora.",

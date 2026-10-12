@@ -9,6 +9,7 @@ import { registerPluginMcpTools } from "./mcp-registry.js";
 import { searchPluginRuntimeWhatsapp } from "./runtime-core-read.js";
 import { invokePluginRuntimeTool, listPluginRuntimeTools, type RuntimeMcpScope } from "./runtime-mcp-tools.js";
 import { pluginManager } from "./runtime.js";
+import { investigatePulsePanorama, latestPulsePanorama } from "../panorama/pulse-runtime.js";
 import type { SolPluginRuntimePrincipal } from "./types.js";
 
 function bearerToken(request: IncomingMessage): string | undefined {
@@ -74,6 +75,8 @@ export async function handlePluginRuntimeApi(path: string, request: IncomingMess
     && path !== "/v1/plugin-api/mcp/tools/invoke-read"
     && path !== "/v1/plugin-api/mcp/tools/invoke-action"
     && path !== "/v1/plugin-api/mcp/core/search-whatsapp"
+    && path !== "/v1/plugin-api/panorama/latest"
+    && path !== "/v1/plugin-api/panorama/investigate"
     && !peopleMatch
     && !connectionPath
     && !credentialPath
@@ -81,6 +84,21 @@ export async function handlePluginRuntimeApi(path: string, request: IncomingMess
 
   const principal = await authenticate(request, response);
   if (!principal) return true;
+
+  if (path === "/v1/plugin-api/panorama/latest" && request.method === "GET") {
+    if (!requirePermission(response, principal, "mcp.invoke.read")) return true;
+    try { sendJson(response, 200, await latestPulsePanorama(principal)); }
+    catch (error) { runtimeError(response, error); }
+    return true;
+  }
+  if (path === "/v1/plugin-api/panorama/investigate" && request.method === "POST") {
+    if (!requirePermission(response, principal, "mcp.invoke.read")) return true;
+    const body = await jsonBody<{ editionId?: unknown }>(request, response);
+    if (!body) return true;
+    try { sendJson(response, 200, await investigatePulsePanorama(principal, body)); }
+    catch (error) { runtimeError(response, error); }
+    return true;
+  }
 
   if (connectionPath) return await handlePluginConnectionsApi(path, request, response, principal);
   if (credentialPath) return await handlePluginCredentialRuntime(path, request, response, principal);

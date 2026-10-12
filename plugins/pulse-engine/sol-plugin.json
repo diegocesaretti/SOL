@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "id": "pulse-engine",
   "name": "SOL Pulse Engine",
-  "version": "0.6.0",
-  "description": "Motor persistente de proactividad con eventos, decisiones, resúmenes y notificaciones controladas por WhatsApp opt-in.",
+  "version": "0.7.0",
+  "description": "Pulse contextual: investiga novedades de Panorama con Codex y herramientas MCP de solo lectura; notificaciones opt-in y canal crítico separado.",
   "runtime": "node",
   "entry": "entry.mjs",
   "args": [],
@@ -36,14 +36,93 @@
       "min": 1024,
       "max": 65535
     },
-    { "key": "ingest_token", "label": "Token local de ingesta", "type": "secret", "env": "PULSE_ENGINE_INGEST_TOKEN", "required": false },
-    { "key": "ingest_owner_id", "label": "Integrante permitido", "type": "text", "env": "PULSE_ENGINE_INGEST_OWNER_ID", "required": false },
-    { "key": "delivery_enabled", "label": "Permitir avisos por WhatsApp al propietario", "type": "boolean", "env": "PULSE_DELIVERY_ENABLED", "required": false, "default": false },
-    { "key": "whatsapp_to", "label": "Número autorizado para avisos (con código de país)", "type": "text", "env": "PULSE_WHATSAPP_TO", "required": false },
-    { "key": "nexo_port", "label": "Puerto local de Nexo", "type": "number", "env": "PULSE_NEXO_PORT", "required": false, "default": 3210, "min": 1024, "max": 65535 },
-    { "key": "nexo_automation_token", "label": "Token de autorización persistente de Nexo para Pulse", "type": "secret", "env": "PULSE_NEXO_AUTOMATION_TOKEN", "required": false },
-    { "key": "finance_enabled", "label": "Monitorear vencimientos de Finanzas", "type": "boolean", "env": "PULSE_FINANCE_ENABLED", "required": false, "default": false },
-    { "key": "home_enabled", "label": "Monitorear estados seleccionados de Home Assistant", "type": "boolean", "env": "PULSE_HOME_ENABLED", "required": false, "default": false },
-    { "key": "home_entities", "label": "Entidades supervisadas (separadas por coma)", "type": "text", "env": "PULSE_HOME_ENTITIES", "required": false, "default": "" }
+    {
+      "key": "ingest_token",
+      "label": "Token local de ingesta",
+      "type": "secret",
+      "env": "PULSE_ENGINE_INGEST_TOKEN",
+      "required": false
+    },
+    {
+      "key": "ingest_owner_id",
+      "label": "Integrante permitido",
+      "type": "text",
+      "env": "PULSE_ENGINE_INGEST_OWNER_ID",
+      "required": false
+    },
+    {
+      "key": "delivery_enabled",
+      "label": "Permitir avisos por WhatsApp al propietario",
+      "type": "boolean",
+      "env": "PULSE_DELIVERY_ENABLED",
+      "required": false,
+      "default": false
+    },
+    {
+      "key": "whatsapp_to",
+      "label": "Número autorizado para avisos (con código de país)",
+      "type": "text",
+      "env": "PULSE_WHATSAPP_TO",
+      "required": false
+    },
+    {
+      "key": "nexo_port",
+      "label": "Puerto local de Nexo",
+      "type": "number",
+      "env": "PULSE_NEXO_PORT",
+      "required": false,
+      "default": 3210,
+      "min": 1024,
+      "max": 65535
+    },
+    {
+      "key": "nexo_automation_token",
+      "label": "Token de autorización persistente de Nexo para Pulse",
+      "type": "secret",
+      "env": "PULSE_NEXO_AUTOMATION_TOKEN",
+      "required": false
+    },
+    {
+      "key": "panorama_enabled",
+      "label": "Examinar las ediciones de Panorama",
+      "type": "boolean",
+      "env": "PULSE_PANORAMA_ENABLED",
+      "required": false,
+      "default": false
+    },
+    {
+      "key": "panorama_poll_ms",
+      "label": "Intervalo de consulta Panorama (ms)",
+      "type": "number",
+      "env": "PULSE_PANORAMA_POLL_MS",
+      "required": false,
+      "default": 180000,
+      "min": 120000,
+      "max": 3600000
+    },
+    {
+      "key": "finance_enabled",
+      "label": "Monitorear vencimientos de Finanzas",
+      "type": "boolean",
+      "env": "PULSE_FINANCE_ENABLED",
+      "required": false,
+      "default": false
+    },
+    {
+      "key": "home_enabled",
+      "label": "Monitorear estados seleccionados de Home Assistant",
+      "type": "boolean",
+      "env": "PULSE_HOME_ENABLED",
+      "required": false,
+      "default": false
+    },
+    {
+      "key": "home_entities",
+      "label": "Entidades supervisadas (separadas por coma)",
+      "type": "text",
+      "env": "PULSE_HOME_ENTITIES",
+      "required": false,
+      "default": ""
+    }
   ]
 }

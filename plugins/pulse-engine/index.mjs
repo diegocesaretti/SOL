@@ -6,6 +6,7 @@ import { SolPluginClientCore } from "./lib/sol-client-core.mjs";
 import { localClock, quietHour, urgentAllowed, messageFor, digestText, sendWhatsApp } from "./notifier.mjs";
 import { createFinanceSource } from "./finance-source.mjs";
 import { createHomeSource } from "./home-source.mjs";
+import { createPanoramaSource } from "./panorama-source.mjs";
 
 const pluginId = process.env.SOL_PLUGIN_ID?.trim() || "pulse-engine";
 const dataDir = process.env.SOL_PLUGIN_DATA_DIR?.trim() || join(process.env.SOL_PLUGIN_ROOT?.trim() || process.cwd(), ".data");
@@ -32,13 +33,14 @@ function authorized(req){
   return a.length===b.length && timingSafeEqual(a,b);
 }
 const MAX_EVENTS = 5000;
-const SOURCES = new Set(["home_assistant","location","mercadolibre","calendar","weather","news","gmail","whatsapp","bambuddy","educacion","finanzas","other"]);
+const SOURCES = new Set(["home_assistant","location","mercadolibre","calendar","weather","news","gmail","whatsapp","bambuddy","educacion","finanzas","panorama","other"]);
 let store = {version:1, events:[], updatedAt:null};
 let writeChain = Promise.resolve();
 let toolsRegistered = false;
 let lastRegistrationError = null;
 const financeSource=createFinanceSource({sol,ownerId:allowedOwner,enabled:process.env.PULSE_FINANCE_ENABLED==="true",ingest});
 const homeSource=createHomeSource({sol,ownerId:allowedOwner,enabled:process.env.PULSE_HOME_ENABLED==="true",entityIds:process.env.PULSE_HOME_ENTITIES||"",dataDir,ingest});
+const panoramaSource=createPanoramaSource({sol,ownerId:allowedOwner,enabled:process.env.PULSE_PANORAMA_ENABLED==="true",intervalMs:Number(process.env.PULSE_PANORAMA_POLL_MS)||180000,dataDir,ingest});
 
 export function classify(e) {
   const critical = /security|smoke|fire|flood|emergency|critical/i.test(e.type);
@@ -61,7 +63,8 @@ export function normalize(input) {
   const importance = input.importance===undefined ? undefined : Number(input.importance);
   if (importance!==undefined && (!Number.isFinite(importance) || importance<0 || importance>100)) throw new Error("invalid_importance");
   const idempotencyKey=createHash("sha256").update(JSON.stringify([source, ownerId, sourceEventId])).digest("hex");
-  return {id:randomUUID(),source,type,sourceEventId,ownerId,title,privacy,importance,occurredAt:occurredAt.toISOString(),receivedAt:new Date().toISOString(),idempotencyKey};
+  const message=source==="panorama" && typeof input.message==="string" ? input.message.replace(/[\u0000-\u001f]/g," ").slice(0,1100) : undefined;
+  return {id:randomUUID(),source,type,sourceEventId,ownerId,title,privacy,importance,message,occurredAt:occurredAt.toISOString(),receivedAt:new Date().toISOString(),idempotencyKey};
 }
 export async function load() {
   try {
@@ -150,7 +153,7 @@ export async function runNotificationCycle({now=new Date(),send=sendWhatsApp}={}
 function status() {
   const counts={review:0,digest:0,ignore:0};
   for(const e of store.events) counts[e.decision]=(counts[e.decision]||0)+1;
-  return {ok:true,plugin:pluginId,version:"0.6.0",events:store.events.length,counts,updatedAt:store.updatedAt,solEnabled:sol.enabled,toolsRegistered,lastRegistrationError,mode:deliveryReady?"notification":"observe_only",notificationsEnabled:deliveryReady,actionsEnabled:false,ingestEnabled,delivery:{ready:deliveryReady,maxDaily,recipientConfigured:Boolean(recipient),lastDigestKeys:Object.keys(store.digests||{}).slice(-4)},financeSource:financeSource.status(),homeSource:homeSource.status()};
+  return {ok:true,plugin:pluginId,version:"0.7.0",events:store.events.length,counts,updatedAt:store.updatedAt,solEnabled:sol.enabled,toolsRegistered,lastRegistrationError,mode:deliveryReady?"notification":"observe_only",notificationsEnabled:deliveryReady,actionsEnabled:false,ingestEnabled,delivery:{ready:deliveryReady,maxDaily,recipientConfigured:Boolean(recipient),lastDigestKeys:Object.keys(store.digests||{}).slice(-4)},financeSource:financeSource.status(),homeSource:homeSource.status(),panoramaSource:panoramaSource.status()};
 }
 const tools=[
 {name:"pulse_status",description:"Return Pulse Engine health and processing counters. Read-only.",requiredScope:"read",inputSchema:{type:"object",properties:{},additionalProperties:false}},
@@ -206,8 +209,9 @@ export async function start(){
   await register();
   financeSource.start();
   homeSource.start();
+  panoramaSource.start();
   const retry=setInterval(()=>{if(!toolsRegistered)void register();},15000);retry.unref?.();
   const notifierTimer=setInterval(()=>void runNotificationCycle().catch(error=>console.warn("Pulse notifier: "+String(error?.message||error))),30000);notifierTimer.unref?.();
-  for(const sig of ["SIGINT","SIGTERM"])process.once(sig,async()=>{clearInterval(retry);clearInterval(notifierTimer);financeSource.stop();homeSource.stop();if(sol.enabled)await sol.registerMcpTools(callbackUrl,[]).catch(()=>{});server.close();process.exit(0);});
+  for(const sig of ["SIGINT","SIGTERM"])process.once(sig,async()=>{clearInterval(retry);clearInterval(notifierTimer);financeSource.stop();homeSource.stop();panoramaSource.stop();if(sol.enabled)await sol.registerMcpTools(callbackUrl,[]).catch(()=>{});server.close();process.exit(0);});
 }
 if(process.argv[1]&&new URL(import.meta.url).pathname.replace(/^\//,"").toLowerCase().endsWith(process.argv[1].replaceAll("\\","/").toLowerCase()))await start();

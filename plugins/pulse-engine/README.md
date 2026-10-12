@@ -1,4 +1,4 @@
-# SOL Pulse Engine 0.6.0
+# SOL Pulse Engine 0.7.0 · Panorama-first
 
 Motor proactivo residente para SOL. Está preparado para funcionar como plugin SOL independiente, pero requiere instalación y autorización mediante el gestor oficial.
 
@@ -61,3 +61,13 @@ Configurar, además de las opciones anteriores:
 El token de autorización para Nexo es distinto del token usado entre BWA 3D y Pulse para publicar eventos. Ambos se guardan como ajustes secretos en el gestor de SOL. Sin esta concesión explícita, las notificaciones permanecen inactivas.
 
 La protección en Nexo aplica clave de idempotencia por evento, evita envíos concurrentes duplicados y limita a 12 notificaciones diarias. Pulse mantiene un máximo propio de 8. Los informes de estado solamente indican aceptación por Nexo, nunca confirmación de lectura.
+
+## Integración Panorama-first (v0.7.0)
+
+- SOL 0.15.27 conserva ediciones diarias por miembro de Panorama. El runtime con token propio de Pulse consulta exclusivamente ediciones del integrante autorizado mediante `GET /v1/plugin-api/panorama/latest`.
+- La primera consulta crea un checkpoint sin volver a avisar por hechos antiguos. Nuevas ediciones con novedades se investigan hasta 2 por ciclo mediante `POST /v1/plugin-api/panorama/investigate`.
+- Codex elige como máximo dos herramientas MCP de **lectura** autorizadas para ese miembro; luego sintetiza evidencia verificada, incertidumbres y próximos pasos. No tiene acceso a herramientas `actions` ni a otro integrante.
+- Pulse persiste las oportunidades y reutiliza el notificador de Nexo autorizado, con deduplicación, horario silencioso y cuota diaria. Aún no existe despacho diferenciado por integrante: solo se permite el número previamente autorizado del propietario.
+- Activación explícita: `PULSE_PANORAMA_ENABLED=true` y permiso `mcp.invoke.read`; por defecto desactivado. Se conserva el canal independiente de Home Assistant para alarmas críticas.
+- No se ejecutan cambios en calendario, pagos, equipos ni publicaciones. Los próximos pasos son propuestas que requieren consentimiento.
+- Hasta instalar esta versión de SOL y Pulse, las nuevas rutas y el polling de Panorama no están activos en producción.
