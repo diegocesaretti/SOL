@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 2,
+  "id": "pulse-engine",
+  "name": "SOL Pulse Engine",
+  "version": "0.1.0",
+  "description": "Motor persistente de eventos proactivos, evaluacion y trazabilidad. No envia notificaciones automaticas.",
+  "runtime": "node",
+  "entry": "entry.mjs",
+  "args": [],
+  "autoStart": false,
+  "restartPolicy": "on-failure",
+  "capabilities": [
+    "mcp.pulse",
+    "proactivity.events",
+    "proactivity.decisions"
+  ],
+  "requires": [
+    "plugin-api.v1",
+    "mcp.register",
+    "filesystem.plugin-data"
+  ],
+  "permissions": [
+    "mcp.register",
+    "filesystem.plugin-data"
+  ],
+  "settings": [
+    {
+      "key": "api_port",
+      "label": "Puerto API local",
+      "type": "number",
+      "env": "PULSE_ENGINE_API_PORT",
+      "required": false,
+      "default": 8794,
+      "min": 1024,
+      "max": 65535
+    }
+  ]
+}
