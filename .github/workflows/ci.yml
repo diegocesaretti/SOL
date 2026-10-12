@@ -44,15 +44,15 @@ jobs:
 
       - name: Package Pulse and BWA3D updates
         run: |
-          node scripts/pack-sol-plugin.mjs plugins/pulse-engine dist/PulseEngine-0.7.0.solplugin
+          node scripts/pack-sol-plugin.mjs plugins/pulse-engine dist/PulseEngine-0.7.1.solplugin
           node scripts/pack-sol-plugin.mjs plugins/bwa-3d dist/BWA3D-0.2.2-Pulse.solplugin
 
       - name: Upload Pulse update packages
         uses: actions/upload-artifact@v4
         with:
-          name: pulse-panorama-v07-packages
+          name: pulse-panorama-v071-packages
           path: |
-            dist/PulseEngine-0.7.0.solplugin
+            dist/PulseEngine-0.7.1.solplugin
             dist/BWA3D-0.2.2-Pulse.solplugin
           if-no-files-found: error
       - name: Package Hello SOL sample plugin
