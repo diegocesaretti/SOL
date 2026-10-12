@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "id": "pulse-engine",
   "name": "SOL Pulse Engine",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Pulse contextual: investiga novedades de Panorama con Codex y herramientas MCP de solo lectura; notificaciones opt-in y canal crítico separado.",
   "runtime": "node",
   "entry": "entry.mjs",
