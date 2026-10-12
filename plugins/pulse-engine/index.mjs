@@ -1,4 +1,4 @@
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { join } from "node:path";
@@ -11,6 +11,16 @@ const port = Number(process.env.PULSE_ENGINE_API_PORT || 8794);
 const secretPath = "/mcp/" + randomBytes(24).toString("base64url");
 const callbackUrl = "http://127.0.0.1:" + port + secretPath;
 const sol = new SolPluginClientCore();
+const ingestToken = process.env.PULSE_ENGINE_INGEST_TOKEN?.trim() || "";
+const allowedOwner = process.env.PULSE_ENGINE_INGEST_OWNER_ID?.trim() || "";
+const ingestEnabled = ingestToken.length >= 32 && allowedOwner.length > 0;
+function authorized(req){
+  if (!ingestEnabled) return false;
+  const supplied = String(req.headers.authorization || "");
+  const expected = "Bearer "+ingestToken;
+  const a=Buffer.from(supplied),b=Buffer.from(expected);
+  return a.length===b.length && timingSafeEqual(a,b);
+}
 const MAX_EVENTS = 5000;
 const SOURCES = new Set(["home_assistant","location","mercadolibre","calendar","weather","news","gmail","whatsapp","bambuddy","educacion","finanzas","other"]);
 let store = {version:1, events:[], updatedAt:null};
@@ -56,7 +66,7 @@ async function save() {
 }
 function publicEvent(event) {
   const {id,source,type,privacy,importance,decision,reason,occurredAt,receivedAt,status} = event;
-  return {id,source,type,privacy,importance,decision,reason,occurredAt,receivedAt,status, title:privacy==="public"||privacy==="household"?event.title:"[restringido]"};
+  return {id,source,type,privacy,importance,decision,reason,occurredAt,receivedAt,status, title:privacy==="public"?event.title:"[restringido]"};
 }
 function mutate(task) {
   const job=writeChain.then(task);
@@ -85,7 +95,7 @@ export function listEvents(args={}) {
 function status() {
   const counts={review:0,digest:0,ignore:0};
   for(const e of store.events) counts[e.decision]=(counts[e.decision]||0)+1;
-  return {ok:true,plugin:pluginId,version:"0.1.0",events:store.events.length,counts,updatedAt:store.updatedAt,solEnabled:sol.enabled,toolsRegistered,lastRegistrationError,mode:"observe_only",notificationsEnabled:false,actionsEnabled:false};
+  return {ok:true,plugin:pluginId,version:"0.2.0",events:store.events.length,counts,updatedAt:store.updatedAt,solEnabled:sol.enabled,toolsRegistered,lastRegistrationError,mode:"observe_only",notificationsEnabled:false,actionsEnabled:false,ingestEnabled};
 }
 const tools=[
 {name:"pulse_status",description:"Return Pulse Engine health and processing counters. Read-only.",requiredScope:"read",inputSchema:{type:"object",properties:{},additionalProperties:false}},
@@ -109,6 +119,14 @@ export async function start(){
   server=createServer(async(req,res)=>{
     const path=new URL(req.url||"/","http://127.0.0.1").pathname;
     if(req.method==="GET"&&path==="/health")return json(res,200,status());
+    if(req.method==="POST"&&path==="/v1/ingest"){
+      if(!authorized(req))return json(res,401,{error:"unauthorized"});
+      try{
+        const body=await parse(req);
+        if(body?.source!=="mercadolibre"||body?.ownerId!==allowedOwner)return json(res,403,{error:"source_or_owner_not_authorized"});
+        return json(res,200,await ingest(body));
+      }catch(error){return json(res,400,{error:String(error?.message||error)});}
+    }
     if(req.method!=="POST"||path!==secretPath)return json(res,404,{error:"not_found"});
     try{
       const body=await parse(req);
@@ -120,7 +138,10 @@ export async function start(){
       if(name==="pulse_status")output=status();
       else if(name==="pulse_events")output=listEvents(args);
       else if(name==="pulse_decisions")output=listEvents({...args,decision:"review"});
-      else if(name==="pulse_ingest_event")output=await ingest(args);
+      else if(name==="pulse_ingest_event"){
+        if(!allowedOwner||args.ownerId!==allowedOwner)throw new Error("owner_not_authorized");
+        output=await ingest(args);
+      }
       else return json(res,404,{error:"tool_not_found"});
       return json(res,200,output);
     }catch(error){return json(res,400,{error:String(error?.message||error)});}

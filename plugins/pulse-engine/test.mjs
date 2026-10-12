@@ -1,6 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {normalize,classify,ingest,listEvents} from "./index.mjs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+const testDataDir=await mkdtemp(join(tmpdir(),"pulse-unit-"));
+process.env.SOL_PLUGIN_DATA_DIR=testDataDir;
+const {normalize,classify,ingest,listEvents}=await import("./index.mjs");
+test.after(async()=>await rm(testDataDir,{recursive:true,force:true}));
 test("validates event identity",()=>{
  assert.throws(()=>normalize({source:"other",type:"sale.created",sourceEventId:"1"}),/invalid_event_fields/);
  assert.equal(normalize({source:"mercadolibre",type:"sale.created",sourceEventId:"1",ownerId:"test"}).source,"mercadolibre");
