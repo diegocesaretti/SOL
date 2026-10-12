@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { SolPluginClientCore } from "./lib/sol-client-core.mjs";
 import { createMercadoLibreApi } from "./lib/mercadolibre-api.mjs";
 import { createMercadoLibreTools } from "./lib/mercadolibre-tools.mjs";
+import { createMercadoLibrePulsePoller } from "./lib/pulse-mercadolibre.mjs";
 
 function numberEnv(name, fallback, min, max) {
   const value = Number(process.env[name] ?? fallback);
@@ -40,7 +41,8 @@ const config = {
   clientSecret: process.env.BWA3D_ML_CLIENT_SECRET?.trim() || "",
   redirectUri: process.env.BWA3D_ML_REDIRECT_URI?.trim() || "",
   allowWrite: boolEnv("BWA3D_ML_ALLOW_WRITE", false),
-  pkce: boolEnv("BWA3D_ML_PKCE", false)
+  pkce: boolEnv("BWA3D_ML_PKCE", false),
+  pulseEnabled: boolEnv("BWA3D_PULSE_ENABLED", false)
 };
 
 const pluginDataDir = process.env.SOL_PLUGIN_DATA_DIR?.trim()
@@ -57,6 +59,14 @@ const mercadoLibreApi = createMercadoLibreApi({
   pkce: config.pkce
 });
 const mercadoLibreToolset = createMercadoLibreTools(mercadoLibreApi);
+const pulsePublisher = createMercadoLibrePulsePoller({
+  listOrders: (args) => mercadoLibreApi.listOrders(args),
+  dataDir: pluginDataDir,
+  endpoint: process.env.BWA3D_PULSE_ENDPOINT?.trim() || "http://127.0.0.1:8794/v1/ingest",
+  token: process.env.BWA3D_PULSE_TOKEN?.trim() || "",
+  ownerId: process.env.BWA3D_PULSE_OWNER_ID?.trim() || "",
+  intervalMs: numberEnv("BWA3D_PULSE_POLL_MS",180000,30000,3600000)
+});
 
 const sol = new SolPluginClientCore();
 const pluginId = process.env.SOL_PLUGIN_ID?.trim() || "bwa-3d";
@@ -390,7 +400,8 @@ async function dispatchTool(tool, args) {
     return {
       ok: true,
       plugin: "bwa-3d",
-      version: "0.2.0",
+      version: "0.2.2",
+      pulsePublisher: { ...pulsePublisher.status(),enabledByConfiguration:config.pulseEnabled },
       modules: {
         mercadolibre: {
           mcp: await mcpStatus({ probe: Boolean(args.probe) }),
@@ -532,6 +543,7 @@ server.listen(config.apiPort, "127.0.0.1", async () => {
     }
   }));
   await registerTools();
+  if (config.pulseEnabled) pulsePublisher.start();
 });
 
 const retry = setInterval(() => {
@@ -544,6 +556,7 @@ async function shutdown(signal) {
   if (stopping) return;
   stopping = true;
   clearInterval(retry);
+  pulsePublisher.stop();
   bridge.stop();
   if (loginProcess && loginProcess.exitCode === null) {
     try { loginProcess.kill(); } catch {}

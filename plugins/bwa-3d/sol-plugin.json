@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "id": "bwa-3d",
   "name": "BWA 3D",
-  "version": "0.2.0",
+  "version": "0.2.2",
   "description": "SOL business plugin for BWA 3D with Mercado Libre DevSite MCP plus full seller API OAuth, auto-refresh, publications, prices, orders, shipments, questions, messages, claims and guarded generic API access.",
   "runtime": "node",
   "entry": "entry.mjs",
@@ -22,6 +22,7 @@
   "permissions": [
     "mcp.register",
     "network.internet",
+    "network.local",
     "filesystem.plugin-data"
   ],
   "settings": [
@@ -95,6 +96,11 @@
       "env": "BWA3D_ML_ALLOW_WRITE",
       "required": false,
       "default": false
-    }
+    },
+    { "key": "pulse_enabled", "label": "Publicar eventos en SOL Pulse", "type": "boolean", "env": "BWA3D_PULSE_ENABLED", "required": false, "default": false },
+    { "key": "pulse_endpoint", "label": "URL local Pulse", "type": "text", "env": "BWA3D_PULSE_ENDPOINT", "required": false, "default": "http://127.0.0.1:8794/v1/ingest" },
+    { "key": "pulse_token", "label": "Token compartido de ingesta", "type": "secret", "env": "BWA3D_PULSE_TOKEN", "required": false },
+    { "key": "pulse_owner_id", "label": "Integrante propietario de eventos", "type": "text", "env": "BWA3D_PULSE_OWNER_ID", "required": false },
+    { "key": "pulse_poll_ms", "label": "Intervalo de monitoreo (ms)", "type": "number", "env": "BWA3D_PULSE_POLL_MS", "required": false, "default": 180000, "min": 30000, "max": 3600000 }
   ]
 }
