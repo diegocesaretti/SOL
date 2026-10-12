@@ -1,45 +1,32 @@
-# SOL Pulse Engine (MVP 0.2)
+# SOL Pulse Engine 0.3.0
 
-Servicio Node de eventos proactivos con almacenamiento durable, deduplicación, prioridad y decisiones. No ejecuta acciones y **no envía WhatsApp**.
+Motor proactivo residente, con events, deduplicación persistente, clasificación heurística y notificación WhatsApp opcional.
 
-## Fuentes
+## Arquitectura
 
-- Mercado Libre: eventos enviados por BWA 3D mediante HTTP loopback autenticado (`127.0.0.1`).
-- El diseño admite otras fuentes, pero todavía no tienen productores residentes conectados.
+- BWA 3D 0.2.1 consulta la API ya autenticada de Mercado Libre cada 3 minutos.
+- La primera consulta establece una línea base: no genera alertas por pedidos pasados.
+- Los pedidos nuevos y cambios de estado generan eventos con claves idempotentes vía HTTP local autenticado.
+- Pulse archiva estado (JSON con escritura atómica) y expone `pulse_status`, `pulse_events`, `pulse_decisions` y `pulse_ingest_event`.
+- Eventos de prioridad >=80 generan un aviso individual. Eventos de prioridad media se agregan en resúmenes (08, 12 y 18, hora de Córdoba).
+- Máximo 8 avisos/día, silencio entre 22 y 07, sólo al WhatsApp explícitamente configurado para el propietario.
+- Los mensajes no incluyen datos privados ni información de compradores.
+- Se marca estado `sending` antes del HTTP a Nexo, y `accepted` después de que Nexo confirma envío. Ante error se marca `uncertain` y se evita el reenvío automático que podría duplicar mensajes.
+- `accepted` no representa prueba de lectura o entrega en el teléfono: sólo aceptación por Nexo.
 
-## Configuración
+## Ajustes
 
-- Plugin Pulse: `PULSE_ENGINE_API_PORT=8794`.
-- En ambos plugins, configurar **el mismo token aleatorio de 32+ caracteres**, como `PULSE_ENGINE_INGEST_TOKEN` en Pulse y `BWA3D_PULSE_TOKEN` en BWA.
-- En ambos plugins, configurar **el mismo ownerId autorizado**: `PULSE_ENGINE_INGEST_OWNER_ID` en Pulse y `BWA3D_PULSE_OWNER_ID` en BWA.
-- BWA debe tener `BWA3D_PULSE_ENABLED=true`. La opción está desactivada de forma predeterminada.
-- BWA publica en `BWA3D_PULSE_ENDPOINT=http://127.0.0.1:8794/v1/ingest`, intervalo `BWA3D_PULSE_POLL_MS=180000`.
-- No configurar secrets en el código ni en Git; usar los ajustes secretos del gestor de plugins.
+Pulse: `PULSE_ENGINE_API_PORT` (8794), `PULSE_ENGINE_INGEST_TOKEN` (secreto), `PULSE_ENGINE_INGEST_OWNER_ID`, `PULSE_DELIVERY_ENABLED`, `PULSE_WHATSAPP_TO`, `PULSE_NEXO_PORT` (3210).
+BWA: `BWA3D_PULSE_ENABLED`, `BWA3D_PULSE_ENDPOINT`, `BWA3D_PULSE_TOKEN`, `BWA3D_PULSE_OWNER_ID`, `BWA3D_PULSE_POLL_MS`.
 
-Pulse tiene `autoStart=false` hasta que se valide su configuración. El endpoint solo escucha en loopback y rechaza eventos sin token, fuente distinta a Mercado Libre u ownerId no autorizado.
+Ambos plugins deben compartir token de 32+ caracteres y ownerId autorizado; ninguna credencial OAuth de Mercado Libre se copia a Pulse. Todos los datos quedan restringidos al host y al propietario configurado.
 
-## API y herramientas
+## Estado funcional y límites
 
-- `GET /health`: salud y conteos.
-- `POST /v1/ingest`: ingesta local autenticada para BWA; propietario y fuente restringidos.
-- MCP: `pulse_status`, `pulse_events`, `pulse_decisions`, `pulse_ingest_event`.
-- Las consultas devuelven solo metadatos con títulos privados redactados.
+- Activación independiente y con permisos. No controla impresoras, precios, publicaciones ni dispositivos.
+- Prioridades heurísticas: todavía no razona con un LLM ni correlaciona fuentes externas.
+- La detección de cambios se limita a los 100 pedidos más recientes en cada ciclo. Los pedidos antiguos fuera de esa ventana y picos masivos requieren reconciliación adicional o webhook oficial.
+- Si Nexo acepta un mensaje pero la conexión se corta antes de responder, el evento queda `uncertain` para revisión y no se reenvía a ciegas.
+- Home Assistant, calendario, clima, correos, noticias, educación y finanzas están contemplados como fuentes futuras, pero aún no conectados como productores residentes.
 
-## Semántica Mercado Libre
-
-La primera consulta de pedidos crea una línea base sin generar eventos de ventas anteriores. Después, cada alta de pedido y cambio de estado produce un evento, con prioridad mayor para cancelaciones. BWA envía primero y registra el checkpoint después: al fallar Pulse, reintenta en la siguiente pasada. Pulse usa clave de idempotencia para no duplicar.
-
-Límite actual: se leen hasta 100 pedidos por iteración y los cambios de pedidos más antiguos pueden no detectarse; la futura versión debería utilizar notificaciones oficiales y reconciliación por páginas. No se almacenan datos del comprador. El motor es heurístico y todavía no razona con IA.
-
-## Pruebas
-
-`node --test plugins/pulse-engine/*.test.mjs plugins/bwa-3d/pulse-publisher.test.mjs`
-
-La prueba de integración inicia Pulse en un puerto temporal, intenta accesos no autorizados, simula pedidos y valida persistencia y deduplicación con envío real **deshabilitado**.
-
-## Próximos pasos
-
-1. Instalar/activar por el gestor SOL, aplicar token y ownerId mediante configuraciones seguras.
-2. Verificar ingestion real por un ciclo; vigilar la salud de ambos plugins.
-3. Desarrollar entregas confiables con recibos de WhatsApp, preferencias y consentimiento por miembro.
-4. Complementar con Home Assistant, educación, finanzas, calendario, correo, clima y noticias.
+Pruebas: `node --test plugins/pulse-engine/*.test.mjs plugins/bwa-3d/pulse-publisher.test.mjs`.

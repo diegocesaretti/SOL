@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "id": "pulse-engine",
   "name": "SOL Pulse Engine",
-  "version": "0.2.0",
-  "description": "Motor persistente de eventos proactivos, evaluacion y trazabilidad. No envia notificaciones automaticas.",
+  "version": "0.3.0",
+  "description": "Motor persistente de proactividad con eventos, decisiones, resúmenes y notificaciones controladas por WhatsApp opt-in.",
   "runtime": "node",
   "entry": "entry.mjs",
   "args": [],
@@ -21,7 +21,8 @@
   ],
   "permissions": [
     "mcp.register",
-    "filesystem.plugin-data"
+    "filesystem.plugin-data",
+    "network.local"
   ],
   "settings": [
     {
@@ -35,6 +36,9 @@
       "max": 65535
     },
     { "key": "ingest_token", "label": "Token local de ingesta", "type": "secret", "env": "PULSE_ENGINE_INGEST_TOKEN", "required": false },
-    { "key": "ingest_owner_id", "label": "Integrante permitido", "type": "text", "env": "PULSE_ENGINE_INGEST_OWNER_ID", "required": false }
+    { "key": "ingest_owner_id", "label": "Integrante permitido", "type": "text", "env": "PULSE_ENGINE_INGEST_OWNER_ID", "required": false },
+    { "key": "delivery_enabled", "label": "Permitir avisos por WhatsApp al propietario", "type": "boolean", "env": "PULSE_DELIVERY_ENABLED", "required": false, "default": false },
+    { "key": "whatsapp_to", "label": "Número autorizado para avisos (con código de país)", "type": "text", "env": "PULSE_WHATSAPP_TO", "required": false },
+    { "key": "nexo_port", "label": "Puerto local de Nexo", "type": "number", "env": "PULSE_NEXO_PORT", "required": false, "default": 3210, "min": 1024, "max": 65535 }
   ]
 }

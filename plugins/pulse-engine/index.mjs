@@ -3,6 +3,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { SolPluginClientCore } from "./lib/sol-client-core.mjs";
+import { localClock, quietHour, messageFor, digestText, sendWhatsApp } from "./notifier.mjs";
 
 const pluginId = process.env.SOL_PLUGIN_ID?.trim() || "pulse-engine";
 const dataDir = process.env.SOL_PLUGIN_DATA_DIR?.trim() || join(process.env.SOL_PLUGIN_ROOT?.trim() || process.cwd(), ".data");
@@ -14,6 +15,12 @@ const sol = new SolPluginClientCore();
 const ingestToken = process.env.PULSE_ENGINE_INGEST_TOKEN?.trim() || "";
 const allowedOwner = process.env.PULSE_ENGINE_INGEST_OWNER_ID?.trim() || "";
 const ingestEnabled = ingestToken.length >= 32 && allowedOwner.length > 0;
+const deliveryEnabled = process.env.PULSE_DELIVERY_ENABLED === "true";
+const recipient = String(process.env.PULSE_WHATSAPP_TO||"").trim();
+const nexoUrl = "http://127.0.0.1:"+(Number(process.env.PULSE_NEXO_PORT)||3210)+"/api/output/send";
+const maxDaily = 8;
+const deliveryReady = deliveryEnabled && ingestEnabled && /^[1-9]\d{9,14}$/.test(recipient);
+let delivering = false;
 function authorized(req){
   if (!ingestEnabled) return false;
   const supplied = String(req.headers.authorization || "");
@@ -55,7 +62,7 @@ export async function load() {
   try {
     const parsed=JSON.parse(await readFile(storePath,"utf8"));
     if (!Array.isArray(parsed.events)) throw new Error("invalid_store");
-    store={version:1,events:parsed.events.slice(-MAX_EVENTS),updatedAt:parsed.updatedAt||null};
+    store={version:1,events:parsed.events.slice(-MAX_EVENTS),updatedAt:parsed.updatedAt||null,digests:parsed.digests||{}};
   } catch(error) {if(error?.code!=="ENOENT") throw error;}
 }
 async function save() {
@@ -65,8 +72,8 @@ async function save() {
   await rename(tmp,storePath);
 }
 function publicEvent(event) {
-  const {id,source,type,privacy,importance,decision,reason,occurredAt,receivedAt,status} = event;
-  return {id,source,type,privacy,importance,decision,reason,occurredAt,receivedAt,status, title:privacy==="public"?event.title:"[restringido]"};
+  const {id,source,type,privacy,importance,decision,reason,occurredAt,receivedAt,status,deliveryStatus} = event;
+  return {id,source,type,privacy,importance,decision,reason,occurredAt,receivedAt,status,deliveryStatus:deliveryStatus||null, title:privacy==="public"?event.title:"[restringido]"};
 }
 function mutate(task) {
   const job=writeChain.then(task);
@@ -80,7 +87,7 @@ export async function ingest(input) {
     if(prev) return {ok:true,deduplicated:true,event:publicEvent(prev)};
     const {importance,decision,reason}=classify(event);
     const record={...event,importance,decision,reason,status:decision==="review"?"pending":"recorded"};
-    const next={version:1,events:[...store.events,record].slice(-MAX_EVENTS),updatedAt:new Date().toISOString()};
+    const next={...store,version:1,events:[...store.events,record].slice(-MAX_EVENTS),updatedAt:new Date().toISOString()};
     const before=store;store=next;
     try {await save();} catch(error){store=before;throw error;}
     return {ok:true,deduplicated:false,event:publicEvent(record)};
@@ -92,10 +99,52 @@ export function listEvents(args={}) {
   const decision=args.decision ? String(args.decision) : null;
   return {ok:true,events:store.events.filter(x=>(!source||x.source===source)&&(!decision||x.decision===decision)).slice(-limit).reverse().map(publicEvent)};
 }
+export async function runNotificationCycle({now=new Date(),send=sendWhatsApp}={}) {
+  if(!deliveryReady||delivering||quietHour(now))return {skipped:"disabled_busy_or_quiet"};
+  delivering=true;
+  try {
+    const clock=localClock(now);
+    const sentToday=store.events.filter(e=>e.deliveryStatus==="accepted"&&e.deliveredAt&&localClock(new Date(e.deliveredAt)).day===clock.day).length
+      + Object.entries(store.digests||{}).filter(([k,v])=>k.startsWith(clock.day+":")&&v.status!=="failed").length;
+    if(sentToday>=maxDaily)return {skipped:"daily_limit"};
+    const urgent=store.events.find(e=>e.ownerId===allowedOwner&&e.decision==="review"&&e.importance>=80&&!e.deliveryStatus);
+    if(urgent){
+      await mutate(async()=>{urgent.deliveryStatus="sending";urgent.deliveryAttemptAt=now.toISOString();await save();});
+      try {
+        await send({url:nexoUrl,recipient,text:messageFor(urgent)});
+        await mutate(async()=>{urgent.deliveryStatus="accepted";urgent.deliveredAt=new Date().toISOString();await save();});
+        return {sent:"urgent",eventId:urgent.id};
+      } catch(error) {
+        await mutate(async()=>{urgent.deliveryStatus="uncertain";urgent.deliveryError=String(error?.message||error).slice(0,160);await save();});
+        return {uncertain:true,eventId:urgent.id};
+      }
+    }
+    const slot=clock.hour>=18?"18":clock.hour>=12?"12":clock.hour>=8?"08":null;
+    if(!slot)return {skipped:"outside_digest"};
+    const key=clock.day+":"+slot;
+    if(store.digests?.[key])return {skipped:"digest_slot_consumed"};
+    const candidates=store.events.filter(e=>e.ownerId===allowedOwner&&e.decision==="digest"&&!e.digestSlot&&localClock(new Date(e.receivedAt)).day===clock.day);
+    if(!candidates.length)return {skipped:"no_updates"};
+    await mutate(async()=>{
+      for(const e of candidates)e.digestSlot=key;
+      store.digests??={};
+      store.digests[key]={status:"sending",at:now.toISOString(),count:candidates.length};
+      await save();
+    });
+    try{
+      await send({url:nexoUrl,recipient,text:digestText(candidates)});
+      await mutate(async()=>{store.digests[key].status="accepted";store.digests[key].deliveredAt=new Date().toISOString();await save();});
+      return {sent:"digest",count:candidates.length};
+    }catch(error){
+      await mutate(async()=>{store.digests[key].status="uncertain";store.digests[key].error=String(error?.message||error).slice(0,160);await save();});
+      return {uncertain:true,count:candidates.length};
+    }
+  }finally{delivering=false;}
+}
 function status() {
   const counts={review:0,digest:0,ignore:0};
   for(const e of store.events) counts[e.decision]=(counts[e.decision]||0)+1;
-  return {ok:true,plugin:pluginId,version:"0.2.0",events:store.events.length,counts,updatedAt:store.updatedAt,solEnabled:sol.enabled,toolsRegistered,lastRegistrationError,mode:"observe_only",notificationsEnabled:false,actionsEnabled:false,ingestEnabled};
+  return {ok:true,plugin:pluginId,version:"0.3.0",events:store.events.length,counts,updatedAt:store.updatedAt,solEnabled:sol.enabled,toolsRegistered,lastRegistrationError,mode:deliveryReady?"notification":"observe_only",notificationsEnabled:deliveryReady,actionsEnabled:false,ingestEnabled,delivery:{ready:deliveryReady,maxDaily,recipientConfigured:Boolean(recipient),lastDigestKeys:Object.keys(store.digests||{}).slice(-4)}};
 }
 const tools=[
 {name:"pulse_status",description:"Return Pulse Engine health and processing counters. Read-only.",requiredScope:"read",inputSchema:{type:"object",properties:{},additionalProperties:false}},
@@ -150,6 +199,7 @@ export async function start(){
   console.log(JSON.stringify({type:"sol.plugin.ready",health:"healthy",details:{provider:pluginId,port,mode:"observe_only"}}));
   await register();
   const retry=setInterval(()=>{if(!toolsRegistered)void register();},15000);retry.unref?.();
-  for(const sig of ["SIGINT","SIGTERM"])process.once(sig,async()=>{clearInterval(retry);if(sol.enabled)await sol.registerMcpTools(callbackUrl,[]).catch(()=>{});server.close();process.exit(0);});
+  const notifierTimer=setInterval(()=>void runNotificationCycle().catch(error=>console.warn("Pulse notifier: "+String(error?.message||error))),30000);notifierTimer.unref?.();
+  for(const sig of ["SIGINT","SIGTERM"])process.once(sig,async()=>{clearInterval(retry);clearInterval(notifierTimer);if(sol.enabled)await sol.registerMcpTools(callbackUrl,[]).catch(()=>{});server.close();process.exit(0);});
 }
 if(process.argv[1]&&new URL(import.meta.url).pathname.replace(/^\//,"").toLowerCase().endsWith(process.argv[1].replaceAll("\\","/").toLowerCase()))await start();
