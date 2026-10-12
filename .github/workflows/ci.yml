@@ -37,7 +37,7 @@ jobs:
         run: pnpm test
 
       - name: Test Pulse Engine plugin (Panorama, dedup, Nexo safeguards)
-        run: node --test plugins/pulse-engine/*.test.mjs
+        run: node --test plugins/pulse-engine/*.test.mjs plugins/bwa-3d/pulse-publisher.test.mjs
 
       - name: Build
         run: pnpm build
