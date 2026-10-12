@@ -71,3 +71,6 @@ La protección en Nexo aplica clave de idempotencia por evento, evita envíos co
 - Activación explícita: `PULSE_PANORAMA_ENABLED=true` y permiso `mcp.invoke.read`; por defecto desactivado. Se conserva el canal independiente de Home Assistant para alarmas críticas.
 - No se ejecutan cambios en calendario, pagos, equipos ni publicaciones. Los próximos pasos son propuestas que requieren consentimiento.
 - Hasta instalar esta versión de SOL y Pulse, las nuevas rutas y el polling de Panorama no están activos en producción.
+
+## 0.7.1 — corrección de registro MCP
+El catálogo MCP de SOL requiere prefijo `pulse_engine_` para todos los nombres de herramientas del plugin. Se usan `pulse_engine_status`, `pulse_engine_events`, `pulse_engine_decisions` y `pulse_engine_ingest_event`.
