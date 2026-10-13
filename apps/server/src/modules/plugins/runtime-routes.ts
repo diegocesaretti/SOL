@@ -10,6 +10,7 @@ import { searchPluginRuntimeWhatsapp } from "./runtime-core-read.js";
 import { invokePluginRuntimeTool, listPluginRuntimeTools, type RuntimeMcpScope } from "./runtime-mcp-tools.js";
 import { pluginManager } from "./runtime.js";
 import { investigatePulsePanorama, latestPulsePanorama } from "../panorama/pulse-runtime.js";
+import { subscribePanoramaEditions } from "../panorama/signals.js";
 import type { SolPluginRuntimePrincipal } from "./types.js";
 
 function bearerToken(request: IncomingMessage): string | undefined {
@@ -75,6 +76,7 @@ export async function handlePluginRuntimeApi(path: string, request: IncomingMess
     && path !== "/v1/plugin-api/mcp/tools/invoke-read"
     && path !== "/v1/plugin-api/mcp/tools/invoke-action"
     && path !== "/v1/plugin-api/mcp/core/search-whatsapp"
+    && path !== "/v1/plugin-api/panorama/stream"
     && path !== "/v1/plugin-api/panorama/latest"
     && path !== "/v1/plugin-api/panorama/investigate"
     && !peopleMatch
@@ -85,6 +87,29 @@ export async function handlePluginRuntimeApi(path: string, request: IncomingMess
   const principal = await authenticate(request, response);
   if (!principal) return true;
 
+  if (path === "/v1/plugin-api/panorama/stream" && request.method === "GET") {
+    if (principal.pluginId !== "pulse-engine" || !requirePermission(response,principal,"mcp.invoke.read")) {
+      if (!response.headersSent) sendJson(response,403,{error:"pulse_stream_forbidden"});
+      return true;
+    }
+    response.writeHead(200,{
+      "content-type":"text/event-stream; charset=utf-8",
+      "cache-control":"no-store, no-transform",
+      "connection":"keep-alive",
+      "x-accel-buffering":"no",
+    });
+    response.write(": panorama_stream_connected\n\n");
+    const dispose=subscribePanoramaEditions(signal=>{
+      if(signal.householdId!==principal.householdId||signal.memberId!==principal.memberId)return;
+      response.write("event: edition\ndata: "+JSON.stringify({editionId:signal.editionId,createdAt:signal.createdAt})+"\n\n");
+    });
+    const beat=setInterval(()=>response.write(": keepalive\n\n"),25_000);
+    beat.unref?.();
+    let closed=false;
+    const cleanup=()=>{if(closed)return;closed=true;clearInterval(beat);dispose();};
+    request.on("close",cleanup);response.on("close",cleanup);
+    return true;
+  }
   if (path === "/v1/plugin-api/panorama/latest" && request.method === "GET") {
     if (!requirePermission(response, principal, "mcp.invoke.read")) return true;
     try { sendJson(response, 200, await latestPulsePanorama(principal)); }
