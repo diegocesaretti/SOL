@@ -21,7 +21,8 @@ export async function getPanoramaSchedule(principal: AuthPrincipal) {
     "SELECT interval_hours FROM panorama_schedule_preferences WHERE household_id=$1 AND member_id=$2",
     [principal.householdId, principal.memberId],
   );
-  return panoramaSchedulePayload(r.rows[0]?.interval_hours ?? null);
+  const value = r.rows[0]?.interval_hours ?? null;
+  return panoramaSchedulePayload(validPanoramaInterval(value) ? value : null);
 }
 export async function updatePanoramaSchedule(principal: AuthPrincipal, intervalHours: unknown) {
   if (principal.role !== "owner" && principal.role !== "adult") throw Error("panorama_schedule_forbidden");
