@@ -13,6 +13,6 @@ test("Pulse MCP tool names use plugin id prefix required by SOL registry", async
   }
   const manifest = JSON.parse(await readFile(new URL("sol-plugin.json", base), "utf8"));
   assert.equal(manifest.id, "pulse-engine");
-  assert.equal(manifest.version, "0.7.2");
-  assert.match(code, /version:"0\.7\.2"/);
+  assert.equal(manifest.version, "0.8.0");
+  assert.match(code, /version:"0\.8\.0"/);
 });
