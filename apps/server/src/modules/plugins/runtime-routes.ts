@@ -107,7 +107,7 @@ export async function handlePluginRuntimeApi(path: string, request: IncomingMess
     beat.unref?.();
     let closed=false;
     const cleanup=()=>{if(closed)return;closed=true;clearInterval(beat);dispose();};
-    request.on("close",cleanup);response.on("close",cleanup);
+    request.on("aborted",cleanup);response.on("close",cleanup);
     return true;
   }
   if (path === "/v1/plugin-api/panorama/latest" && request.method === "GET") {
