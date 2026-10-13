@@ -5,9 +5,11 @@ import type { AuthPrincipal } from "../auth/session.js";
 import { listTimeline, type TimelineItem, type TimelineCursor } from "../life/timeline.js";
 import { selectEditorialEvidence, type FamilyParticipant } from "./editor.js";
 import { visibleFamilyParticipants, schoolContextFor, type SchoolAgendaEntry } from "./family-school.js";
+import { scheduledPanoramaHours, type PanoramaIntervalHours } from "./schedule.js";
+import { publishPanoramaEdition } from "./signals.js";
 
 const DEFAULT_ZONE = "America/Argentina/Buenos_Aires";
-export type DigestSlot = "08" | "12" | "18" | "manual" | "review";
+export type DigestSlot = string; // HH (08..20), manual or review; enforced before saving.
 export const MAX_DAY_RECORDS = 50_000;
 const PAGE_SIZE = 500;
 const LOOKBACK_MS = 8 * 60 * 60 * 1000;
@@ -158,7 +160,7 @@ export async function getCalendar(principal:AuthPrincipal,month:string):Promise<
 }
 const flights=new Map<string,Promise<DailyEdition>>();
 export async function generateEdition(principal:AuthPrincipal,date:string,slot:DigestSlot,now=new Date()):Promise<DailyEdition> {
-  if(!validDate(date)||!["08","12","18","manual","review"].includes(slot))throw Error("invalid_digest_request");
+  if(!validDate(date)||!(slot==="manual"||slot==="review"||/^(0[8-9]|1[0-9]|20)$/.test(slot)))throw Error("invalid_digest_request");
   const zone=await memberZone(principal);
   const today=localClock(now,zone).date;
   const age=(Date.parse(today+"T12:00:00Z")-Date.parse(date+"T12:00:00Z"))/86400000;
@@ -265,7 +267,11 @@ export async function generateEdition(principal:AuthPrincipal,date:string,slot:D
     const inserted=await db.query<EditionRow>(
       "INSERT INTO panorama_daily_editions(household_id,member_id,local_date,slot,as_of,timezone,narrative,provider,source_stats,evidence_keys,event_count,new_count) VALUES ($1,$2,$3::date,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11,$12) ON CONFLICT(household_id,member_id,local_date,slot) DO NOTHING RETURNING *",args
     );
-    if(inserted.rows[0])return edition(inserted.rows[0]);
+    if(inserted.rows[0]){
+      const committed=edition(inserted.rows[0]);
+      publishPanoramaEdition({householdId:principal.householdId,memberId:principal.memberId,editionId:committed.id,createdAt:committed.createdAt});
+      return committed;
+    }
     const other=await db.query<EditionRow>(
       "SELECT * FROM panorama_daily_editions WHERE household_id=$1 AND member_id=$2 AND local_date=$3::date AND slot=$4",
       [principal.householdId,principal.memberId,date,slot],
@@ -285,13 +291,13 @@ export async function runScheduledEditions(now=new Date()):Promise<void> {
   try{
     const result=await db.query<{
       id:string;household_id:string;display_name:string;login_name:string|null;
-      role:AuthPrincipal["role"];timezone:string|null;
+      role:AuthPrincipal["role"];timezone:string|null;interval_hours:number|null;
     }>(
-      "SELECT m.id,m.household_id,m.display_name,m.login_name,m.role::text AS role, COALESCE(NULLIF(m.timezone,''),NULLIF(h.timezone,'')) AS timezone FROM members m JOIN households h ON h.id=m.household_id WHERE m.status='active' AND m.role IN ('owner','adult') ORDER BY m.created_at ASC LIMIT 40"
+      "SELECT m.id,m.household_id,m.display_name,m.login_name,m.role::text AS role, COALESCE(NULLIF(m.timezone,''),NULLIF(h.timezone,'')) AS timezone,p.interval_hours FROM members m JOIN households h ON h.id=m.household_id LEFT JOIN panorama_schedule_preferences p ON p.member_id=m.id AND p.household_id=m.household_id WHERE m.status='active' AND m.role IN ('owner','adult') ORDER BY m.created_at ASC LIMIT 40"
     );
     for(const m of result.rows){
       const local=localClock(now,timezoneOrDefault(m.timezone));
-      const hour=[18,12,8].find(h=>local.hour>=h);
+      const hour=scheduledPanoramaHours(m.interval_hours as PanoramaIntervalHours).filter(h=>local.hour>=h).at(-1);
       if(!hour)continue;
       const slot=String(hour).padStart(2,"0") as DigestSlot;
       const key=m.id+":"+local.date+":"+slot;
