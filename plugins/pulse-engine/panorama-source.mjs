@@ -33,14 +33,15 @@ function formatMessage(result) {
     "\n" + evidence + (steps.length ? "\nOpciones: " + steps.join(" / ") : "")).slice(0, 1000);
 }
 export function createPanoramaSource({
-  sol, ingest, ownerId, dataDir, enabled = false, intervalMs = 180000, now = () => new Date(),
+  sol, ingest, ownerId, dataDir, enabled = false, intervalMs = 1800000, now = () => new Date(), onCycle = null,
 }) {
   const file = join(dataDir, "pulse-panorama-checkpoint.json");
-  let timer = null, running = false, busy = false;
+  let timer = null, running = false, busy = false, streamController = null, streamConnected = false;
+  let lastSignalAt = null, lastStreamError = null, rerun = false;
   let lastPollAt = null, lastSuccessAt = null, lastError = null, lastEmitted = 0, lastExamined = 0;
   async function tick() {
     if (!enabled || !ownerId || !sol?.enabled) return { skipped: "not_configured" };
-    if (busy) return { skipped: "busy" };
+    if (busy) { rerun = true; return { skipped: "busy" }; }
     busy = true;
     lastPollAt = now().toISOString();
     lastEmitted = 0;
@@ -57,7 +58,7 @@ export function createPanoramaSource({
         return { ok: true, baselined: true, observed: editions.length, investigated: 0 };
       }
       const seen = new Set(checkpoint.ids);
-      const fresh = editions.filter(x => !seen.has(x.id)).slice(0, 2);
+      const fresh = editions.filter(x => !seen.has(x.id)).slice(0, 6);
       for (const edition of fresh) {
         if (Number(edition.newCount) > 0) {
           const reviewed = await sol.request("/v1/plugin-api/panorama/investigate", {
@@ -90,20 +91,57 @@ export function createPanoramaSource({
       return { ok: false, error: lastError };
     } finally {
       busy = false;
+      // Re-evaluate notifications already pending as well as newly detected
+      // editions. Sending remains controlled by Pulse's quiet hours and limits.
+      if (onCycle) Promise.resolve().then(onCycle).catch(() => {});
+      if (rerun) { rerun = false; queueMicrotask(() => void tick()); }
+    }
+  }
+  async function followStream(signal) {
+    while (running && !signal.aborted) {
+      try {
+        if (typeof sol.watchPanorama !== "function") return;
+        await sol.watchPanorama(() => {
+          lastSignalAt = now().toISOString();
+          void tick();
+        }, {
+          signal,
+          onConnected: () => { streamConnected = true; lastStreamError = null; void tick(); },
+        });
+        streamConnected = false;
+      } catch (error) {
+        streamConnected = false;
+        if (!signal.aborted) lastStreamError = String(error?.message || error).slice(0, 180);
+      }
+      if (!running || signal.aborted) break;
+      await new Promise(resolve => {
+        const delay = setTimeout(resolve, 5000);
+        delay.unref?.();
+        signal.addEventListener("abort", () => { clearTimeout(delay); resolve(); }, { once: true });
+      });
     }
   }
   function start() {
     if (!enabled || !ownerId || !sol?.enabled || running) return false;
     running = true;
+    // Safety net on lost notifications or disconnected SOL; stream drives fast
+    // updates rather than this low-frequency timer.
     timer = setInterval(() => void tick(), Math.max(120000, intervalMs));
     timer.unref?.();
+    streamController = new AbortController();
+    void followStream(streamController.signal);
     void tick();
     return true;
   }
-  function stop() { running = false; if (timer) clearInterval(timer); timer = null; }
+  function stop() {
+    running = false;
+    streamConnected = false;
+    streamController?.abort(); streamController = null;
+    if (timer) clearInterval(timer); timer = null;
+  }
   function status() {
     return { configured: Boolean(enabled && ownerId && sol?.enabled), running, lastPollAt,
-      lastSuccessAt, lastError, lastExamined, lastEmitted, intervalMs };
+      lastSuccessAt, lastError, lastExamined, lastEmitted, intervalMs, streamConnected, lastSignalAt, lastStreamError };
   }
   return { start, stop, tick, status };
 }
