@@ -13,6 +13,8 @@ test("daily Panorama renders an accessible calendar and archived editions",()=>{
   assert.match(html,/v1\/panorama\/digest\/day/);
   assert.match(html,/v1\/panorama\/digest\/calendar/);
   assert.match(html,/daily-editions/);
+  assert.match(html,/daily-interval-save/);
+  assert.ok(html.includes("/v1/panorama/digest/schedule"));
   const script=html.split("<script>")[1]?.split("</script>")[0];
   assert.ok(script,"Panorama exposes a browser script");
   assert.doesNotThrow(()=>new Script(script));
