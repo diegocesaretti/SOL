@@ -153,7 +153,7 @@ export async function runNotificationCycle({now=new Date(),send=sendWhatsApp}={}
 function status() {
   const counts={review:0,digest:0,ignore:0};
   for(const e of store.events) counts[e.decision]=(counts[e.decision]||0)+1;
-  return {ok:true,plugin:pluginId,version:"0.7.1",events:store.events.length,counts,updatedAt:store.updatedAt,solEnabled:sol.enabled,toolsRegistered,lastRegistrationError,mode:deliveryReady?"notification":"observe_only",notificationsEnabled:deliveryReady,actionsEnabled:false,ingestEnabled,delivery:{ready:deliveryReady,maxDaily,recipientConfigured:Boolean(recipient),lastDigestKeys:Object.keys(store.digests||{}).slice(-4)},financeSource:financeSource.status(),homeSource:homeSource.status(),panoramaSource:panoramaSource.status()};
+  return {ok:true,plugin:pluginId,version:"0.7.2",events:store.events.length,counts,updatedAt:store.updatedAt,solEnabled:sol.enabled,toolsRegistered,lastRegistrationError,mode:deliveryReady?"notification":"observe_only",notificationsEnabled:deliveryReady,actionsEnabled:false,ingestEnabled,delivery:{ready:deliveryReady,maxDaily,recipientConfigured:Boolean(recipient),lastDigestKeys:Object.keys(store.digests||{}).slice(-4)},financeSource:financeSource.status(),homeSource:homeSource.status(),panoramaSource:panoramaSource.status()};
 }
 const tools=[
 {name:"pulse_engine_status",description:"Return Pulse Engine health and processing counters. Read-only.",requiredScope:"read",inputSchema:{type:"object",properties:{},additionalProperties:false}},
