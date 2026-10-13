@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "id": "pulse-engine",
   "name": "SOL Pulse Engine",
-  "version": "0.7.2",
+  "version": "0.8.0",
   "description": "Pulse contextual: investiga novedades de Panorama con Codex y herramientas MCP de solo lectura; notificaciones opt-in y canal crítico separado.",
   "runtime": "node",
   "entry": "entry.mjs",
@@ -92,11 +92,11 @@
     },
     {
       "key": "panorama_poll_ms",
-      "label": "Intervalo de consulta Panorama (ms)",
+      "label": "Intervalo de respaldo para Panorama (ms)",
       "type": "number",
       "env": "PULSE_PANORAMA_POLL_MS",
       "required": false,
-      "default": 180000,
+      "default": 1800000,
       "min": 120000,
       "max": 3600000
     },
