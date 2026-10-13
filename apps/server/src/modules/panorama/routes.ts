@@ -2,11 +2,33 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { readJsonBody, sendJson } from "../../http.js";
 import type { AuthPrincipal } from "../auth/session.js";
 import { getCalendar as calendarDays, getEditions as dailyEditions, generateEdition, validDate } from "./daily.js";
+import { getPanoramaSchedule, updatePanoramaSchedule } from "./schedule.js";
 
 export async function handlePanoramaDailyApi(
   path:string, request:IncomingMessage,response:ServerResponse,principal:AuthPrincipal,
 ):Promise<boolean> {
   const url=new URL(request.url||path,"http://sol.local");
+  if(path==="/v1/panorama/digest/schedule" && request.method==="GET"){
+    sendJson(response,200,{schedule:await getPanoramaSchedule(principal),editable:principal.role==="owner"||principal.role==="adult"});
+    return true;
+  }
+  if(path==="/v1/panorama/digest/schedule" && request.method==="PUT"){
+    if(principal.role!=="owner"&&principal.role!=="adult"){sendJson(response,403,{error:"panorama_schedule_forbidden"});return true;}
+    if(!String(request.headers["content-type"]||"").includes("application/json")){sendJson(response,415,{error:"json_required"});return true;}
+    const origin=request.headers.origin;
+    if(origin){
+      try{if(new URL(origin).host!==request.headers.host){sendJson(response,403,{error:"same_origin_required"});return true;}}
+      catch{sendJson(response,403,{error:"same_origin_required"});return true;}
+    }
+    const body=await readJsonBody<{intervalHours?:unknown}>(request,4096);
+    try{sendJson(response,200,{schedule:await updatePanoramaSchedule(principal,body.intervalHours)});}
+    catch(error){
+      const message=error instanceof Error?error.message:String(error);
+      if(message==="invalid_panorama_interval")sendJson(response,400,{error:message});
+      else throw error;
+    }
+    return true;
+  }
   if(path==="/v1/panorama/digest/day" && request.method==="GET"){
     const date=url.searchParams.get("date")||"";
     if(!validDate(date)){sendJson(response,400,{error:"invalid_digest_date"});return true;}
