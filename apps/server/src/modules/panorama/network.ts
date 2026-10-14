@@ -152,8 +152,15 @@ export function projectNeuralNetwork(
   };
   // Only configured names appear without a recent event. Do not suggest their
   // machine state/activity is known until member-visible evidence arrives.
-  for (const name of printerRoster.slice(0, MAX_DEVICES_PER_SOURCE)) {
-    ensureChild("printer:" + name.toLowerCase(), name, "bambuddy", "printer");
+  if (printerRoster.length) {
+    const fleet = ensureChild("group:bambuddy:printers", "Impresoras", "bambuddy", "group");
+    fleet.count = printerRoster.length;
+    fleet.detail = printerRoster.length + " impresoras registradas · estados no consultados";
+    fleet.activity = 0;
+    for (const name of printerRoster.slice(0, MAX_DEVICES_PER_SOURCE)) {
+      const printer = ensureChild("printer:" + name.toLowerCase(), name, fleet.id, "printer");
+      printer.detail = "Impresora registrada · estado no consultado";
+    }
   }
   const events: NeuralNetworkSnapshot["events"] = [];
   const perSource = new Map<string, Set<string>>();
@@ -170,7 +177,12 @@ export function projectNeuralNetwork(
       const known = perSource.get(source) || new Set<string>();
       if (byId.has(deviceId) || known.size < MAX_DEVICES_PER_SOURCE) {
         known.add(deviceId); perSource.set(source, known);
-        ensureChild(deviceId, device, source, source === "bambuddy" ? "printer" : "device");
+        const fleetId = source === "bambuddy" ? "group:bambuddy:printers" : "group:home:devices";
+        const fleet = ensureChild(fleetId, source === "bambuddy" ? "Impresoras" : "Dispositivos", source, "group");
+        const deviceNode = ensureChild(deviceId, device, fleet.id, source === "bambuddy" ? "printer" : "device");
+        deviceNode.count += 1;
+        deviceNode.activity = activityFor(deviceNode.count);
+        deviceNode.detail = deviceNode.count + " cambios o eventos registrados";
         target = deviceId;
       }
     }
