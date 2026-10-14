@@ -774,7 +774,7 @@
   function loadThree(urls){if(window.THREE){startThree();return}if(!urls.length)return;
     const s=document.createElement('script');s.src=urls.shift();s.async=true;s.onload=()=>{if(window.THREE)startThree();else loadThree(urls)};s.onerror=()=>loadThree(urls);document.head.appendChild(s);
   }
-  loadThree(['https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js','https://cdnjs.cloudflare.com/ajax/libs/three.js/0.152.2/three.min.js','https://unpkg.com/three@0.152.2/build/three.min.js']);
+  loadThree(['/panorama/three.min.js','https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js','https://cdnjs.cloudflare.com/ajax/libs/three.js/0.152.2/three.min.js','https://unpkg.com/three@0.152.2/build/three.min.js']);
 })();
 </script>
 
@@ -847,7 +847,7 @@ html[data-sol-view="screensaver"] #sol-fs:hover,html[data-sol-view="screensaver"
       var data=await response.json();
       var signature=data.nodes.map(function(n){return n.id}).join("|");
       if(signature!==lastSignature){
-        net.setGraph(shape(data));lastSignature=signature;lastActivities.clear();
+        net.setGraph(shape(data));lastSignature=signature;lastActivities.clear();data.nodes.forEach(function(n){lastActivities.set(n.id,n.activity)});
       }
       data.nodes.forEach(function(n){
         var prev=lastActivities.get(n.id);
