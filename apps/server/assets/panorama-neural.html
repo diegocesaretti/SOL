@@ -324,10 +324,10 @@
     const degree=new Map();for(const e of graph.edges){degree.set(e.source,(degree.get(e.source)||0)+e.strength);degree.set(e.target,(degree.get(e.target)||0)+e.strength)}
     // Prefer meaningful clusters to satellite relays; when the app supplies a live
     // pulse its receiving node gets temporary priority for the next camera stop.
-    const ranked=graph.nodes.filter(n=>n.type!=='relay'||graph.nodes.length<25)
+    const ranked=graph.nodes.filter(n=>n.type!=='relay'&&n.role!=='event')
       .map(n=>({n,score:n.activity*3.2+Math.min(degree.get(n.id)||0,6)*.14+(n.anchor?.3:0)+(isHub(n)?.75:0)+Math.min(getHeat(nodeHeat,n.id),1.5)*1.1}))
       .sort((a,b)=>b.score-a.score).slice(0,Math.min(11,graph.nodes.length));
-    if(view.latestHot&&animTime-view.lastHotAt<5){const hot=graph.nodes.find(n=>n.id===view.latestHot);if(hot&&hot.id!==view.targetId)return hot;}
+    if(view.latestHot&&animTime-view.lastHotAt<5){const hot=graph.nodes.find(n=>n.id===view.latestHot);if(hot&&hot.type!=='relay'&&hot.id!==view.targetId)return hot;}
     if(!ranked.length)return graph.nodes[0];
     view.cycle=(view.cycle+1)%ranked.length;
     let result=ranked[view.cycle].n;
@@ -542,9 +542,12 @@
     setGraph(data){if(!data||!Array.isArray(data.nodes)||!Array.isArray(data.edges))throw Error('setGraph expects {nodes:[...],edges:[...]}');graph=layoutIfNeeded(data);selection=null;hover=null;pulses.length=0;nodeHeat.clear();edgeHeat.clear();view.targetId=null;view.cycle=-1;view.changeAt=animTime+.4;updateCounts();if(render3d)render3d.rebuild();window.dispatchEvent(new CustomEvent('ai-graph-updated',{detail:{nodes:graph.nodes.length,edges:graph.edges.length}}));return true},
     resetDemo(){return API.setGraph(demoGraph())},
     getGraph(){return JSON.parse(JSON.stringify(graph))},
+    getFocusState(){return {selected:selection,targetId:view.targetId,autoFocus:view.autoFocus}},
+    getNodeScreenPosition(id){const n=graph.nodes.find(x=>x.id===String(id));return n?coordToScreen(n):null},
     focusNode(id){selection=String(id);const n=graph.nodes.find(x=>x.id===selection);if(!n){selection=null;return false}view.autoFocus=false;view.targetId=n.id;updatePanel();return true},
     clearFocus(){selection=null;if(view.autoFocus)view.changeAt=animTime+.2;},
-    setActivity(id,activity){const n=graph.nodes.find(x=>x.id===String(id));if(!n)return false;n.activity=clamp(Number(activity)||0,0,1);addHeat(nodeHeat,n.id,.45);if(render3d)render3d.refresh();return true},
+    setActivity(id,activity){const n=graph.nodes.find(x=>x.id===String(id));if(!n)return false;n.activity=clamp(Number(activity)||0,0,1);addHeat(nodeHeat,n.id,.25);if(render3d)render3d.refresh();return true},
+    setActivities(changes){let touched=false;for(const [id,value] of Object.entries(changes||{})){const n=graph.nodes.find(x=>x.id===id);if(!n)continue;n.activity=clamp(Number(value)||0,0,1);touched=true;}if(touched&&render3d)render3d.refresh();return touched},
     setNodeCenter(id,on=true){const n=graph.nodes.find(x=>x.id===String(id));if(!n)return false;n.center=!!on;if(on&&(!n.role||n.role==='node'))n.role='center';if(render3d)render3d.refresh();return true},
     pulse(source,target,intensity=1){source=String(source);target=String(target);if(!graph.edges.some(e=>(e.source===source&&e.target===target)||(e.source===target&&e.target===source)))return false;intensity=clamp(Number(intensity)||1,.2,2.5);pulses.push({source,target,progress:0,speed:(.29+Math.random()*.4)*(0.9+intensity*.15),manual:true,intensity});addHeat(nodeHeat,source,.35*intensity);addHeat(nodeHeat,target,.9*intensity);addHeat(edgeHeat,edgeKey(source,target),1.15*intensity);view.latestHot=target;view.lastHotAt=animTime;if(view.autoFocus&&!selection)view.changeAt=animTime+.4;return true},
     setPalette(name){if(!palettes[name])return false;updatePalette({...palettes[name],palette:name});return true},
@@ -784,6 +787,17 @@ html[data-sol-view="screensaver"] .masthead,html[data-sol-view="screensaver"] .c
 #sol-live{position:fixed;left:max(18px,env(safe-area-inset-left));top:max(18px,env(safe-area-inset-top));z-index:30;pointer-events:none;background:rgba(4,18,24,.60);border:1px solid rgba(144,211,200,.20);padding:9px 13px;border-radius:12px;backdrop-filter:blur(14px);color:#d7eee8;font:11px/1.45 system-ui,sans-serif;letter-spacing:.08em;max-width:65vw}
 #sol-live small{display:block;font-size:9px;letter-spacing:.045em;color:#8eaaa5;margin-top:3px}
 html[data-sol-view="embed"] #sol-live{left:12px;top:12px;padding:6px 9px;font-size:10px}
+
+#neural-labels{position:fixed;inset:0;z-index:23;pointer-events:none;overflow:hidden;font:11px/1.45 Inter,system-ui,sans-serif}
+.neural-label{position:absolute;max-width:min(230px,60vw);padding:5px 9px;border:1px solid rgba(155,211,201,.24);border-radius:9px;color:#d2efe9;background:rgba(7,24,31,.67);backdrop-filter:blur(12px);text-shadow:0 1px 4px #061015;box-shadow:0 3px 20px rgba(0,0,0,.18);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:opacity .26s ease}
+.neural-label strong{font-weight:650;color:#ffe2b0}
+.neural-label span{display:block;opacity:.68;font-size:9px;letter-spacing:.045em;margin-top:2px}
+.neural-label.primary{border-color:rgba(250,205,140,.6);font-size:13px;padding:9px 13px;box-shadow:0 0 24px rgba(248,183,104,.15)}
+.neural-label.secondary{font-size:11px;opacity:.86}
+html[data-sol-view="embed"] .neural-label.primary{font-size:11px;padding:5px 8px}
+html[data-sol-view="embed"] .neural-label.secondary{font-size:9px;padding:4px 6px}
+html[data-sol-view="screensaver"] .neural-label.secondary{opacity:.60}
+@media(max-width:600px){.neural-label.primary{max-width:175px;font-size:11px;padding:6px 9px}.neural-label.secondary{max-width:128px;font-size:9px}}
 #sol-fs{position:fixed;bottom:max(18px,env(safe-area-inset-bottom));right:max(18px,env(safe-area-inset-right));z-index:31;padding:9px 14px;border-radius:10px;border:1px solid rgba(144,211,200,.28);background:rgba(4,18,24,.65);color:#d7eee8;cursor:pointer;backdrop-filter:blur(14px)}
 html[data-sol-view="embed"] #sol-fs{display:none}
 html[data-sol-view="screensaver"] #sol-fs{opacity:.22;transition:opacity .3s}
@@ -791,6 +805,7 @@ html[data-sol-view="screensaver"] #sol-fs:hover,html[data-sol-view="screensaver"
 @media(max-width:640px){#sol-live{max-width:56vw;padding:7px 9px}#sol-fs{font-size:12px}}
 </style>
 <div id="sol-live" role="status">SOL · SINCRONIZANDO<small>Conectando con Panorama…</small></div>
+<div id="neural-labels" aria-hidden="true"></div>
 <button id="sol-fs" type="button" title="Pantalla completa / salir">⛶ Pantalla completa</button>
 <script>
 (function(){
@@ -803,6 +818,8 @@ html[data-sol-view="screensaver"] #sol-fs:hover,html[data-sol-view="screensaver"
   var button=document.getElementById("sol-fs");
   var net=window.AINetwork;
   var first=true,lastSignature="",lastActivities=new Map(),seen=new Set(),lastEdition="";
+  var latestGraph={nodes:[],edges:[]};
+  var labelLayer=document.getElementById("neural-labels");
   var pending=false,refreshInterval=30000;
   if(mode==="screensaver"){net.setAutoFocus(true);net.setAutoRotate(true);net.setRotationSpeed(.42);net.setZoom(1.35)}
   if(mode==="embed"){net.setAutoFocus(true);net.setAutoRotate(true);net.setRotationSpeed(.28);net.setZoom(1.22)}
@@ -811,28 +828,96 @@ html[data-sol-view="screensaver"] #sol-fs:hover,html[data-sol-view="screensaver"
   function shape(payload){
     var nodes=payload.nodes.map(function(n){return Object.assign({},n)});
     var edges=payload.edges.map(function(e){return Object.assign({},e)});
-    var aspect=innerWidth/Math.max(innerHeight,1);
-    var xfactor=Math.min(1,Math.max(.39,aspect/1.65));
-    if(aspect<1.2){
-      nodes.forEach(function(n){n.x=.5+(n.x-.5)*xfactor;n.y=.5+(n.y-.5)*.90});
-    }
-    var bases=nodes.filter(function(n){return n.id!=="panorama"&&n.id!=="pulse"&&n.id!=="sol"});
+    var aspect=innerWidth/Math.max(1,innerHeight);
+    var narrow=aspect<1.10;
+    var squash=narrow?.82:.81;
+    var stretchX=narrow?Math.min(1,Math.max(.66,aspect/1.15)):1;
+    // Contract the entire graph without breaking relations or stable positions.
+    nodes.forEach(function(n){
+      n.x=.5+(n.x-.5)*squash*stretchX;
+      n.y=.5+(n.y-.5)*squash;
+      n.z*=.8;
+    });
+    // Decorative microfilaments only around stable centers and child groups.
+    // Individual events never generate fake relays; they are real leaf nodes.
+    var bases=nodes.filter(function(n){return n.center||n.type==="group"||n.type==="printer"||n.type==="device"});
     bases.forEach(function(n,i){
-      var many=Math.min(13,6+Math.floor((n.count||0)/4));
-      var radius=aspect<1.2?.05:.067;
+      var major=!!n.center;
+      var many=major?(narrow?10:23):(n.type==="group"?(narrow?5:10):(narrow?4:7));
+      var radius=major?.031:.019;
       for(var k=0;k<many;k++){
         var theta=k*Math.PI*2/many+i*.7;
-        var rr=radius*(.56+.47*(k%3)/2);
+        var rr=radius*(.58+.43*(k%3)/2);
         var id="filament:"+n.id+":"+k;
-        nodes.push({id:id,label:"Decorative relay",type:"relay",activity:Math.max(.08,n.activity*.35),x:n.x+Math.cos(theta)*rr*xfactor,y:n.y+Math.sin(theta)*rr,z:(k%5-2)*.37});
-        edges.push({source:n.id,target:id,strength:.26+.35*(k%4)/3});
-        if(k>0)edges.push({source:"filament:"+n.id+":"+(k-1),target:id,strength:.22});
-        if(k>1&&k%3===0)edges.push({source:"filament:"+n.id+":"+(k-2),target:id,strength:.17});
+        nodes.push({id:id,label:"Filamento",type:"relay",role:"decorative",activity:Math.max(.04,n.activity*.20),x:n.x+Math.cos(theta)*rr*stretchX,y:n.y+Math.sin(theta)*rr,z:n.z+(k%5-2)*.12});
+        edges.push({source:n.id,target:id,strength:.26+.24*(k%4)/3,kind:"decorative"});
+        if(k>0)edges.push({source:"filament:"+n.id+":"+(k-1),target:id,strength:.21,kind:"decorative"});
+        if(k>1&&k%3===0)edges.push({source:"filament:"+n.id+":"+(k-2),target:id,strength:.16,kind:"decorative"});
       }
-      edges.push({source:"filament:"+n.id+":"+(many-1),target:"filament:"+n.id+":0",strength:.2});
+      edges.push({source:"filament:"+n.id+":"+(many-1),target:"filament:"+n.id+":0",strength:.2,kind:"decorative"});
     });
     return {nodes:nodes,edges:edges};
   }
+  function labelText(n){
+    if(n.type==="printer")return n.count?n.count+" eventos de impresión":"Impresora · estado no consultado";
+    if(n.type==="device")return n.count?n.count+" cambios registrados":"Dispositivo";
+    if(n.type==="relay")return n.role==="event"?"Observación individual":"";
+    if(n.type==="group")return n.count?n.count+" eventos recientes":"Subcentro";
+    return n.count?n.count+" observaciones visibles":"Centro conectado";
+  }
+  function visibleLabelNodes(){
+    var focus=net.getFocusState(),focusId=focus.selected||focus.targetId;
+    if(!focusId)return [];
+    var index=new Map(latestGraph.nodes.map(function(n){return [n.id,n]}));
+    var selected=index.get(focusId);
+    if(!selected)return [];
+    var neighborIds=new Set();
+    latestGraph.edges.forEach(function(e){
+      if(e.source===focusId)neighborIds.add(e.target);
+      if(e.target===focusId)neighborIds.add(e.source);
+    });
+    // When a hub is focused, surface members of its subgroups and printers.
+    latestGraph.nodes.forEach(function(n){
+      if(n.parent===focusId)neighborIds.add(n.id);
+      if(selected.type==="hub"&&n.parent&&index.get(n.parent)?.parent===focusId)neighborIds.add(n.id);
+    });
+    var maxNeighbors=mode==="embed"?3:(mode==="screensaver"?5:9);
+    var related=[...neighborIds].map(function(id){return index.get(id)}).filter(function(n){
+      return n && n.role!=="decorative" && (n.type!=="relay"||n.activity>.75||focus.selected===n.id);
+    });
+    related.sort(function(a,b){
+      function rank(n){return (n.type==="printer"||n.type==="device"?3:0)+(n.type==="group"?2:0)+(n.center?2:0)+n.activity*1.2;}
+      return rank(b)-rank(a);
+    });
+    return [selected].concat(related.slice(0,maxNeighbors));
+  }
+  function drawLabels(){
+    var list=visibleLabelNodes(),nodes=[];
+    var occupied=[];
+    list.forEach(function(n,i){
+      var p=net.getNodeScreenPosition(n.id);if(!p)return;
+      if(!Number.isFinite(p.x)||!Number.isFinite(p.y)||p.x<-45||p.y<-20||p.x>innerWidth+25||p.y>innerHeight+25)return;
+      var px=Math.max(5,Math.min(innerWidth-(i?135:205),p.x+12));
+      var py=Math.max(6,Math.min(innerHeight-54,p.y-(i?11:18)));
+      if(i&&occupied.some(function(q){return Math.abs(q.x-px)<95&&Math.abs(q.y-py)<44}))return;
+      occupied.push({x:px,y:py});
+      var item=document.createElement("div");
+      item.className="neural-label "+(i?"secondary":"primary");
+      var title=document.createElement("strong");title.textContent=n.label;
+      item.appendChild(title);
+      var detail=labelText(n);if(detail){var sub=document.createElement("span");sub.textContent=detail;item.appendChild(sub);}
+      item.style.left=px+"px";item.style.top=py+"px";
+      nodes.push(item);
+    });
+    labelLayer.replaceChildren(...nodes);
+  }
+  // Re-project after camera motion without rebuilding every animation frame.
+  var labelClock=0;
+  function labelTick(t){
+    if(t-labelClock>160){labelClock=t;drawLabels();}
+    requestAnimationFrame(labelTick);
+  }
+  requestAnimationFrame(labelTick);
   async function update(){
     if(pending || (document.hidden && mode!=="screensaver"))return;
     pending=true;
@@ -846,16 +931,19 @@ html[data-sol-view="screensaver"] #sol-fs:hover,html[data-sol-view="screensaver"
       if(!response.ok)throw Error("Panorama "+response.status);
       var data=await response.json();
       var signature=data.nodes.map(function(n){return n.id}).join("|");
+      latestGraph=data;
       if(signature!==lastSignature){
         net.setGraph(shape(data));lastSignature=signature;lastActivities.clear();data.nodes.forEach(function(n){lastActivities.set(n.id,n.activity)});
       }
+      var activityChanges={};
       data.nodes.forEach(function(n){
         var prev=lastActivities.get(n.id);
-        if(prev===undefined || Math.abs(prev-n.activity)>.035){net.setActivity(n.id,n.activity);lastActivities.set(n.id,n.activity)}
+        if(prev===undefined || Math.abs(prev-n.activity)>.035){activityChanges[n.id]=n.activity;lastActivities.set(n.id,n.activity)}
       });
+      if(Object.keys(activityChanges).length)net.setActivities(activityChanges);
       (data.events||[]).forEach(function(event){
         if(!seen.has(event.id)){
-          if(!first || Date.now()-Date.parse(event.occurredAt)<3*60000){
+          if(!first && Date.now()-Date.parse(event.occurredAt)<5*60000){
             net.pulse(event.source,event.target,event.intensity||1);
           }
           seen.add(event.id);
