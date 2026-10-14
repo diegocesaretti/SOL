@@ -10,3 +10,14 @@ test("System page inline browser script parses", () => {
     assert.doesNotThrow(() => new Function(script));
   }
 });
+
+test("System settings expose a persistent SOL color theme editor", () => {
+  const html=renderSystemPage();
+  for(const color of ["accent","background","panel","text","glow"]){
+    assert.match(html,new RegExp('data-theme-color="'+color+'"'));
+  }
+  assert.match(html,/sol\.appearance\.v1/);
+  assert.match(html,/id="theme-reset"/);
+  assert.match(html,/SOLTheme\.set/);
+  assert.match(html,/window\.addEventListener\("storage"/);
+});
