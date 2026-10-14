@@ -50,3 +50,35 @@ Revisar 401 al acceder al endpoint o pantalla sin sesión y comprobar aislamient
 
 **Nota**: la app SOL debe estar iniciada para recibir actualizaciones. El navegador no puede
 deshabilitar el protector de pantalla del sistema operativo por sí solo.
+
+## Red neuronal jerárquica (v0.15.29)
+
+* **Centros:** SOL, Panorama, Pulse y fuentes conectadas.
+* **Subcentros:** grupos como Mensajes, Ventas registradas, Actividad comercial,
+  Actividad de impresión, Impresoras y Dispositivos.
+* **Nodos persistentes:** cada impresora configurada en el roster y cada dispositivo
+  identificado en el metadato accesible de Life (ej. `printerName` y `entityId`).
+  No se consulta ni se inventa un estado activo por el mero hecho de estar en el roster.
+* **Relés reales:** hasta 64 registros recientes con identificadores estables de Life,
+  conectados a su grupo, impresora o dispositivo y con etiqueta categórica.
+* **Microfilamentos decorativos:** nunca se muestran como ventas, mensajes ni acciones de SOL.
+* **Foco:** el nodo principal y sus vecinos muestran etiquetas espaciales, sin enviar al
+  navegador textos privados ni datos de comprador.
+
+Para mantener las impresoras visibles incluso si no hubo actividad reciente en Life,
+configurá opcionalmente el inventario en el archivo **.env persistente** del SOL local:
+
+```dotenv
+SOL_NEURAL_PRINTERS=A1 - A,A1 - B AMS,A1 MINI A,A1 MINI B,A1 MINI C,A1 MINI D
+```
+
+Esta opción sólo identifica nombres de impresoras. El inventario puede estar en blanco
+en otras instalaciones, y sólo lo reciben sesiones owner/adult. Si más adelante Bambuddy
+proyecta observaciones estructuradas en Life, el visualizador asociará eventos a cada
+máquina según `printerName` o `printerId`. Para estados de impresión en vivo se
+necesitará un lector Bambuddy autorizado adicional: este cambio no los presume.
+
+La constelación se centra alrededor del núcleo, con subgrupos superpuestos suavemente
+y un número de filamentos reducido automáticamente en móviles. El foco automático
+evita seleccionar relés históricos por defecto, pero se puede hacer clic para
+inspeccionar un relé y ver su etiqueta genérica y hora.
