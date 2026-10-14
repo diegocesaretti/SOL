@@ -19,3 +19,19 @@ test("vendored Three.js is available for fully offline SOL rendering", () => {
   assert.match(code, /three\.js/);
   assert.ok(code.length > 100_000);
 });
+
+test("constellation persists settings and exposes density without embedding-specific overrides", () => {
+  const html=readFileSync(new URL("../../assets/panorama-neural.html",import.meta.url),"utf8");
+  assert.match(html,/sol\.neural\.preferences\.v1/);
+  assert.match(html,/localStorage\.setItem\(PREF_KEY/);
+  assert.match(html,/addEventListener\('storage'/);
+  assert.match(html,/id="densityRange"/);
+  assert.match(html,/setDensity\(density=60\)/);
+  assert.match(html,/getPreferences\(\)/);
+  assert.match(html,/focus\.settled/);
+  assert.match(html,/performance\.now\(\)-stableSince<1200/);
+  assert.doesNotMatch(html,/if\(mode==="embed"\)\{net\.setAutoFocus/);
+  assert.doesNotMatch(html,/if\(mode==="screensaver"\)\{net\.setAutoFocus/);
+  assert.match(html,/camera\.left=-6\*aspect/);
+  assert.match(html,/camera\.right=6\*aspect/);
+});
