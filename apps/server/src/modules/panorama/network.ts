@@ -71,7 +71,7 @@ export function projectNeuralNetwork(
       count: counts.get(source.id) || 0,
     })),
   ];
-  const edges = sources.map(source => ({
+  const edges: NeuralNetworkSnapshot["edges"] = sources.map(source => ({
     source: source.id, target: "panorama",
     strength: .24 + Math.min(.70, Math.log1p(counts.get(source.id) || 0) / Math.log(24) * .70),
     kind: "observation",
