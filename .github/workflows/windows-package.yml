@@ -73,6 +73,7 @@ jobs:
             Pop-Location
           }
           Copy-Item apps/server/dist "$server/dist" -Recurse -Force
+          Copy-Item apps/server/assets "$server/assets" -Recurse -Force
 
       - name: Add portable Node runtime and SOL support files
         shell: pwsh
@@ -173,6 +174,8 @@ jobs:
             'dist/windows/SOL/runtime/node.exe',
             'dist/windows/SOL/apps/server/package.json',
             'dist/windows/SOL/apps/server/dist/index.js',
+            'dist/windows/SOL/apps/server/assets/panorama-neural.html',
+            'dist/windows/SOL/apps/server/assets/three-r152.min.js',
             'dist/windows/SOL/apps/server/dist/mcp/openai-bridge.js',
             'dist/windows/SOL/apps/server/dist/mcp/nexo-stdio.js',
             'dist/windows/SOL/apps/server/dist/mcp/stdio-preload.js',
