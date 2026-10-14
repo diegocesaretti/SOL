@@ -103,6 +103,7 @@
       <label class="slider-title" for="zoomRange">Focus zoom <output id="zoomValue">1.55×</output></label><input class="range" type="range" id="zoomRange" min="1" max="2.5" step="0.05" value="1.55" />
       <label class="slider-title" for="speedRange">Camera drift <output id="speedValue">0.45×</output></label><input class="range" type="range" id="speedRange" min="0.15" max="1.5" step="0.05" value="0.45" />
       <label class="slider-title" for="rotationRange">Rotation speed <output id="rotationValue">0.55×</output></label><input class="range" type="range" id="rotationRange" min="0" max="2.5" step="0.05" value="0.55" />
+      <label class="slider-title" for="densityRange">Hub density <output id="densityValue">60%</output></label><input class="range" type="range" id="densityRange" min="0" max="100" step="5" value="60" />
       <label class="slider-title" for="glowRange">Glow intensity <output id="glowValue">1.00×</output></label><input class="range" type="range" id="glowRange" min="0.2" max="2" step="0.05" value="1" />
       <div class="panel-footer"><button class="utility" id="resetView" type="button">Reset view</button><button class="utility" id="pauseCamera" type="button">Pause tour</button></div>
       <div class="hint">Drag to orbit 3D · Shift + drag to pan · Scroll to zoom · Click a node to lock focus · Esc to release</div>
@@ -278,7 +279,8 @@
   const addHeat=(map,key,amount=1)=>map.set(String(key),Math.min(3,(map.get(String(key))||0)+amount));
   const getHeat=(map,key)=>map.get(String(key))||0;
   const decayHeat=(map,dt)=>{for(const [k,v] of map){const nv=v*Math.exp(-dt*1.45)-dt*0.02; if(nv<=0.01)map.delete(k); else map.set(k,nv)}};
-  const view={autoFocus:!reducedMotion,autoRotate:!reducedMotion,focusZoom:1.55,speed:.45,rotationSpeed:.55,
+  const PREF_KEY='sol.neural.preferences.v1';
+  const view={autoFocus:!reducedMotion,autoRotate:!reducedMotion,focusZoom:1.55,speed:.45,rotationSpeed:.55,density:60,
     yaw:.08,pitch:-.06,yawGoal:.08,pitchGoal:-.06,zoom:1,zoomGoal:1,
     x:.5,y:.5,xGoal:.5,yGoal:.5,targetId:null,cycle:-1,changeAt:2.5,
     focusedUntil:0,latestHot:null,lastHotAt:-100,manualZoom:false};
@@ -286,6 +288,27 @@
   const controls=document.getElementById('controls');
   let selectedOnPointerDown=false,dragDistance=0;
   const pointers=new Map();let pinchDistance=0;
+  let applyingPrefs=false,saveTimer=null;
+  function snapshotPrefs(){return {palette:styleState.palette,warm:styleState.warm,cool:styleState.cool,background:styleState.background,glow:styleState.glow,autoFocus:view.autoFocus,autoRotate:view.autoRotate,focusZoom:view.focusZoom,speed:view.speed,rotationSpeed:view.rotationSpeed,density:view.density}}
+  function savePrefs(){if(applyingPrefs)return;clearTimeout(saveTimer);saveTimer=setTimeout(()=>{try{localStorage.setItem(PREF_KEY,JSON.stringify(snapshotPrefs()))}catch(error){console.warn('Could not save constellation preferences',error)}},160)}
+  function restorePrefs(saved){if(!saved||typeof saved!=='object')return;applyingPrefs=true;
+    try{
+      const number=(key,min,max)=>{if(Number.isFinite(saved[key]))view[key]=clamp(saved[key],min,max)};
+      view.autoFocus=typeof saved.autoFocus==='boolean'?saved.autoFocus:view.autoFocus;
+      view.autoRotate=typeof saved.autoRotate==='boolean'?saved.autoRotate:view.autoRotate;
+      number('focusZoom',1,2.5);number('speed',.15,1.5);number('rotationSpeed',0,2.5);number('density',0,100);
+      const colors={};for(const k of ['warm','cool','background'])if(typeof saved[k]==='string'&&/^#[0-9a-f]{6}$/i.test(saved[k]))colors[k]=saved[k];
+      if(Number.isFinite(saved.glow))colors.glow=clamp(saved.glow,.2,2);
+      colors.palette=typeof saved.palette==='string'&&palettes[saved.palette]?saved.palette:'custom';
+      updatePalette(colors);
+      view.changeAt=animTime+.3;if(!view.autoFocus)view.targetId=null;
+      if(render3d)render3d.rebuild();updatePanel();
+    }finally{applyingPrefs=false}
+  }
+  function readPrefs(){try{return JSON.parse(localStorage.getItem(PREF_KEY)||'null')}catch{return null}}
+  window.addEventListener('storage',e=>{if(e.key===PREF_KEY)restorePrefs(readPrefs())});
+  function densityFactor(){return 1.46-view.density*.011}
+  function pos(n){const k=densityFactor();return {x:.5+(n.x-.5)*k,y:.5+(n.y-.5)*k}}
   function updatePanel(){
     document.getElementById('autoFocus').setAttribute('aria-pressed',String(view.autoFocus));
     document.getElementById('autoRotate').setAttribute('aria-pressed',String(view.autoRotate));
@@ -295,6 +318,8 @@
     document.getElementById('speedValue').textContent=view.speed.toFixed(2)+'×';
     document.getElementById('rotationRange').value=view.rotationSpeed;
     document.getElementById('rotationValue').textContent=view.rotationSpeed.toFixed(2)+'×';
+    document.getElementById('densityRange').value=view.density;
+    document.getElementById('densityValue').textContent=Math.round(view.density)+'%';
     document.getElementById('glowRange').value=styleState.glow;
     document.getElementById('glowValue').textContent=styleState.glow.toFixed(2)+'×';
     document.getElementById('pauseCamera').textContent=view.autoFocus?'Pause tour':'Resume tour';
@@ -316,9 +341,9 @@
     atmosphere.style.opacity=styleState.palette==='original'?.9:.64;
     drawAtmosphere();
     if(render3d?.recolor)render3d.recolor();
-    updatePanel();return {...styleState};
+    updatePanel();savePrefs();return {...styleState};
   }
-  function setAutoFocus(on){view.autoFocus=!!on;if(on){view.cycle=-1;view.changeAt=animTime+.3;view.manualZoom=false;selection=null;}else{view.targetId=null;view.zoomGoal=view.zoom;}updatePanel()}
+  function setAutoFocus(on){view.autoFocus=!!on;if(on){view.cycle=-1;view.changeAt=animTime+.3;view.manualZoom=false;selection=null;}else{view.targetId=null;view.zoomGoal=view.zoom;}updatePanel();savePrefs()}
   function chooseFocusNode(){
     if(!graph.nodes.length)return null;
     const degree=new Map();for(const e of graph.edges){degree.set(e.source,(degree.get(e.source)||0)+e.strength);degree.set(e.target,(degree.get(e.target)||0)+e.strength)}
@@ -417,6 +442,8 @@
     {x:.263,y:.73,r:10,a:.32,warm:false,phase:1,speed:.12,hero:true},
   ];
   bokeh.push(...heroBokeh);
+  function graphPixel(n){const p=pos(n),scale=Math.min(w,h)*1.12,spread=clamp(w/Math.max(h,1)*1.15,.72,1.58);return {x:w*.5+(p.x-.5)*scale*spread,y:h*.5+(p.y-.5)*scale}}
+  function focusPixel(){return graphPixel({x:view.x,y:view.y})}
   function renderFallback(ts){
     const ctx=fallback.getContext('2d'),time=ts*.001;
     ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);
@@ -433,7 +460,7 @@
     ctx.translate(w*.5,h*.5);ctx.scale(view.zoom,view.zoom);
     const cx=Math.cos(view.yaw),cp=Math.cos(view.pitch);
     ctx.transform(cx,.12*Math.sin(view.pitch),.12*Math.sin(view.yaw),cp,0,0);
-    ctx.translate(-view.x*w,-view.y*h);
+    const focus=focusPixel();ctx.translate(-focus.x,-focus.y);
     const idMap=new Map(graph.nodes.map(n=>[n.id,n]));
     for(const e of graph.edges){const a=idMap.get(e.source),b=idMap.get(e.target);if(!a||!b)continue;
       const highlighted=selection&&(selection===e.source||selection===e.target);
@@ -442,9 +469,9 @@
       ctx.lineWidth=(highlighted?1.4:.65+e.strength*.5)+Math.min(heat,1.35)*1.1;
       const edgeColor=(e.strength>.48||heat>.4)?styleState.warm:styleState.cool;
       ctx.strokeStyle=rgba(edgeColor,e.strength>.48||heat>.4?alpha:alpha*.78);
-      ctx.beginPath();ctx.moveTo(a.x*w,a.y*h);ctx.lineTo(b.x*w,b.y*h);ctx.stroke();
+      const aa=graphPixel(a),bb=graphPixel(b);ctx.beginPath();ctx.moveTo(aa.x,aa.y);ctx.lineTo(bb.x,bb.y);ctx.stroke();
     }
-    for(const n of graph.nodes){const xx=n.x*w,yy=n.y*h;
+    for(const n of graph.nodes){const p=graphPixel(n),xx=p.x,yy=p.y;
       const hub=isHub(n);
       const heat=getHeat(nodeHeat,n.id);
       const major=(n.anchor&&n.activity>.6)||hub;
@@ -457,7 +484,7 @@
         if(hub){ctx.beginPath();ctx.arc(xx,yy,8+Math.min(heat,1.2)*5,0,TAU);ctx.strokeStyle=rgba(styleState.cool,.20+Math.min(heat,1.2)*.22);ctx.lineWidth=1.1;ctx.stroke();}}
       ctx.beginPath();ctx.arc(xx,yy,hub?3.6:(major?2.3:power>.44?1.48:.84),0,TAU);ctx.fillStyle=heat>.55?'#fff6e8':major?'#fff0de':n.type==='memory'?styleState.cool:styleState.warm;ctx.fill();
     }
-    for(const p of pulses){const a=idMap.get(p.source),b=idMap.get(p.target);if(!a||!b)continue;let f=p.progress;const x=lerp(a.x,b.x,f)*w,y=lerp(a.y,b.y,f)*h;
+    for(const p of pulses){const a=idMap.get(p.source),b=idMap.get(p.target);if(!a||!b)continue;let f=p.progress;const aa=graphPixel(a),bb=graphPixel(b);const x=lerp(aa.x,bb.x,f),y=lerp(aa.y,bb.y,f);
       let grad=ctx.createRadialGradient(x,y,0,x,y,14);grad.addColorStop(0,'rgba(255,250,240,.9)');grad.addColorStop(.25,rgba(styleState.warm,.45));grad.addColorStop(1,rgba(styleState.warm,0));ctx.fillStyle=grad;ctx.fillRect(x-14,y-14,28,28);
     }
     ctx.restore(); // Graph transform
@@ -466,7 +493,7 @@
 
   function coordToScreen(n){
     if(render3d?.project)return render3d.project(n);
-    const x=(n.x-view.x)*w,y=(n.y-view.y)*h,cx=Math.cos(view.yaw),cp=Math.cos(view.pitch);
+    const p=graphPixel(n),focus=focusPixel(),x=p.x-focus.x,y=p.y-focus.y,cx=Math.cos(view.yaw),cp=Math.cos(view.pitch);
     return {x:w/2+view.zoom*(x*cx+y*.12*Math.sin(view.yaw)),y:h/2+view.zoom*(x*.12*Math.sin(view.pitch)+y*cp)};
   }
   function detect(x,y){let chosen=null,min=34*34;for(const n of graph.nodes){if(n.role==='decorative')continue;const p=coordToScreen(n);const d=(p.x-x)**2+(p.y-y)**2;
@@ -527,22 +554,23 @@
   for(const [id,key] of [['colorWarm','warm'],['colorCool','cool'],['colorBackground','background']])
     document.getElementById(id).addEventListener('input',e=>updatePalette({[key]:e.target.value}));
   document.getElementById('autoFocus').addEventListener('click',()=>setAutoFocus(!view.autoFocus));
-  document.getElementById('autoRotate').addEventListener('click',()=>{view.autoRotate=!view.autoRotate;updatePanel()});
-  document.getElementById('zoomRange').addEventListener('input',e=>{view.focusZoom=Number(e.target.value);if(!view.autoFocus&&!selection)view.zoomGoal=view.focusZoom;updatePanel()});
-  document.getElementById('speedRange').addEventListener('input',e=>{view.speed=Number(e.target.value);updatePanel()});
-  document.getElementById('rotationRange').addEventListener('input',e=>{view.rotationSpeed=Number(e.target.value);updatePanel()});
+  document.getElementById('autoRotate').addEventListener('click',()=>{view.autoRotate=!view.autoRotate;updatePanel();savePrefs()});
+  document.getElementById('zoomRange').addEventListener('input',e=>{view.focusZoom=Number(e.target.value);if(!view.autoFocus&&!selection)view.zoomGoal=view.focusZoom;updatePanel();savePrefs()});
+  document.getElementById('speedRange').addEventListener('input',e=>{view.speed=Number(e.target.value);updatePanel();savePrefs()});
+  document.getElementById('rotationRange').addEventListener('input',e=>{view.rotationSpeed=Number(e.target.value);updatePanel();savePrefs()});
+  document.getElementById('densityRange').addEventListener('input',e=>{view.density=Number(e.target.value);if(render3d)render3d.rebuild();updatePanel();savePrefs()});
   document.getElementById('glowRange').addEventListener('input',e=>updatePalette({glow:Number(e.target.value)}));
   document.getElementById('pauseCamera').addEventListener('click',()=>setAutoFocus(!view.autoFocus));
   document.getElementById('resetView').addEventListener('click',()=>{
     selection=null;view.xGoal=.5;view.yGoal=.5;view.zoomGoal=1;
-    view.yawGoal=0;view.pitchGoal=0;view.autoRotate=true;setAutoFocus(true);
+    view.yawGoal=0;view.pitchGoal=0;view.autoRotate=true;setAutoFocus(true);savePrefs();
   });
 
   const API={
     setGraph(data){if(!data||!Array.isArray(data.nodes)||!Array.isArray(data.edges))throw Error('setGraph expects {nodes:[...],edges:[...]}');graph=layoutIfNeeded(data);selection=null;hover=null;pulses.length=0;nodeHeat.clear();edgeHeat.clear();view.targetId=null;view.cycle=-1;view.changeAt=animTime+.4;updateCounts();if(render3d)render3d.rebuild();window.dispatchEvent(new CustomEvent('ai-graph-updated',{detail:{nodes:graph.nodes.length,edges:graph.edges.length}}));return true},
     resetDemo(){return API.setGraph(demoGraph())},
     getGraph(){return JSON.parse(JSON.stringify(graph))},
-    getFocusState(){return {selected:selection,targetId:view.targetId,autoFocus:view.autoFocus}},
+    getFocusState(){const focusId=selection||view.targetId;return {selected:selection,targetId:focusId,autoFocus:view.autoFocus,settled:!!(focusId&&(selection||view.autoFocus)&&Math.abs(view.x-view.xGoal)<.023&&Math.abs(view.y-view.yGoal)<.023&&Math.abs(view.zoom-view.zoomGoal)<.075)}},
     getNodeScreenPosition(id){const n=graph.nodes.find(x=>x.id===String(id));return n?coordToScreen(n):null},
     focusNode(id){selection=String(id);const n=graph.nodes.find(x=>x.id===selection);if(!n){selection=null;return false}view.autoFocus=false;view.targetId=n.id;updatePanel();return true},
     clearFocus(){selection=null;if(view.autoFocus)view.changeAt=animTime+.2;},
@@ -557,8 +585,10 @@
     setAutoRotate(on=true){view.autoRotate=!!on;updatePanel();return view.autoRotate},
     setZoom(zoom=1.55){view.focusZoom=clamp(Number(zoom)||1,1,2.5);if(!view.autoFocus)view.zoomGoal=view.focusZoom;updatePanel();return view.focusZoom},
     resetView(){document.getElementById('resetView').click()},
-    setRotationSpeed(speed=.55){view.rotationSpeed=clamp(Number(speed)||0,0,2.5);updatePanel();return view.rotationSpeed},
-    getViewSettings(){return {autoFocus:view.autoFocus,autoRotate:view.autoRotate,focusZoom:view.focusZoom,speed:view.speed,rotationSpeed:view.rotationSpeed,yaw:view.yaw,pitch:view.pitch,zoom:view.zoom,targetId:view.targetId}},
+    setRotationSpeed(speed=.55){view.rotationSpeed=clamp(Number(speed)||0,0,2.5);updatePanel();savePrefs();return view.rotationSpeed},
+    setDensity(density=60){view.density=clamp(Number(density)||0,0,100);if(render3d)render3d.rebuild();updatePanel();savePrefs();return view.density},
+    getPreferences(){return snapshotPrefs()},
+    getViewSettings(){return {autoFocus:view.autoFocus,autoRotate:view.autoRotate,focusZoom:view.focusZoom,speed:view.speed,rotationSpeed:view.rotationSpeed,density:view.density,yaw:view.yaw,pitch:view.pitch,zoom:view.zoom,targetId:view.targetId,settled:!!(graph.nodes.find(n=>n.id===(selection||view.targetId))&&(selection||view.autoFocus)&&Math.abs(view.x-view.xGoal)<.023&&Math.abs(view.y-view.yGoal)<.023&&Math.abs(view.zoom-view.zoomGoal)<.075)}},
     showStats(show=true){statsVisible=!!show;info.classList.toggle('show',statsVisible);status.classList.toggle('show',statsVisible)},
     setReferenceOverlay(enabled=true, opacity=.37){reference.style.display=enabled?'block':'none';reference.style.opacity=clamp(Number(opacity)||0,0,1);return true},
     get renderer(){return render3d?'three.js':'canvas fallback'},
@@ -578,7 +608,7 @@
       const group=new THREE.Group();scene.add(group);
       const auxGroup=new THREE.Group();scene.add(auxGroup);
       const colorTeal=new THREE.Color(styleState.cool),colorGold=new THREE.Color(styleState.warm);
-      function worldPos(n){return new THREE.Vector3((n.x-.5)*w/h*12.8,(.5-n.y)*12.8,n.z*.95)}
+      function worldPos(n){const p=pos(n),spread=clamp(w/Math.max(h,1)*1.15,.72,1.58);return new THREE.Vector3((p.x-.5)*12.8*spread,(.5-p.y)*12.8,n.z*.95)}
       function glowTexture(kind='glow'){
         const canvas=document.createElement('canvas');canvas.width=canvas.height=128;const cx=canvas.getContext('2d');
         const grad=cx.createRadialGradient(64,64,1,64,64,63);
@@ -717,7 +747,8 @@
         // shares the same group transform so its topology stays consistent.
         group.rotation.set(view.pitch,view.yaw,Math.sin(view.yaw*.6)*.027);
         group.updateWorldMatrix(true,true);
-        const focusPoint=new THREE.Vector3((view.x-.5)*w/h*12.8,(.5-view.y)*12.8,0);
+        const p=pos({x:view.x,y:view.y}),spread=clamp(w/Math.max(h,1)*1.15,.72,1.58);
+        const focusPoint=new THREE.Vector3((p.x-.5)*12.8*spread,(.5-p.y)*12.8,0);
         group.localToWorld(focusPoint);
         camera.position.set(focusPoint.x,focusPoint.y,25);
         camera.lookAt(focusPoint.x,focusPoint.y,0);
@@ -745,7 +776,7 @@
         // Recreate graph shaders/sprites/filaments in the new palette.
         buildGraph();
       }
-      render3d={render,rebuild:buildGraph,refresh:buildGraph,recolor,project,resize(){renderer.setPixelRatio(dpr);renderer.setSize(w,h,false);dotsShader.uniforms.uDpr.value=dpr;signalMat.uniforms.uDpr.value=dpr;buildGraph()}};
+      render3d={render,rebuild:buildGraph,refresh:buildGraph,recolor,project,resize(){const aspect=w/Math.max(h,1);camera.left=-6*aspect;camera.right=6*aspect;camera.top=6;camera.bottom=-6;camera.updateProjectionMatrix();renderer.setPixelRatio(dpr);renderer.setSize(w,h,false);dotsShader.uniforms.uDpr.value=dpr;signalMat.uniforms.uDpr.value=dpr;buildGraph()}};
       fallback.style.display='none';render3d.resize();
     }catch(error){console.warn('Three.js renderer unavailable; using Canvas fallback.',error);render3d=null;}
   }
@@ -756,7 +787,7 @@
     fallback.width=Math.round(w*dpr);fallback.height=Math.round(h*dpr);drawAtmosphere();
     if(render3d)render3d.resize();
   }
-  onResize();window.addEventListener('resize',onResize,{passive:true});window.visualViewport?.addEventListener('resize',onResize,{passive:true});
+  onResize();restorePrefs(readPrefs());window.addEventListener('resize',onResize,{passive:true});window.visualViewport?.addEventListener('resize',onResize,{passive:true});
   if((window.visualViewport?.width||window.innerWidth)<=560){controls.classList.add('collapsed');const btn=document.getElementById('collapseStudio');btn.textContent='+';btn.setAttribute('aria-expanded','false');}
   document.addEventListener('visibilitychange',()=>{active=!document.hidden;lastFrame=performance.now()});
   function loop(now){requestAnimationFrame(loop);if(!active)return;
@@ -821,8 +852,8 @@ html[data-sol-view="screensaver"] #sol-fs:hover,html[data-sol-view="screensaver"
   var latestGraph={nodes:[],edges:[]};
   var labelLayer=document.getElementById("neural-labels");
   var pending=false,refreshInterval=30000;
-  if(mode==="screensaver"){net.setAutoFocus(true);net.setAutoRotate(true);net.setRotationSpeed(.42);net.setZoom(1.35)}
-  if(mode==="embed"){net.setAutoFocus(true);net.setAutoRotate(true);net.setRotationSpeed(.28);net.setZoom(1.22)}
+  // The main Panorama, studio and screensaver deliberately share the exact
+  // same stored camera, density and palette preferences on this browser.
   net.setGraph({nodes:[],edges:[]});
   net.setReferenceOverlay(true,.13);
   function shape(payload){
@@ -866,12 +897,17 @@ html[data-sol-view="screensaver"] #sol-fs:hover,html[data-sol-view="screensaver"
     if(n.type==="group")return n.count?n.count+" eventos recientes":"Subcentro";
     return n.count?n.count+" observaciones visibles":"Centro conectado";
   }
+  var previousFocusId="",stableSince=0;
   function visibleLabelNodes(){
     var focus=net.getFocusState(),focusId=focus.selected||focus.targetId;
-    if(!focusId)return [];
+    if(!focusId){previousFocusId="";stableSince=0;return [];}
+    if(focusId!==previousFocusId){previousFocusId=focusId;stableSince=0;return [];}
+    if(!focus.settled){stableSince=0;return [];}
+    if(!stableSince){stableSince=performance.now();return [];}
+    if(performance.now()-stableSince<1200)return [];
     var index=new Map(latestGraph.nodes.map(function(n){return [n.id,n]}));
     var selected=index.get(focusId);
-    if(!selected)return [];
+    if(!selected || (!focus.selected && !selected.center && selected.type!=="group"))return [];
     var neighborIds=new Set();
     latestGraph.edges.forEach(function(e){
       if(e.source===focusId)neighborIds.add(e.target);

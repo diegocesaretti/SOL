@@ -21,6 +21,35 @@ export function renderSystemPage(): string {
       <div class="empty" style="margin-top:14px">Consultando la versión publicada…</div>
     </section>
 
+
+    <section id="sol-appearance" class="card" style="margin-bottom:16px">
+      <div class="row between">
+        <div><div class="eyebrow">Personalización</div><h2 style="margin-top:5px">Colores de SOL</h2>
+        <p class="muted small" style="margin-top:8px">Elegí los colores del tema. Se guardan automáticamente y se aplican a todas las páginas SOL de este navegador.</p></div>
+        <button type="button" id="theme-reset">Restaurar</button>
+      </div>
+      <div class="row" style="margin:16px 0" id="theme-presets">
+        <button type="button" data-theme="ocean">Océano</button>
+        <button type="button" data-theme="amber">Ámbar</button>
+        <button type="button" data-theme="forest">Bosque</button>
+        <button type="button" data-theme="violet">Violeta</button>
+      </div>
+      <div class="theme-color-grid">
+        <label>Color principal <input type="color" data-theme-color="accent" value="#aee7ff"/></label>
+        <label>Fondo <input type="color" data-theme-color="background" value="#070d1a"/></label>
+        <label>Paneles <input type="color" data-theme-color="panel" value="#13243c"/></label>
+        <label>Texto <input type="color" data-theme-color="text" value="#f0f7ff"/></label>
+        <label>Luz ambiental <input type="color" data-theme-color="glow" value="#5279bc"/></label>
+      </div>
+      <div class="small muted" role="status" id="theme-save-status" style="margin-top:14px">Preferencias de este navegador.</div>
+      <p class="small muted" style="margin-top:8px">Para los colores, densidad, zoom y rotación de la constelación abrí <a href="/panorama/neural">el estudio neuronal</a>. Esos ajustes también se guardan y se reflejan en el panel de Panorama.</p>
+    </section>
+    <style>
+      .theme-color-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}
+      .theme-color-grid label{min-width:0}.theme-color-grid input[type=color]{height:44px;cursor:pointer;padding:4px}
+      @media(max-width:750px){.theme-color-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+    </style>
+
     <div class="grid">
       <a class="card action span4" href="/v1/inputs/plugins/extensions/ui" style="color:inherit;text-decoration:none"><div class="eyebrow">Extensiones</div><h2 style="margin-top:7px">Plugins</h2><p class="muted small">Instalar, actualizar, configurar y revisar plugins.</p></a>
       <a class="card action span4" href="/mcp" style="color:inherit;text-decoration:none"><div class="eyebrow">Herramientas</div><h2 style="margin-top:7px">MCP</h2><p class="muted small">Acceso unificado a herramientas nativas y de plugins.</p></a>
@@ -45,6 +74,29 @@ function renderStatus(s){const installed=s.installed||{},latest=s.latest||{},man
 async function load(force=false){check.disabled=true;check.textContent=force?'Buscando…':'Buscar actualizaciones';const out=await api(API+(force?'?force=1':''));check.disabled=false;check.textContent='Buscar actualizaciones';if(!out.r.ok){root.innerHTML='<div class="row between"><div><div class="eyebrow">SOL Core</div><h2 style="margin-top:5px">Actualizaciones</h2></div><span class="badge"><span class="dot bad"></span> sin conexión</span></div><div class="callout error" style="margin-top:14px">'+esc(out.b.error||'No se pudo comprobar la versión publicada.')+'</div>';return}renderStatus(out.b)}
 async function installUpdate(btn){if(!confirm('SOL descargará la nueva versión, verificará su SHA-256, se reiniciará y hará rollback automáticamente si el nuevo build no levanta.\\n\\n¿Actualizar ahora?'))return;btn.disabled=true;btn.textContent='Preparando…';const out=await api(API+'/install',{method:'POST'});if(!out.r.ok){btn.disabled=false;btn.textContent='Actualizar ahora';alert(out.b.error||'No se pudo iniciar la actualización');return}root.innerHTML='<div class="row between"><div><div class="eyebrow">SOL Core</div><h2 style="margin-top:5px">Actualizando a v'+esc(out.b.version||'')+'</h2></div><span class="badge"><span class="dot warn"></span> reiniciando</span></div><div class="callout" style="margin-top:14px">SOL se cerrará, el updater reemplazará el paquete y volverá a iniciar. Esta página se reconectará automáticamente.</div>';waitForRestart()}
 async function waitForRestart(){let sawDown=false;for(let i=0;i<90;i++){await new Promise(r=>setTimeout(r,1000));try{const r=await fetch('/health',{cache:'no-store'});if(r.ok&&sawDown){location.reload();return}if(!r.ok)sawDown=true}catch{sawDown=true}}root.innerHTML+='<div class="callout warntext" style="margin-top:12px">La UI todavía no volvió a conectar. Revisá el log del updater en %LOCALAPPDATA%\\SOL\\logs.</div>'}
+
+const themeInputs=Array.from(document.querySelectorAll("[data-theme-color]"));
+const themeStatus=document.getElementById("theme-save-status");
+function showTheme(){
+  if(!window.SOLTheme)return;
+  const state=window.SOLTheme.get();
+  themeInputs.forEach(input=>{const key=input.dataset.themeColor;if(state[key])input.value=state[key]});
+}
+themeInputs.forEach(input=>input.addEventListener("input",()=>{
+  const key=input.dataset.themeColor;
+  window.SOLTheme.set({[key]:input.value});
+  themeStatus.textContent="Colores guardados y aplicados";
+}));
+document.querySelectorAll("[data-theme]").forEach(btn=>btn.addEventListener("click",()=>{
+  window.SOLTheme.preset(btn.dataset.theme);showTheme();
+  themeStatus.textContent="Tema guardado";
+}));
+document.getElementById("theme-reset").addEventListener("click",()=>{
+  window.SOLTheme.reset();showTheme();themeStatus.textContent="Colores restaurados";
+});
+window.addEventListener("sol-theme-change",showTheme);
+showTheme();
+
 check.onclick=()=>load(true);loadStartup();load();
 `;
 

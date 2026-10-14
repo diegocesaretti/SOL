@@ -28,11 +28,11 @@ export function renderDailyPanoramaPage(): string {
     .neural-links{display:flex;flex-wrap:wrap;gap:8px;flex:none}
     .neural-links a{border-radius:11px;padding:10px 12px;border:1px solid rgba(178,221,218,.32);font-size:12px;text-decoration:none;color:#c4f0e6;background:rgba(104,194,172,.09)}
     .neural-links a:hover{background:rgba(108,218,181,.18)}
-    .neural-frame{border-radius:16px;overflow:hidden;border:1px solid rgba(156,204,208,.17);background:#061216;height:390px}
-    .neural-frame iframe{width:100%;height:100%;border:0;display:block}
+    .neural-frame{position:relative;aspect-ratio:16/9;max-height:min(75vh,740px);min-height:0;border-radius:16px;overflow:hidden;border:1px solid rgba(156,204,208,.17);background:#061216}
+    .neural-frame iframe{position:absolute;inset:0;width:100%;height:100%;border:0;display:block}
     .neural-footnote{color:var(--muted);font-size:11px;line-height:1.55;margin-top:12px}
-    @media(max-width:760px){.neural-section{padding:12px;margin-bottom:18px}.neural-heading{display:block}.neural-links{margin-top:13px}.neural-frame{height:350px}.neural-links a{flex:1;text-align:center}}
-    @media(max-width:430px){.neural-frame{height:320px}.neural-links{display:grid;grid-template-columns:1fr 1fr}.neural-links a{font-size:10px;padding:9px 5px}}
+    @media(max-width:760px){.neural-section{padding:12px;margin-bottom:18px}.neural-heading{display:block}.neural-links{margin-top:13px}.neural-frame{aspect-ratio:4/3;max-height:none}.neural-links a{flex:1;text-align:center}}
+    @media(max-width:430px){.neural-frame{aspect-ratio:4/3}.neural-links{display:grid;grid-template-columns:1fr 1fr}.neural-links a{font-size:10px;padding:9px 5px}}
   </style>`;
   const withConstellation = body.replace('<div class="daily-grid">',constellation + '<div class="daily-grid">');
   return solPage("home", "Panorama · Crónicas diarias", withConstellation, script, styles + constellationStyles);
