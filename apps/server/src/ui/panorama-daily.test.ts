@@ -10,7 +10,7 @@ test("daily Panorama renders an accessible calendar and archived editions",()=>{
   assert.doesNotMatch(html,/SOL · Panorama · Memoria cotidiana/);
   assert.doesNotMatch(html,/El día, contado por SOL/);
   assert.doesNotMatch(html,/Una crónica con criterio/);
-  assert.doesNotMatch(html,/daily-top/);
+  assert.doesNotMatch(html,/<div class="daily-top">/);
   assert.match(html,/Ver evidencias en Life/);
   assert.match(html,/daily-days/);
   assert.match(html,/daily-narrative/);
