@@ -176,7 +176,8 @@ export function projectNeuralNetwork(
     }
     const eventId = "event:" + item.type + ":" + item.id;
     const activity = item.metadata?.intelligencePriority === "high" ? .95 : .48;
-    const eventNode = ensureChild(eventId, category.label, target, "event");
+    const eventNode = ensureChild(eventId, category.label, target, "relay");
+    eventNode.role = "event";
     eventNode.activity = activity;
     eventNode.count = 1;
     eventNode.detail = "Observación reciente · " + new Date(item.occurredAt).toISOString().slice(11, 16) + " UTC";
