@@ -82,3 +82,29 @@ La constelación se centra alrededor del núcleo, con subgrupos superpuestos sua
 y un número de filamentos reducido automáticamente en móviles. El foco automático
 evita seleccionar relés históricos por defecto, pero se puede hacer clic para
 inspeccionar un relé y ver su etiqueta genérica y hora.
+
+## Preferencias compartidas (SOL 0.15.30)
+
+En **/panorama/neural** el panel «VISUAL STUDIO» guarda automáticamente en
+\`localStorage["sol.neural.preferences.v1"]\` la paleta, colores, brillo,
+autoenfoque, autorrotación, zoom, deriva, velocidad de giro y **densidad de
+hubs** (0–100 %, valores mayores = centros más juntos). El iframe de **/panorama**
+y el protector de pantalla usan las **mismas preferencias**, sin imponer otro
+conjunto de controles; los cambios de otra pestaña se reciben con el evento
+\`storage\`.
+
+Las etiquetas flotantes del foco y sus vecinos permanecen ocultas durante el
+movimiento de cámara, y aparecen tras 1,2 segundos de enfoque estable. El
+recorrido automático sólo muestra etiquetas al centrarse en hubs o subcentros;
+la selección manual permite inspeccionar entidades individuales.
+
+La proyección ortográfica Three.js ajusta el frustum a la relación ancho/alto
+real y utiliza unidades de escena uniformes (sin estirar nodos o filamentos).
+El iframe Panorama usa relación **16:9** en escritorio y **4:3** en móvil;
+el fallback Canvas respeta el mismo escalado isotrópico.
+
+En **Sistema → Colores de SOL** hay cuatro temas y cinco selectores
+(principal, fondo, paneles, texto y luz ambiental), guardados en
+\`localStorage["sol.appearance.v1"]\` y aplicados a todas las páginas del
+marco SOL. Estas preferencias de navegador son visuales, no se transmiten al
+servidor ni requieren migraciones; cada navegador conserva su propia selección.
