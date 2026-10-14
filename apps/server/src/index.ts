@@ -30,6 +30,7 @@ import { handleInputsApi } from "./modules/inputs/routes.js";
 import { handlePluginInputApi } from "./modules/ingestion/plugin-input-routes.js";
 import { handleLifeApi } from "./modules/life/routes.js";
 import { handlePanoramaDailyApi } from "./modules/panorama/routes.js";
+import { getPanoramaNeuralNetwork } from "./modules/panorama/network.js";
 import { startDailyNarratives, stopDailyNarratives } from "./modules/panorama/daily.js";
 import { registerCandidateProcessor } from "./modules/knowledge/candidate-processor.js";
 import { handleKnowledgeApi } from "./modules/knowledge/routes.js";
@@ -162,6 +163,13 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
   }
   if (request.method === "GET" && path === "/panorama") {
     sendHtml(response, 200, renderDailyPanoramaPage());
+    return;
+  }
+  if (request.method === "GET" && path === "/panorama/neural") {
+    const principal = await principalFor(request, response);
+    if (!principal) return;
+    response.setHeader("cache-control", "private, no-store");
+    sendHtml(response, 200, readFileSync(new URL("../assets/panorama-neural.html", import.meta.url), "utf8"));
     return;
   }
   if (request.method === "GET" && path === "/inputs") {
@@ -351,6 +359,14 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     const principal = await principalFor(request, response);
     if (!principal) return;
     if (await handleAiApi(path, request, response, principal)) return;
+  }
+  if (path === "/v1/panorama/network") {
+    const principal = await principalFor(request, response);
+    if (!principal) return;
+    if (request.method !== "GET") { sendJson(response, 405, { error: "method_not_allowed" }); return; }
+    response.setHeader("cache-control", "private, no-store");
+    sendJson(response, 200, await getPanoramaNeuralNetwork(principal));
+    return;
   }
   if (path.startsWith("/v1/panorama/digest/")) {
     const principal = await principalFor(request, response);
