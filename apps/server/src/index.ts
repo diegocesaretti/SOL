@@ -165,6 +165,16 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     sendHtml(response, 200, renderDailyPanoramaPage());
     return;
   }
+  if (request.method === "GET" && path === "/panorama/three.min.js") {
+    const principal = await principalFor(request, response);
+    if (!principal) return;
+    response.statusCode = 200;
+    response.setHeader("content-type", "application/javascript; charset=utf-8");
+    response.setHeader("cache-control", "private, max-age=86400");
+    response.setHeader("x-content-type-options", "nosniff");
+    response.end(readFileSync(new URL("../assets/three-r152.min.js", import.meta.url)));
+    return;
+  }
   if (request.method === "GET" && path === "/panorama/neural") {
     const principal = await principalFor(request, response);
     if (!principal) return;
