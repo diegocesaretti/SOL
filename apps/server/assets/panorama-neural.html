@@ -852,8 +852,8 @@ html[data-sol-view="screensaver"] #sol-fs:hover,html[data-sol-view="screensaver"
   var latestGraph={nodes:[],edges:[]};
   var labelLayer=document.getElementById("neural-labels");
   var pending=false,refreshInterval=30000;
-  if(mode==="screensaver"){net.setAutoFocus(true);net.setAutoRotate(true);net.setRotationSpeed(.42);net.setZoom(1.35)}
-  if(mode==="embed"){net.setAutoFocus(true);net.setAutoRotate(true);net.setRotationSpeed(.28);net.setZoom(1.22)}
+  // The main Panorama, studio and screensaver deliberately share the exact
+  // same stored camera, density and palette preferences on this browser.
   net.setGraph({nodes:[],edges:[]});
   net.setReferenceOverlay(true,.13);
   function shape(payload){
@@ -897,12 +897,17 @@ html[data-sol-view="screensaver"] #sol-fs:hover,html[data-sol-view="screensaver"
     if(n.type==="group")return n.count?n.count+" eventos recientes":"Subcentro";
     return n.count?n.count+" observaciones visibles":"Centro conectado";
   }
+  var previousFocusId="",stableSince=0;
   function visibleLabelNodes(){
     var focus=net.getFocusState(),focusId=focus.selected||focus.targetId;
-    if(!focusId)return [];
+    if(!focusId){previousFocusId="";stableSince=0;return [];}
+    if(focusId!==previousFocusId){previousFocusId=focusId;stableSince=0;return [];}
+    if(!focus.settled){stableSince=0;return [];}
+    if(!stableSince){stableSince=performance.now();return [];}
+    if(performance.now()-stableSince<1200)return [];
     var index=new Map(latestGraph.nodes.map(function(n){return [n.id,n]}));
     var selected=index.get(focusId);
-    if(!selected)return [];
+    if(!selected || (!focus.selected && !selected.center && selected.type!=="group"))return [];
     var neighborIds=new Set();
     latestGraph.edges.forEach(function(e){
       if(e.source===focusId)neighborIds.add(e.target);
