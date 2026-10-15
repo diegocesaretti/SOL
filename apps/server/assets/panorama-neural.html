@@ -364,6 +364,7 @@
     atmosphere.style.opacity=styleState.palette==='original'?.9:.64;
     document.querySelector('.grain').style.display=styleState.grain?'block':'none';
     document.querySelector('.vignette').style.display=plain?'none':'block';
+    if(!plain)drawAtmosphere();
     if(render3d?.environment)render3d.environment();
   }
   function updatePalette(data){
@@ -375,7 +376,6 @@
     document.documentElement.style.setProperty('--warm',styleState.warm);
     document.documentElement.style.setProperty('--teal',styleState.cool);
     syncEnvironment();
-    if(styleState.backgroundMode!=='plain')drawAtmosphere();
     if(render3d?.recolor)render3d.recolor();
     updatePanel();savePrefs();return {...styleState};
   }
