@@ -731,15 +731,38 @@
 
       let edgeMeshes=[],nodePoints=null,nodeGeometry=null,nodeShader=null,signals=null;
       let focusedMesh=null,lastFocused=undefined;
-      let graphNodeMap=new Map(),edgesForSignals=[],activeLineMeshes=[];
-      function clearGroup(){for(const child of [...group.children]){if(child===signals)continue;group.remove(child);child.geometry?.dispose?.();child.material?.dispose?.()}majorSprites.length=0;edgeMeshes.length=0;activeLineMeshes.length=0;focusedMesh=null;lastFocused=undefined}
+      let graphNodeMap=new Map(),edgesForSignals=[],activeLineMeshes=[],glitchOverlay=null,glitchCandidates=[],lastArcUpdate=-1,lastHotUpdate=-1;
+      function curvedPoint(pa,pb,key,t,arcT=0,glitch=0){
+        const p=pa.clone().lerp(pb,t);
+        if(!t||t===1)return p;
+        const dx=pb.x-pa.x,dy=pb.y-pa.y,len=Math.hypot(dx,dy)||1;
+        const bend=Math.min(.60,len*.29)*styleState.curve/100*(hash(key)%2?1:-1)*Math.sin(Math.PI*t);
+        const jitter=glitch * .14 * Math.sin((t*13+arcT*7)+(hash(key)%97))*Math.sin(t*Math.PI);
+        const offset=bend+jitter;
+        p.x-=dy/len*offset;p.y+=dx/len*offset;
+        return p;
+      }
+      function sampleWorldEdge(a,b,key,glitch=0,clock=0){
+        const pa=worldPos(a),pb=worldPos(b),steps=styleState.curve||glitch?7:1,coords=[];
+        let last=pa;
+        for(let i=1;i<=steps;i++){
+          const cur=curvedPoint(pa,pb,key,i/steps,clock,glitch);
+          coords.push(...last.toArray(),...cur.toArray());last=cur;
+        }
+        return coords;
+      }
+      function clearGroup(){for(const child of [...group.children]){if(child===signals)continue;group.remove(child);child.geometry?.dispose?.();child.material?.dispose?.()}majorSprites.length=0;edgeMeshes.length=0;activeLineMeshes.length=0;focusedMesh=null;glitchOverlay=null;lastFocused=undefined;lastHotUpdate=-1}
       function buildGraph(){
         clearGroup();graphNodeMap=new Map(graph.nodes.map(n=>[n.id,n]));
         const lightEdges=[],darkEdges=[],tealEdges=[],signalCandidates=[];
+        glitchCandidates=[];
         let i=0;
         for(const e of graph.edges){const a=graphNodeMap.get(e.source),b=graphNodeMap.get(e.target);if(!a||!b)continue;
-          const aa=worldPos(a),bb=worldPos(b);const arr=e.strength>.47?lightEdges:e.strength>.25?darkEdges:tealEdges;
-          arr.push(...aa.toArray(),...bb.toArray());if(e.strength>.58)signalCandidates.push(e);
+          if(e.strength>.58)signalCandidates.push(e);
+          if(e.visual===false)continue;
+          const arr=e.strength>.47?lightEdges:e.strength>.25?darkEdges:tealEdges;
+          arr.push(...sampleWorldEdge(a,b,edgeKey(a.id,b.id)));
+          if(e.kind==='visual-mesh'||e.strength>.36)glitchCandidates.push(e);
           i++;
         }
         function addLines(positions,rgba,opacity){
@@ -749,6 +772,14 @@
           const line=new THREE.LineSegments(geo,mat);group.add(line);edgeMeshes.push({line,opacity});
         }
         addLines(darkEdges,styleState.cool,.28);addLines(tealEdges,styleState.cool,.32);addLines(lightEdges,styleState.warm,.48);
+        // One reused GPU geometry for intermittent electrical interference.
+        // No per-frame material or buffer allocations.
+        const maxArcs=14,steps=7,arcPositions=new Float32Array(maxArcs*steps*6);
+        const arcGeometry=new THREE.BufferGeometry();
+        arcGeometry.setAttribute('position',new THREE.BufferAttribute(arcPositions,3));
+        const arcMaterial=new THREE.LineBasicMaterial({color:styleState.warm,transparent:true,opacity:0,blending:THREE.AdditiveBlending,depthWrite:false,depthTest:false});
+        glitchOverlay=new THREE.LineSegments(arcGeometry,arcMaterial);
+        glitchOverlay.frustumCulled=false;glitchOverlay.renderOrder=6;group.add(glitchOverlay);
         const np=[],nc=[],ns=[];
         for(const n of graph.nodes){const p=worldPos(n),hub=isHub(n),major=(n.anchor&&n.activity>.58)||hub;
           np.push(...p.toArray());
@@ -793,26 +824,58 @@
         if(!selection)return;
         const pp=[];
         for(const e of graph.edges){
-          if(e.source!==selection&&e.target!==selection)continue;
+          if(e.visual===false||(e.source!==selection&&e.target!==selection))continue;
           const a=graphNodeMap.get(e.source),b=graphNodeMap.get(e.target);
-          if(a&&b){pp.push(...worldPos(a).toArray(),...worldPos(b).toArray())}
+          if(a&&b){pp.push(...sampleWorldEdge(a,b,edgeKey(a.id,b.id)))}
         }
         if(pp.length){const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(pp,3));
           const m=new THREE.LineBasicMaterial({color:styleState.warm,opacity:.96,transparent:true,blending:THREE.AdditiveBlending,depthTest:false,depthWrite:false});
           focusedMesh=new THREE.LineSegments(g,m);focusedMesh.renderOrder=4;group.add(focusedMesh)}
       }
-      function updateActiveLines(){
+      function updateActiveLines(t){
+        if(t-lastHotUpdate<.13)return;lastHotUpdate=t;
         while(activeLineMeshes.length){const item=activeLineMeshes.pop();group.remove(item.line);item.line.geometry.dispose();item.line.material.dispose();}
         const hot=[...edgeHeat.entries()].filter(([,v])=>v>.12).sort((a,b)=>b[1]-a[1]).slice(0,36);
         for(const [key,heat] of hot){
           const parts=key.split('↔');const a=graphNodeMap.get(parts[0]),b=graphNodeMap.get(parts[1]);
           if(!a||!b)continue;
-          const pos=[...worldPos(a).toArray(),...worldPos(b).toArray()];
+          // Semantic event routes stay hidden in mesh view; never create a
+          // misleading radial glow along a non-visible membership edge.
+          if(styleState.topology==='mesh')continue;
+          const pos=sampleWorldEdge(a,b,key);
           const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));
           const color=new THREE.Color(heat>.6?styleState.warm:styleState.cool);
           const m=new THREE.LineBasicMaterial({color,transparent:true,opacity:Math.min(.92,.18+heat*.32),blending:THREE.AdditiveBlending,depthWrite:false,depthTest:false});
           const line=new THREE.LineSegments(g,m);line.renderOrder=5;group.add(line);activeLineMeshes.push({line});
         }
+      }
+      function updateElectricArcs(t){
+        if(!glitchOverlay)return;
+        if(t-lastArcUpdate<.11)return;lastArcUpdate=t;
+        const intensity=styleState.glitch/100;
+        const positions=glitchOverlay.geometry.attributes.position;
+        if(!intensity||reducedMotion||!glitchCandidates.length||styleState.backgroundMode==='plain'&&intensity<.05){
+          glitchOverlay.material.opacity=0;return;
+        }
+        let used=0;
+        const limit=Math.min(14,glitchCandidates.length);
+        for(let i=0;i<limit;i++){
+          const idx=(i*29+Math.floor(t*6)*7)%glitchCandidates.length;
+          const e=glitchCandidates[idx];
+          const a=graphNodeMap.get(e.source),b=graphNodeMap.get(e.target);
+          if(!a||!b)continue;
+          const phase=hash(edgeKey(a.id,b.id))*.001 + t*6.13;
+          // Glitches flash only on a minority of existing mesh edges.
+          const visible=Math.sin(phase*1.73+i*4.7) > (1.03-intensity*.60);
+          const coords=visible?sampleWorldEdge(a,b,edgeKey(a.id,b.id),intensity,t):null;
+          for(let j=0;j<42;j++){
+            positions.array[used*42+j]=coords?coords[j]:0;
+          }
+          used++;
+        }
+        for(let i=used*42;i<positions.array.length;i++)positions.array[i]=0;
+        positions.needsUpdate=true;
+        glitchOverlay.material.opacity=.25+intensity*.55;
       }
       function render(dt,t){
         const aspect=w/h,viewH=12.8;
@@ -831,7 +894,7 @@
         backingBokeh.forEach(b=>{b.s.material.opacity=clamp(b.base*(.93+.07*Math.sin(t*b.rate+b.phase))*styleState.glow,0,1);b.s.position.y+=Math.sin(t*.12+b.phase)*.00013});
         majorSprites.forEach(s=>{const heat=Math.min(getHeat(nodeHeat,s.nodeId),1.3);const f=.9+.1*Math.sin(t*1.4+s.phase)+heat*.12; s.core.material.opacity=clamp((s.base+heat*.18)*f*styleState.glow,0,1);s.bloom.material.opacity=clamp((s.base*.51+heat*.12)*f*styleState.glow,0,1); if(s.ring){s.ring.material.opacity=clamp(.14+heat*.22,0,.72); const rs=s.ringBaseScale*(1+heat*.12); s.ring.scale.set(rs,rs,1);}});
         if(lastFocused!==selection)updateFocusLines();
-        updateActiveLines();
+        updateActiveLines(t);updateElectricArcs(t);
         if(selection){for(const item of edgeMeshes)item.line.material.opacity=item.opacity*.27;
           if(nodeShader)nodeShader.uniforms.uAlpha.value=.66;
         }else{for(const item of edgeMeshes)item.line.material.opacity=item.opacity;
@@ -850,8 +913,9 @@
         // Recreate graph shaders/sprites/filaments in the new palette.
         buildGraph();
       }
-      render3d={render,rebuild:buildGraph,refresh:buildGraph,recolor,project,resize(){const aspect=w/Math.max(h,1);camera.left=-6*aspect;camera.right=6*aspect;camera.top=6;camera.bottom=-6;camera.updateProjectionMatrix();renderer.setPixelRatio(dpr);renderer.setSize(w,h,false);dotsShader.uniforms.uDpr.value=dpr;signalMat.uniforms.uDpr.value=dpr;buildGraph()}};
-      fallback.style.display='none';render3d.resize();
+      function environment(){auxGroup.visible=styleState.backgroundMode!=='plain';}
+      render3d={render,rebuild:buildGraph,refresh:buildGraph,recolor,project,connectomes:buildGraph,environment,resize(){const aspect=w/Math.max(h,1);camera.left=-6*aspect;camera.right=6*aspect;camera.top=6;camera.bottom=-6;camera.updateProjectionMatrix();renderer.setPixelRatio(dpr);renderer.setSize(w,h,false);dotsShader.uniforms.uDpr.value=dpr;signalMat.uniforms.uDpr.value=dpr;buildGraph()}};
+      fallback.style.display='none';render3d.resize();environment();
     }catch(error){console.warn('Three.js renderer unavailable; using Canvas fallback.',error);render3d=null;}
   }
 
@@ -861,7 +925,7 @@
     fallback.width=Math.round(w*dpr);fallback.height=Math.round(h*dpr);drawAtmosphere();
     if(render3d)render3d.resize();
   }
-  onResize();restorePrefs(readPrefs());window.addEventListener('resize',onResize,{passive:true});window.visualViewport?.addEventListener('resize',onResize,{passive:true});
+  onResize();syncEnvironment();restorePrefs(readPrefs());window.addEventListener('resize',onResize,{passive:true});window.visualViewport?.addEventListener('resize',onResize,{passive:true});
   if((window.visualViewport?.width||window.innerWidth)<=560){controls.classList.add('collapsed');const btn=document.getElementById('collapseStudio');btn.textContent='+';btn.setAttribute('aria-expanded','false');}
   document.addEventListener('visibilitychange',()=>{active=!document.hidden;lastFrame=performance.now()});
   function loop(now){requestAnimationFrame(loop);if(!active)return;
