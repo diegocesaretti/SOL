@@ -39,7 +39,9 @@
   .view-status .focus-name{font-size:15px;letter-spacing:.03em;margin-top:7px;font-weight:450;color:#fff0dc;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .view-status .focus-meta{font-size:10px;letter-spacing:.10em;color:#8bafac;margin-top:5px}
   .controls{position:absolute;z-index:20;top:24px;right:26px;width:282px;color:#e6e9e4;border:1px solid rgba(166,220,217,.19);border-radius:15px;background:linear-gradient(135deg,rgba(17,36,43,.86),rgba(6,19,27,.83));box-shadow:0 10px 70px rgba(0,0,0,.34),inset 0 1px rgba(255,255,255,.075);backdrop-filter:blur(23px);-webkit-backdrop-filter:blur(23px);overflow:hidden;touch-action:auto}
-  .controls button,.controls input{font:inherit}
+  .controls button,.controls input,.controls select{font:inherit}
+  .studio-select{display:grid;gap:6px;color:#b9cbc6;font-size:11px;margin:9px 0 12px}
+  .studio-select select{width:100%;padding:8px 10px;color:#e0f0e9;border:1px solid rgba(165,208,207,.22);border-radius:8px;background:#10232c;cursor:pointer}
   .controls button{cursor:pointer}
   .panel-head{display:flex;justify-content:space-between;align-items:center;padding:15px 16px 14px;user-select:none}
   .panel-head .mini{font-size:10px;letter-spacing:.24em;color:#91b3b0}
@@ -97,6 +99,14 @@
       </div>
       <div class="section-title">CUSTOM PALETTE</div>
       <div class="colors"><label class="color-field">Signals<input type="color" id="colorWarm" value="#f5c18e" aria-label="Signal color" /></label><label class="color-field">Nodes<input type="color" id="colorCool" value="#85e1ce" aria-label="Secondary node color" /></label><label class="color-field">Space<input type="color" id="colorBackground" value="#061216" aria-label="Background color" /></label></div>
+      <div class="section-title">NETWORK TOPOLOGY</div>
+      <label class="studio-select" for="topologySelect">Layout <select id="topologySelect"><option value="mesh">Connected network mesh</option><option value="clusters">Clustered branches (classic)</option></select></label>
+      <label class="slider-title" for="curveRange">Connectome curvature <output id="curveValue">40%</output></label><input class="range" type="range" id="curveRange" min="0" max="100" step="5" value="40" />
+      <label class="slider-title" for="glitchRange">Glitch / electric flicker <output id="glitchValue">25%</output></label><input class="range" type="range" id="glitchRange" min="0" max="100" step="5" value="25" />
+      <div class="section-title">BACKGROUND &amp; EFFECTS</div>
+      <label class="studio-select" for="backgroundMode">Background <select id="backgroundMode"><option value="nebula">Nebula / atmospheric</option><option value="plain">Plain solid color</option></select></label>
+      <div class="toggle-row"><span class="toggle-label">Film grain / moiré texture<small>Remove the textured screen overlay</small></span><button type="button" class="switch" id="grainToggle" aria-label="Film grain overlay" aria-pressed="false"></button></div>
+      <div class="toggle-row"><span class="toggle-label">Image overlay<small>Blurred reference behind the network</small></span><button type="button" class="switch" id="imageToggle" aria-label="Reference image overlay" aria-pressed="false"></button></div>
       <div class="section-title">CAMERA</div>
       <div class="toggle-row"><span class="toggle-label">Auto-focus<small>Follow high-activity clusters</small></span><button type="button" class="switch" id="autoFocus" aria-label="Auto focus on active nodes" aria-pressed="true"></button></div>
       <div class="toggle-row"><span class="toggle-label">Auto-rotation<small>Continuous gentle 3D orbit</small></span><button type="button" class="switch" id="autoRotate" aria-label="Rotate network automatically" aria-pressed="true"></button></div>
@@ -270,7 +280,7 @@
     bioelectric:{warm:'#b6ff75',cool:'#3cf0c4',background:'#051713'},
     starlight:{warm:'#e6f1ff',cool:'#82a9ff',background:'#070e21'}
   };
-  const styleState={...palettes.original,glow:1,palette:'original'};
+  const styleState={...palettes.original,glow:1,palette:'original',backgroundMode:'nebula',grain:false,showImage:false,curve:40,glitch:25,topology:'mesh'};
   const rgb=(hex)=>{const n=parseInt(String(hex).replace('#',''),16);return [(n>>16)&255,(n>>8)&255,n&255]};
   const rgba=(hex,a)=>`rgba(${rgb(hex).join(',')},${a})`;
   const isHub=(n)=>!!(n && (n.center||n.hub||n.isCenter||n.isHub||n.role==='center'||n.role==='hub'||n.type==='center'||n.type==='hub'||n.type==='core'));
@@ -289,20 +299,29 @@
   let selectedOnPointerDown=false,dragDistance=0;
   const pointers=new Map();let pinchDistance=0;
   let applyingPrefs=false,saveTimer=null;
-  function snapshotPrefs(){return {palette:styleState.palette,warm:styleState.warm,cool:styleState.cool,background:styleState.background,glow:styleState.glow,autoFocus:view.autoFocus,autoRotate:view.autoRotate,focusZoom:view.focusZoom,speed:view.speed,rotationSpeed:view.rotationSpeed,density:view.density}}
+  function snapshotPrefs(){return {palette:styleState.palette,warm:styleState.warm,cool:styleState.cool,background:styleState.background,glow:styleState.glow,autoFocus:view.autoFocus,autoRotate:view.autoRotate,focusZoom:view.focusZoom,speed:view.speed,rotationSpeed:view.rotationSpeed,density:view.density,topology:styleState.topology,curve:styleState.curve,glitch:styleState.glitch,backgroundMode:styleState.backgroundMode,grain:styleState.grain,showImage:styleState.showImage}}
   function savePrefs(){if(applyingPrefs)return;clearTimeout(saveTimer);saveTimer=setTimeout(()=>{try{localStorage.setItem(PREF_KEY,JSON.stringify(snapshotPrefs()))}catch(error){console.warn('Could not save constellation preferences',error)}},160)}
   function restorePrefs(saved){if(!saved||typeof saved!=='object')return;applyingPrefs=true;
+    const oldTopology=styleState.topology,oldCurve=styleState.curve,oldGlitch=styleState.glitch;
     try{
       const number=(key,min,max)=>{if(Number.isFinite(saved[key]))view[key]=clamp(saved[key],min,max)};
       view.autoFocus=typeof saved.autoFocus==='boolean'?saved.autoFocus:view.autoFocus;
       view.autoRotate=typeof saved.autoRotate==='boolean'?saved.autoRotate:view.autoRotate;
       number('focusZoom',1,2.5);number('speed',.15,1.5);number('rotationSpeed',0,2.5);number('density',0,100);
+      if(saved.topology==='mesh'||saved.topology==='clusters')styleState.topology=saved.topology;
+      if(Number.isFinite(saved.curve))styleState.curve=clamp(saved.curve,0,100);
+      if(Number.isFinite(saved.glitch))styleState.glitch=clamp(saved.glitch,0,100);
+      if(saved.backgroundMode==='plain'||saved.backgroundMode==='nebula')styleState.backgroundMode=saved.backgroundMode;
+      if(typeof saved.grain==='boolean')styleState.grain=saved.grain;
+      if(typeof saved.showImage==='boolean')styleState.showImage=saved.showImage;
       const colors={};for(const k of ['warm','cool','background'])if(typeof saved[k]==='string'&&/^#[0-9a-f]{6}$/i.test(saved[k]))colors[k]=saved[k];
       if(Number.isFinite(saved.glow))colors.glow=clamp(saved.glow,.2,2);
       colors.palette=typeof saved.palette==='string'&&palettes[saved.palette]?saved.palette:'custom';
       updatePalette(colors);
       view.changeAt=animTime+.3;if(!view.autoFocus)view.targetId=null;
       if(render3d)render3d.rebuild();updatePanel();
+      if(styleState.topology!==oldTopology)window.dispatchEvent(new CustomEvent('ai-topology-changed'));
+      else if(styleState.curve!==oldCurve||styleState.glitch!==oldGlitch)window.dispatchEvent(new CustomEvent('ai-connectome-updated'));
     }finally{applyingPrefs=false}
   }
   function readPrefs(){try{return JSON.parse(localStorage.getItem(PREF_KEY)||'null')}catch{return null}}
@@ -320,6 +339,14 @@
     document.getElementById('rotationValue').textContent=view.rotationSpeed.toFixed(2)+'×';
     document.getElementById('densityRange').value=view.density;
     document.getElementById('densityValue').textContent=Math.round(view.density)+'%';
+    document.getElementById('topologySelect').value=styleState.topology;
+    document.getElementById('curveRange').value=styleState.curve;
+    document.getElementById('curveValue').textContent=Math.round(styleState.curve)+'%';
+    document.getElementById('glitchRange').value=styleState.glitch;
+    document.getElementById('glitchValue').textContent=Math.round(styleState.glitch)+'%';
+    document.getElementById('backgroundMode').value=styleState.backgroundMode;
+    document.getElementById('grainToggle').setAttribute('aria-pressed',String(styleState.grain));
+    document.getElementById('imageToggle').setAttribute('aria-pressed',String(styleState.showImage));
     document.getElementById('glowRange').value=styleState.glow;
     document.getElementById('glowValue').textContent=styleState.glow.toFixed(2)+'×';
     document.getElementById('pauseCamera').textContent=view.autoFocus?'Pause tour':'Resume tour';
@@ -327,6 +354,17 @@
     document.getElementById('colorWarm').value=styleState.warm;
     document.getElementById('colorCool').value=styleState.cool;
     document.getElementById('colorBackground').value=styleState.background;
+  }
+  function syncEnvironment(){
+    const plain=styleState.backgroundMode==='plain';
+    root.style.background=plain?styleState.background:`radial-gradient(ellipse at 54% 42%, ${styleState.cool}2b 0%, ${styleState.background} 52%, #030608 100%)`;
+    reference.style.display=styleState.showImage&&!plain?'block':'none';
+    reference.style.opacity=styleState.showImage?(styleState.palette==='original'?.28:.14):0;
+    atmosphere.style.display=plain?'none':'block';
+    atmosphere.style.opacity=styleState.palette==='original'?.9:.64;
+    document.querySelector('.grain').style.display=styleState.grain?'block':'none';
+    document.querySelector('.vignette').style.display=plain?'none':'block';
+    if(render3d?.environment)render3d.environment();
   }
   function updatePalette(data){
     for(const k of ['warm','cool','background'])if(data[k]&&/^#[0-9a-f]{6}$/i.test(data[k]))styleState[k]=data[k];
@@ -336,10 +374,8 @@
     document.documentElement.style.setProperty('--accent',styleState.warm);
     document.documentElement.style.setProperty('--warm',styleState.warm);
     document.documentElement.style.setProperty('--teal',styleState.cool);
-    root.style.background=`radial-gradient(ellipse at 54% 42%, ${styleState.cool}2b 0%, ${styleState.background} 50%, #030608 100%)`;
-    reference.style.opacity=styleState.palette==='original'?.37:.06;
-    atmosphere.style.opacity=styleState.palette==='original'?.9:.64;
-    drawAtmosphere();
+    syncEnvironment();
+    if(styleState.backgroundMode!=='plain')drawAtmosphere();
     if(render3d?.recolor)render3d.recolor();
     updatePanel();savePrefs();return {...styleState};
   }
@@ -553,6 +589,24 @@
   document.querySelectorAll('.preset').forEach(el=>el.addEventListener('click',()=>updatePalette({...palettes[el.dataset.palette],palette:el.dataset.palette})));
   for(const [id,key] of [['colorWarm','warm'],['colorCool','cool'],['colorBackground','background']])
     document.getElementById(id).addEventListener('input',e=>updatePalette({[key]:e.target.value}));
+  document.getElementById('topologySelect').addEventListener('change',e=>{
+    if(e.target.value!==styleState.topology){styleState.topology=e.target.value;updatePanel();savePrefs();window.dispatchEvent(new CustomEvent('ai-topology-changed'));}
+  });
+  for(const [key,control] of [['curve','curveRange'],['glitch','glitchRange']]){
+    document.getElementById(control).addEventListener('input',e=>{
+      styleState[key]=Number(e.target.value);updatePanel();savePrefs();
+      if(render3d?.connectomes)render3d.connectomes();
+    });
+  }
+  document.getElementById('backgroundMode').addEventListener('change',e=>{
+    styleState.backgroundMode=e.target.value;syncEnvironment();updatePanel();savePrefs();
+  });
+  document.getElementById('grainToggle').addEventListener('click',()=>{
+    styleState.grain=!styleState.grain;syncEnvironment();updatePanel();savePrefs();
+  });
+  document.getElementById('imageToggle').addEventListener('click',()=>{
+    styleState.showImage=!styleState.showImage;syncEnvironment();updatePanel();savePrefs();
+  });
   document.getElementById('autoFocus').addEventListener('click',()=>setAutoFocus(!view.autoFocus));
   document.getElementById('autoRotate').addEventListener('click',()=>{view.autoRotate=!view.autoRotate;updatePanel();savePrefs()});
   document.getElementById('zoomRange').addEventListener('input',e=>{view.focusZoom=Number(e.target.value);if(!view.autoFocus&&!selection)view.zoomGoal=view.focusZoom;updatePanel();savePrefs()});
@@ -582,15 +636,18 @@
     setColors(opts){return updatePalette(opts||{})},
     getColors(){return {...styleState}},
     setAutoFocus(on=true){setAutoFocus(on);return view.autoFocus},
-    setAutoRotate(on=true){view.autoRotate=!!on;updatePanel();return view.autoRotate},
-    setZoom(zoom=1.55){view.focusZoom=clamp(Number(zoom)||1,1,2.5);if(!view.autoFocus)view.zoomGoal=view.focusZoom;updatePanel();return view.focusZoom},
+    setAutoRotate(on=true){view.autoRotate=!!on;updatePanel();savePrefs();return view.autoRotate},
+    setZoom(zoom=1.55){view.focusZoom=clamp(Number(zoom)||1,1,2.5);if(!view.autoFocus)view.zoomGoal=view.focusZoom;updatePanel();savePrefs();return view.focusZoom},
     resetView(){document.getElementById('resetView').click()},
     setRotationSpeed(speed=.55){view.rotationSpeed=clamp(Number(speed)||0,0,2.5);updatePanel();savePrefs();return view.rotationSpeed},
     setDensity(density=60){view.density=clamp(Number(density)||0,0,100);if(render3d)render3d.rebuild();updatePanel();savePrefs();return view.density},
     getPreferences(){return snapshotPrefs()},
+    setTopology(topology='mesh'){if(!['mesh','clusters'].includes(topology))return false;styleState.topology=topology;updatePanel();savePrefs();window.dispatchEvent(new CustomEvent('ai-topology-changed'));return true},
+    setConnectomeEffects(curve=40,glitch=25){styleState.curve=clamp(Number(curve)||0,0,100);styleState.glitch=clamp(Number(glitch)||0,0,100);updatePanel();savePrefs();render3d?.connectomes?.();return true},
+    setBackgroundMode(mode='plain'){if(!['plain','nebula'].includes(mode))return false;styleState.backgroundMode=mode;syncEnvironment();updatePanel();savePrefs();return true},
     getViewSettings(){return {autoFocus:view.autoFocus,autoRotate:view.autoRotate,focusZoom:view.focusZoom,speed:view.speed,rotationSpeed:view.rotationSpeed,density:view.density,yaw:view.yaw,pitch:view.pitch,zoom:view.zoom,targetId:view.targetId,settled:!!(graph.nodes.find(n=>n.id===(selection||view.targetId))&&(selection||view.autoFocus)&&Math.abs(view.x-view.xGoal)<.023&&Math.abs(view.y-view.yGoal)<.023&&Math.abs(view.zoom-view.zoomGoal)<.075)}},
     showStats(show=true){statsVisible=!!show;info.classList.toggle('show',statsVisible);status.classList.toggle('show',statsVisible)},
-    setReferenceOverlay(enabled=true, opacity=.37){reference.style.display=enabled?'block':'none';reference.style.opacity=clamp(Number(opacity)||0,0,1);return true},
+    setReferenceOverlay(enabled=true){styleState.showImage=!!enabled;syncEnvironment();updatePanel();savePrefs();return true},
     get renderer(){return render3d?'three.js':'canvas fallback'},
   };
   window.AINetwork=API;
