@@ -7,7 +7,11 @@ import type { TimelineItem } from "../modules/life/timeline.js";
 
 test("daily Panorama renders an accessible calendar and archived editions",()=>{
   const html=renderDailyPanoramaPage();
-  assert.match(html,/El día, contado por SOL/);
+  assert.doesNotMatch(html,/SOL · Panorama · Memoria cotidiana/);
+  assert.doesNotMatch(html,/El día, contado por SOL/);
+  assert.doesNotMatch(html,/Una crónica con criterio/);
+  assert.doesNotMatch(html,/<div class="daily-top">/);
+  assert.match(html,/Ver evidencias en Life/);
   assert.match(html,/daily-days/);
   assert.match(html,/daily-narrative/);
   assert.match(html,/v1\/panorama\/digest\/day/);
