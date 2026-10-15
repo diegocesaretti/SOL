@@ -245,7 +245,7 @@
   function layoutIfNeeded(data){
     let nodes=data.nodes.map((n,i)=>({...n,id:String(n.id??i),label:String(n.label??n.id??`Node ${i+1}`),type:n.type||'node',role:n.role||n.type||'node',center:!!(n.center||n.hub||n.isCenter||n.isHub||n.role==='center'||n.role==='hub'||n.type==='center'||n.type==='hub'||n.type==='core'),hub:!!(n.hub||n.isHub||n.role==='hub'||n.type==='hub'),activity:clamp(Number(n.activity??.48),0,1)}));
     const idMap=new Map(nodes.map((n,i)=>[n.id,i]));
-    const edges=(data.edges||[]).map(e=>({source:String(e.source),target:String(e.target),strength:clamp(Number(e.strength??.6),0,1)})).filter(e=>idMap.has(e.source)&&idMap.has(e.target)&&e.source!==e.target);
+    const edges=(data.edges||[]).map(e=>({...e,source:String(e.source),target:String(e.target),strength:clamp(Number(e.strength??.6),0,1)})).filter(e=>idMap.has(e.source)&&idMap.has(e.target)&&e.source!==e.target);
     const missing=nodes.some(n=>!Number.isFinite(Number(n.x))||!Number.isFinite(Number(n.y))||n.x==null||n.y==null);
     if(missing){
       const rr=RNG(77);nodes.forEach((n,i)=>{if(n.x==null||n.y==null){const ang=TAU*(i/Math.max(nodes.length,1))+rr()*.3,rad=.15+.25*rr();n.x=.5+rad*Math.cos(ang)*1.3;n.y=.47+rad*Math.sin(ang)}});
@@ -912,7 +912,6 @@ html[data-sol-view="screensaver"] #sol-fs:hover,html[data-sol-view="screensaver"
   // The main Panorama, studio and screensaver deliberately share the exact
   // same stored camera, density and palette preferences on this browser.
   net.setGraph({nodes:[],edges:[]});
-  net.setReferenceOverlay(true,.13);
   function shape(payload){
     var nodes=payload.nodes.map(function(n){return Object.assign({},n)});
     var edges=payload.edges.map(function(e){return Object.assign({},e)});
@@ -926,6 +925,65 @@ html[data-sol-view="screensaver"] #sol-fs:hover,html[data-sol-view="screensaver"
       n.y=.5+(n.y-.5)*squash;
       n.z*=.8;
     });
+    if(net.getPreferences().topology==='mesh'){
+      // Keep actual SOL membership/event edges for live signals and inspection,
+      // but render an independent proximity mesh rather than radial spokes.
+      // Synthetic links are explicitly decorative, never represented as traffic.
+      edges.forEach(function(e){e.visual=false;});
+      var original=nodes.slice(), count=original.length;
+      var seed=function(str){var h=2166136261;for(var k=0;k<str.length;k++)h=Math.imul(h^str.charCodeAt(k),16777619);return h>>>0;};
+      original.forEach(function(n,i){
+        var hash=seed(n.id);
+        var angle=(hash%6283)/1000;
+        var jitter=n.role==='event'?.082:.048;
+        n.x=Math.max(.10,Math.min(.90,.5+(n.x-.5)*.94+Math.cos(angle)*jitter));
+        n.y=Math.max(.09,Math.min(.91,.5+(n.y-.5)*.94+Math.sin(angle)*jitter));
+        n.z+=(hash%31-15)/100;
+      });
+      // Evenly scattered anchor filaments fill empty pockets of the mesh.
+      var countDecorative=narrow?24:Math.min(74,Math.max(42,Math.floor(count*.52)));
+      var gold=2.399963229728653;
+      for(var i=0;i<countDecorative;i++){
+        var rad=Math.sqrt((i+.6)/(countDecorative+.8));
+        var theta=i*gold+0.27;
+        nodes.push({id:"mesh:filament:"+i,label:"Filamento",type:"relay",role:"decorative",
+          activity:.06,x:.5+Math.cos(theta)*rad*.39,y:.5+Math.sin(theta)*rad*.40,
+          z:Math.sin(i*1.43)*.35});
+      }
+      var links=new Set();
+      function meshLink(a,b,strength){
+        if(a.id===b.id)return;
+        var key=[a.id,b.id].sort().join("|");
+        if(links.has(key))return;
+        links.add(key);
+        edges.push({source:a.id,target:b.id,strength:strength,kind:"visual-mesh",visual:true});
+      }
+      // Nearest-neighbour triangulation; each point links to nearby peers,
+      // including actual domain hubs, printers, events and scattered filaments.
+      nodes.forEach(function(n,i){
+        var nearby=[];
+        for(var j=0;j<nodes.length;j++){
+          if(i===j)continue;
+          var q=nodes[j];
+          var dx=(n.x-q.x)*1.15,dy=n.y-q.y;
+          var d=Math.sqrt(dx*dx+dy*dy);
+          if(d<.245&&d>.014)nearby.push([d,q]);
+        }
+        nearby.sort(function(a,b){return a[0]-b[0]});
+        var degree=n.center?4:(n.role==="decorative"?3:2);
+        for(var j=0;j<Math.min(degree,nearby.length);j++){
+          // Edges are geometric, never presented as real communication.
+          meshLink(n,nearby[j][1],.20+Math.min(.48,(.18-nearby[j][0])*.90));
+        }
+      });
+      // Connect remote islands with a sparse spanning chain if necessary.
+      var sorted=nodes.slice().sort(function(a,b){return a.x-b.x||a.y-b.y});
+      for(var i=1;i<sorted.length;i++){
+        if(Math.hypot(sorted[i].x-sorted[i-1].x,sorted[i].y-sorted[i-1].y)<.14)
+          meshLink(sorted[i-1],sorted[i],.21);
+      }
+      return {nodes:nodes,edges:edges};
+    }
     // Decorative microfilaments only around stable centers and child groups.
     // Individual events never generate fake relays; they are real leaf nodes.
     var bases=nodes.filter(function(n){return n.center||n.type==="group"||n.type==="printer"||n.type==="device"});
@@ -1012,6 +1070,12 @@ html[data-sol-view="screensaver"] #sol-fs:hover,html[data-sol-view="screensaver"
     requestAnimationFrame(labelTick);
   }
   requestAnimationFrame(labelTick);
+  window.addEventListener("ai-topology-changed",function(){
+    if(!latestGraph.nodes.length)return;
+    lastSignature="";
+    net.setGraph(shape(latestGraph));
+    lastSignature=latestGraph.nodes.map(function(n){return n.id}).join("|");
+  });
   async function update(){
     if(pending || (document.hidden && mode!=="screensaver"))return;
     pending=true;
