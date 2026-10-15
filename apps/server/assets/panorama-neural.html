@@ -484,13 +484,13 @@
     const ctx=fallback.getContext('2d'),time=ts*.001;
     ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);
     ctx.save();ctx.globalCompositeOperation='screen';
-    for(const b of bokeh){const xx=b.x*w+mouse.x*b.r*.25, yy=b.y*h+mouse.y*b.r*.22;const rr=b.r*Math.min(w/1400+0.3,1.25);const pulse=.87+.13*Math.sin(time*b.speed+b.phase);
+    if(styleState.backgroundMode!=='plain')for(const b of bokeh){const xx=b.x*w+mouse.x*b.r*.25, yy=b.y*h+mouse.y*b.r*.22;const rr=b.r*Math.min(w/1400+0.3,1.25);const pulse=.87+.13*Math.sin(time*b.speed+b.phase);
       const g=ctx.createRadialGradient(xx,yy,0,xx,yy,rr*2.6);
       const c=rgb(b.warm?styleState.warm:styleState.cool).join(',');g.addColorStop(0,`rgba(${c},${Math.min(1,b.a*pulse*(b.hero?1:.75))})`);g.addColorStop(.22,`rgba(${c},${Math.min(1,b.a*(b.hero?.72:.52)*pulse)})`);g.addColorStop(.48,`rgba(${c},${b.a*(b.hero?.23:.13)*pulse})`);g.addColorStop(1,`rgba(${c},0)`);
       ctx.fillStyle=g;ctx.beginPath();ctx.arc(xx,yy,rr*2.6,0,TAU);ctx.fill();
       if(b.hero){ctx.beginPath();ctx.arc(xx,yy,rr*.72,0,TAU);ctx.fillStyle=rgba(b.warm?styleState.warm:styleState.cool,b.a*(b.warm?.27:.15)*pulse);ctx.fill();}
     }
-    for(const s of fallbackStars){ctx.globalAlpha=s.opacity*(.75+.25*Math.sin(time*.44+s.phase));ctx.fillStyle=s.teal?styleState.cool:'#e9e9d5';ctx.beginPath();ctx.arc(s.x*w,s.y*h,s.r*clamp(w/1450,.65,1.4),0,TAU);ctx.fill()}
+    if(styleState.backgroundMode!=='plain')for(const s of fallbackStars){ctx.globalAlpha=s.opacity*(.75+.25*Math.sin(time*.44+s.phase));ctx.fillStyle=s.teal?styleState.cool:'#e9e9d5';ctx.beginPath();ctx.arc(s.x*w,s.y*h,s.r*clamp(w/1450,.65,1.4),0,TAU);ctx.fill()}
     ctx.globalAlpha=1;
     ctx.save(); // Graph-only orbit, pan and zoom; background particles remain atmospheric.
     ctx.translate(w*.5,h*.5);ctx.scale(view.zoom,view.zoom);
@@ -498,14 +498,31 @@
     ctx.transform(cx,.12*Math.sin(view.pitch),.12*Math.sin(view.yaw),cp,0,0);
     const focus=focusPixel();ctx.translate(-focus.x,-focus.y);
     const idMap=new Map(graph.nodes.map(n=>[n.id,n]));
-    for(const e of graph.edges){const a=idMap.get(e.source),b=idMap.get(e.target);if(!a||!b)continue;
+    for(const e of graph.edges){if(e.visual===false)continue;const a=idMap.get(e.source),b=idMap.get(e.target);if(!a||!b)continue;
       const highlighted=selection&&(selection===e.source||selection===e.target);
       const heat=getHeat(edgeHeat,edgeKey(e.source,e.target));
       const alpha=(highlighted?.8:selection?.06:.15+e.strength*.32)+Math.min(heat,.95)*.25;
       ctx.lineWidth=(highlighted?1.4:.65+e.strength*.5)+Math.min(heat,1.35)*1.1;
       const edgeColor=(e.strength>.48||heat>.4)?styleState.warm:styleState.cool;
       ctx.strokeStyle=rgba(edgeColor,e.strength>.48||heat>.4?alpha:alpha*.78);
-      const aa=graphPixel(a),bb=graphPixel(b);ctx.beginPath();ctx.moveTo(aa.x,aa.y);ctx.lineTo(bb.x,bb.y);ctx.stroke();
+      const aa=graphPixel(a),bb=graphPixel(b);
+      const bend=styleState.curve/100;
+      const seed=hash(edgeKey(a.id,b.id));
+      const sign=seed%2?1:-1;
+      const length=Math.hypot(bb.x-aa.x,bb.y-aa.y)||1;
+      const nX=-(bb.y-aa.y)/length,nY=(bb.x-aa.x)/length;
+      const amount=Math.min(27,length*.30)*bend*sign;
+      ctx.beginPath();ctx.moveTo(aa.x,aa.y);
+      ctx.quadraticCurveTo((aa.x+bb.x)/2+nX*amount*2,(aa.y+bb.y)/2+nY*amount*2,bb.x,bb.y);ctx.stroke();
+      if(styleState.glitch>0 && !reducedMotion && Math.sin(time*8.5+seed*.013)>.955){
+        const mid=.44+.13*Math.sin(time*10+seed);
+        const cx=aa.x+(bb.x-aa.x)*mid+nX*amount,cy=aa.y+(bb.y-aa.y)*mid+nY*amount;
+        ctx.beginPath();ctx.lineWidth=.85+styleState.glitch*.012;
+        ctx.strokeStyle=rgba(styleState.warm,.13+styleState.glitch*.007);
+        ctx.moveTo(cx-nX*3,cy-nY*3);
+        ctx.lineTo(cx+nX*(styleState.glitch/100)*12,cy+nY*(styleState.glitch/100)*12);
+        ctx.stroke();
+      }
     }
     for(const n of graph.nodes){const p=graphPixel(n),xx=p.x,yy=p.y;
       const hub=isHub(n);
