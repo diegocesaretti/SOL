@@ -108,3 +108,41 @@ En **Sistema → Colores de SOL** hay cuatro temas y cinco selectores
 \`localStorage["sol.appearance.v1"]\` y aplicados a todas las páginas del
 marco SOL. Estas preferencias de navegador son visuales, no se transmiten al
 servidor ni requieren migraciones; cada navegador conserva su propia selección.
+
+
+## Connected Network Mesh and effects (SOL 0.15.32)
+
+**Viewer → NETWORK TOPOLOGY**
+
+- **Connected network mesh** (default for browsers with no saved topology): triangulated
+  proximity connections between all visible hubs, devices, printers, groups, and
+  event relays. Semantic Life edges are retained for genuine activity events
+  but hidden visually in mesh mode, avoiding misleading radial hub spokes.
+  Extra mesh filaments and proximity links are strictly decorative.
+- **Clustered branches (classic)**: the original peripheral relay filaments
+  remain available as a separate selectable layout.
+- **Connectome curvature** (0–100%): bends visible mesh connections
+  with subtle deterministic arcs in both WebGL and Canvas fallback.
+- **Glitch / electric flicker** (0–100%): momentary irregular electrical arcs,
+  throttled to about nine GPU updates per second with one reusable
+  Three.js geometry. Respects reduced-motion settings.
+
+**Viewer → BACKGROUND & EFFECTS**
+
+- **Nebula / atmospheric** or **Plain solid color**. Plain removes reference
+  photo, star/bokeh layers, atmosphere, and vignette while using the chosen
+  custom "Space" color as an untextured flat background.
+- **Film grain / moiré texture**: on/off; defaults off on fresh setups.
+- **Image overlay**: on/off; defaults off on fresh setups.
+
+All of these choices are appended to the existing
+\`sol.neural.preferences.v1\` record in the browser's localStorage. Older
+preferences are compatible (new settings fall back to their defaults).
+\`storage\` synchronizes preferences to other SOL pages and open iframes
+on the same origin/browser. An earlier embedded-view override that always
+re-enabled the blurred image has been removed. Saved settings stay local
+to the current browser; they are not yet cloud-/account-synchronized.
+
+Visual mesh edges are tagged \`kind:"visual-mesh"\` and never described as
+actual communications. The underlying observed Life events, semantics,
+visibility scopes and pulse triggers remain unchanged.

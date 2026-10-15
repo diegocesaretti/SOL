@@ -39,7 +39,9 @@
   .view-status .focus-name{font-size:15px;letter-spacing:.03em;margin-top:7px;font-weight:450;color:#fff0dc;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .view-status .focus-meta{font-size:10px;letter-spacing:.10em;color:#8bafac;margin-top:5px}
   .controls{position:absolute;z-index:20;top:24px;right:26px;width:282px;color:#e6e9e4;border:1px solid rgba(166,220,217,.19);border-radius:15px;background:linear-gradient(135deg,rgba(17,36,43,.86),rgba(6,19,27,.83));box-shadow:0 10px 70px rgba(0,0,0,.34),inset 0 1px rgba(255,255,255,.075);backdrop-filter:blur(23px);-webkit-backdrop-filter:blur(23px);overflow:hidden;touch-action:auto}
-  .controls button,.controls input{font:inherit}
+  .controls button,.controls input,.controls select{font:inherit}
+  .studio-select{display:grid;gap:6px;color:#b9cbc6;font-size:11px;margin:9px 0 12px}
+  .studio-select select{width:100%;padding:8px 10px;color:#e0f0e9;border:1px solid rgba(165,208,207,.22);border-radius:8px;background:#10232c;cursor:pointer}
   .controls button{cursor:pointer}
   .panel-head{display:flex;justify-content:space-between;align-items:center;padding:15px 16px 14px;user-select:none}
   .panel-head .mini{font-size:10px;letter-spacing:.24em;color:#91b3b0}
@@ -97,6 +99,14 @@
       </div>
       <div class="section-title">CUSTOM PALETTE</div>
       <div class="colors"><label class="color-field">Signals<input type="color" id="colorWarm" value="#f5c18e" aria-label="Signal color" /></label><label class="color-field">Nodes<input type="color" id="colorCool" value="#85e1ce" aria-label="Secondary node color" /></label><label class="color-field">Space<input type="color" id="colorBackground" value="#061216" aria-label="Background color" /></label></div>
+      <div class="section-title">NETWORK TOPOLOGY</div>
+      <label class="studio-select" for="topologySelect">Layout <select id="topologySelect"><option value="mesh">Connected network mesh</option><option value="clusters">Clustered branches (classic)</option></select></label>
+      <label class="slider-title" for="curveRange">Connectome curvature <output id="curveValue">40%</output></label><input class="range" type="range" id="curveRange" min="0" max="100" step="5" value="40" />
+      <label class="slider-title" for="glitchRange">Glitch / electric flicker <output id="glitchValue">25%</output></label><input class="range" type="range" id="glitchRange" min="0" max="100" step="5" value="25" />
+      <div class="section-title">BACKGROUND &amp; EFFECTS</div>
+      <label class="studio-select" for="backgroundMode">Background <select id="backgroundMode"><option value="nebula">Nebula / atmospheric</option><option value="plain">Plain solid color</option></select></label>
+      <div class="toggle-row"><span class="toggle-label">Film grain / moiré texture<small>Remove the textured screen overlay</small></span><button type="button" class="switch" id="grainToggle" aria-label="Film grain overlay" aria-pressed="false"></button></div>
+      <div class="toggle-row"><span class="toggle-label">Image overlay<small>Blurred reference behind the network</small></span><button type="button" class="switch" id="imageToggle" aria-label="Reference image overlay" aria-pressed="false"></button></div>
       <div class="section-title">CAMERA</div>
       <div class="toggle-row"><span class="toggle-label">Auto-focus<small>Follow high-activity clusters</small></span><button type="button" class="switch" id="autoFocus" aria-label="Auto focus on active nodes" aria-pressed="true"></button></div>
       <div class="toggle-row"><span class="toggle-label">Auto-rotation<small>Continuous gentle 3D orbit</small></span><button type="button" class="switch" id="autoRotate" aria-label="Rotate network automatically" aria-pressed="true"></button></div>
@@ -235,7 +245,7 @@
   function layoutIfNeeded(data){
     let nodes=data.nodes.map((n,i)=>({...n,id:String(n.id??i),label:String(n.label??n.id??`Node ${i+1}`),type:n.type||'node',role:n.role||n.type||'node',center:!!(n.center||n.hub||n.isCenter||n.isHub||n.role==='center'||n.role==='hub'||n.type==='center'||n.type==='hub'||n.type==='core'),hub:!!(n.hub||n.isHub||n.role==='hub'||n.type==='hub'),activity:clamp(Number(n.activity??.48),0,1)}));
     const idMap=new Map(nodes.map((n,i)=>[n.id,i]));
-    const edges=(data.edges||[]).map(e=>({source:String(e.source),target:String(e.target),strength:clamp(Number(e.strength??.6),0,1)})).filter(e=>idMap.has(e.source)&&idMap.has(e.target)&&e.source!==e.target);
+    const edges=(data.edges||[]).map(e=>({...e,source:String(e.source),target:String(e.target),strength:clamp(Number(e.strength??.6),0,1)})).filter(e=>idMap.has(e.source)&&idMap.has(e.target)&&e.source!==e.target);
     const missing=nodes.some(n=>!Number.isFinite(Number(n.x))||!Number.isFinite(Number(n.y))||n.x==null||n.y==null);
     if(missing){
       const rr=RNG(77);nodes.forEach((n,i)=>{if(n.x==null||n.y==null){const ang=TAU*(i/Math.max(nodes.length,1))+rr()*.3,rad=.15+.25*rr();n.x=.5+rad*Math.cos(ang)*1.3;n.y=.47+rad*Math.sin(ang)}});
@@ -270,7 +280,7 @@
     bioelectric:{warm:'#b6ff75',cool:'#3cf0c4',background:'#051713'},
     starlight:{warm:'#e6f1ff',cool:'#82a9ff',background:'#070e21'}
   };
-  const styleState={...palettes.original,glow:1,palette:'original'};
+  const styleState={...palettes.original,glow:1,palette:'original',backgroundMode:'nebula',grain:false,showImage:false,curve:40,glitch:25,topology:'mesh'};
   const rgb=(hex)=>{const n=parseInt(String(hex).replace('#',''),16);return [(n>>16)&255,(n>>8)&255,n&255]};
   const rgba=(hex,a)=>`rgba(${rgb(hex).join(',')},${a})`;
   const isHub=(n)=>!!(n && (n.center||n.hub||n.isCenter||n.isHub||n.role==='center'||n.role==='hub'||n.type==='center'||n.type==='hub'||n.type==='core'));
@@ -289,20 +299,29 @@
   let selectedOnPointerDown=false,dragDistance=0;
   const pointers=new Map();let pinchDistance=0;
   let applyingPrefs=false,saveTimer=null;
-  function snapshotPrefs(){return {palette:styleState.palette,warm:styleState.warm,cool:styleState.cool,background:styleState.background,glow:styleState.glow,autoFocus:view.autoFocus,autoRotate:view.autoRotate,focusZoom:view.focusZoom,speed:view.speed,rotationSpeed:view.rotationSpeed,density:view.density}}
+  function snapshotPrefs(){return {palette:styleState.palette,warm:styleState.warm,cool:styleState.cool,background:styleState.background,glow:styleState.glow,autoFocus:view.autoFocus,autoRotate:view.autoRotate,focusZoom:view.focusZoom,speed:view.speed,rotationSpeed:view.rotationSpeed,density:view.density,topology:styleState.topology,curve:styleState.curve,glitch:styleState.glitch,backgroundMode:styleState.backgroundMode,grain:styleState.grain,showImage:styleState.showImage}}
   function savePrefs(){if(applyingPrefs)return;clearTimeout(saveTimer);saveTimer=setTimeout(()=>{try{localStorage.setItem(PREF_KEY,JSON.stringify(snapshotPrefs()))}catch(error){console.warn('Could not save constellation preferences',error)}},160)}
   function restorePrefs(saved){if(!saved||typeof saved!=='object')return;applyingPrefs=true;
+    const oldTopology=styleState.topology,oldCurve=styleState.curve,oldGlitch=styleState.glitch;
     try{
       const number=(key,min,max)=>{if(Number.isFinite(saved[key]))view[key]=clamp(saved[key],min,max)};
       view.autoFocus=typeof saved.autoFocus==='boolean'?saved.autoFocus:view.autoFocus;
       view.autoRotate=typeof saved.autoRotate==='boolean'?saved.autoRotate:view.autoRotate;
       number('focusZoom',1,2.5);number('speed',.15,1.5);number('rotationSpeed',0,2.5);number('density',0,100);
+      if(saved.topology==='mesh'||saved.topology==='clusters')styleState.topology=saved.topology;
+      if(Number.isFinite(saved.curve))styleState.curve=clamp(saved.curve,0,100);
+      if(Number.isFinite(saved.glitch))styleState.glitch=clamp(saved.glitch,0,100);
+      if(saved.backgroundMode==='plain'||saved.backgroundMode==='nebula')styleState.backgroundMode=saved.backgroundMode;
+      if(typeof saved.grain==='boolean')styleState.grain=saved.grain;
+      if(typeof saved.showImage==='boolean')styleState.showImage=saved.showImage;
       const colors={};for(const k of ['warm','cool','background'])if(typeof saved[k]==='string'&&/^#[0-9a-f]{6}$/i.test(saved[k]))colors[k]=saved[k];
       if(Number.isFinite(saved.glow))colors.glow=clamp(saved.glow,.2,2);
       colors.palette=typeof saved.palette==='string'&&palettes[saved.palette]?saved.palette:'custom';
       updatePalette(colors);
       view.changeAt=animTime+.3;if(!view.autoFocus)view.targetId=null;
       if(render3d)render3d.rebuild();updatePanel();
+      if(styleState.topology!==oldTopology)window.dispatchEvent(new CustomEvent('ai-topology-changed'));
+      else if(styleState.curve!==oldCurve||styleState.glitch!==oldGlitch)window.dispatchEvent(new CustomEvent('ai-connectome-updated'));
     }finally{applyingPrefs=false}
   }
   function readPrefs(){try{return JSON.parse(localStorage.getItem(PREF_KEY)||'null')}catch{return null}}
@@ -320,6 +339,14 @@
     document.getElementById('rotationValue').textContent=view.rotationSpeed.toFixed(2)+'×';
     document.getElementById('densityRange').value=view.density;
     document.getElementById('densityValue').textContent=Math.round(view.density)+'%';
+    document.getElementById('topologySelect').value=styleState.topology;
+    document.getElementById('curveRange').value=styleState.curve;
+    document.getElementById('curveValue').textContent=Math.round(styleState.curve)+'%';
+    document.getElementById('glitchRange').value=styleState.glitch;
+    document.getElementById('glitchValue').textContent=Math.round(styleState.glitch)+'%';
+    document.getElementById('backgroundMode').value=styleState.backgroundMode;
+    document.getElementById('grainToggle').setAttribute('aria-pressed',String(styleState.grain));
+    document.getElementById('imageToggle').setAttribute('aria-pressed',String(styleState.showImage));
     document.getElementById('glowRange').value=styleState.glow;
     document.getElementById('glowValue').textContent=styleState.glow.toFixed(2)+'×';
     document.getElementById('pauseCamera').textContent=view.autoFocus?'Pause tour':'Resume tour';
@@ -327,6 +354,18 @@
     document.getElementById('colorWarm').value=styleState.warm;
     document.getElementById('colorCool').value=styleState.cool;
     document.getElementById('colorBackground').value=styleState.background;
+  }
+  function syncEnvironment(){
+    const plain=styleState.backgroundMode==='plain';
+    root.style.background=plain?styleState.background:`radial-gradient(ellipse at 54% 42%, ${styleState.cool}2b 0%, ${styleState.background} 52%, #030608 100%)`;
+    reference.style.display=styleState.showImage&&!plain?'block':'none';
+    reference.style.opacity=styleState.showImage?(styleState.palette==='original'?.28:.14):0;
+    atmosphere.style.display=plain?'none':'block';
+    atmosphere.style.opacity=styleState.palette==='original'?.9:.64;
+    document.querySelector('.grain').style.display=styleState.grain?'block':'none';
+    document.querySelector('.vignette').style.display=plain?'none':'block';
+    if(!plain)drawAtmosphere();
+    if(render3d?.environment)render3d.environment();
   }
   function updatePalette(data){
     for(const k of ['warm','cool','background'])if(data[k]&&/^#[0-9a-f]{6}$/i.test(data[k]))styleState[k]=data[k];
@@ -336,10 +375,7 @@
     document.documentElement.style.setProperty('--accent',styleState.warm);
     document.documentElement.style.setProperty('--warm',styleState.warm);
     document.documentElement.style.setProperty('--teal',styleState.cool);
-    root.style.background=`radial-gradient(ellipse at 54% 42%, ${styleState.cool}2b 0%, ${styleState.background} 50%, #030608 100%)`;
-    reference.style.opacity=styleState.palette==='original'?.37:.06;
-    atmosphere.style.opacity=styleState.palette==='original'?.9:.64;
-    drawAtmosphere();
+    syncEnvironment();
     if(render3d?.recolor)render3d.recolor();
     updatePanel();savePrefs();return {...styleState};
   }
@@ -448,13 +484,13 @@
     const ctx=fallback.getContext('2d'),time=ts*.001;
     ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);
     ctx.save();ctx.globalCompositeOperation='screen';
-    for(const b of bokeh){const xx=b.x*w+mouse.x*b.r*.25, yy=b.y*h+mouse.y*b.r*.22;const rr=b.r*Math.min(w/1400+0.3,1.25);const pulse=.87+.13*Math.sin(time*b.speed+b.phase);
+    if(styleState.backgroundMode!=='plain')for(const b of bokeh){const xx=b.x*w+mouse.x*b.r*.25, yy=b.y*h+mouse.y*b.r*.22;const rr=b.r*Math.min(w/1400+0.3,1.25);const pulse=.87+.13*Math.sin(time*b.speed+b.phase);
       const g=ctx.createRadialGradient(xx,yy,0,xx,yy,rr*2.6);
       const c=rgb(b.warm?styleState.warm:styleState.cool).join(',');g.addColorStop(0,`rgba(${c},${Math.min(1,b.a*pulse*(b.hero?1:.75))})`);g.addColorStop(.22,`rgba(${c},${Math.min(1,b.a*(b.hero?.72:.52)*pulse)})`);g.addColorStop(.48,`rgba(${c},${b.a*(b.hero?.23:.13)*pulse})`);g.addColorStop(1,`rgba(${c},0)`);
       ctx.fillStyle=g;ctx.beginPath();ctx.arc(xx,yy,rr*2.6,0,TAU);ctx.fill();
       if(b.hero){ctx.beginPath();ctx.arc(xx,yy,rr*.72,0,TAU);ctx.fillStyle=rgba(b.warm?styleState.warm:styleState.cool,b.a*(b.warm?.27:.15)*pulse);ctx.fill();}
     }
-    for(const s of fallbackStars){ctx.globalAlpha=s.opacity*(.75+.25*Math.sin(time*.44+s.phase));ctx.fillStyle=s.teal?styleState.cool:'#e9e9d5';ctx.beginPath();ctx.arc(s.x*w,s.y*h,s.r*clamp(w/1450,.65,1.4),0,TAU);ctx.fill()}
+    if(styleState.backgroundMode!=='plain')for(const s of fallbackStars){ctx.globalAlpha=s.opacity*(.75+.25*Math.sin(time*.44+s.phase));ctx.fillStyle=s.teal?styleState.cool:'#e9e9d5';ctx.beginPath();ctx.arc(s.x*w,s.y*h,s.r*clamp(w/1450,.65,1.4),0,TAU);ctx.fill()}
     ctx.globalAlpha=1;
     ctx.save(); // Graph-only orbit, pan and zoom; background particles remain atmospheric.
     ctx.translate(w*.5,h*.5);ctx.scale(view.zoom,view.zoom);
@@ -462,14 +498,31 @@
     ctx.transform(cx,.12*Math.sin(view.pitch),.12*Math.sin(view.yaw),cp,0,0);
     const focus=focusPixel();ctx.translate(-focus.x,-focus.y);
     const idMap=new Map(graph.nodes.map(n=>[n.id,n]));
-    for(const e of graph.edges){const a=idMap.get(e.source),b=idMap.get(e.target);if(!a||!b)continue;
+    for(const e of graph.edges){if(e.visual===false)continue;const a=idMap.get(e.source),b=idMap.get(e.target);if(!a||!b)continue;
       const highlighted=selection&&(selection===e.source||selection===e.target);
       const heat=getHeat(edgeHeat,edgeKey(e.source,e.target));
       const alpha=(highlighted?.8:selection?.06:.15+e.strength*.32)+Math.min(heat,.95)*.25;
       ctx.lineWidth=(highlighted?1.4:.65+e.strength*.5)+Math.min(heat,1.35)*1.1;
       const edgeColor=(e.strength>.48||heat>.4)?styleState.warm:styleState.cool;
       ctx.strokeStyle=rgba(edgeColor,e.strength>.48||heat>.4?alpha:alpha*.78);
-      const aa=graphPixel(a),bb=graphPixel(b);ctx.beginPath();ctx.moveTo(aa.x,aa.y);ctx.lineTo(bb.x,bb.y);ctx.stroke();
+      const aa=graphPixel(a),bb=graphPixel(b);
+      const bend=styleState.curve/100;
+      const seed=hash(edgeKey(a.id,b.id));
+      const sign=seed%2?1:-1;
+      const length=Math.hypot(bb.x-aa.x,bb.y-aa.y)||1;
+      const nX=-(bb.y-aa.y)/length,nY=(bb.x-aa.x)/length;
+      const amount=Math.min(27,length*.30)*bend*sign;
+      ctx.beginPath();ctx.moveTo(aa.x,aa.y);
+      ctx.quadraticCurveTo((aa.x+bb.x)/2+nX*amount*2,(aa.y+bb.y)/2+nY*amount*2,bb.x,bb.y);ctx.stroke();
+      if(styleState.glitch>0 && !reducedMotion && Math.sin(time*8.5+seed*.013)>.955){
+        const mid=.44+.13*Math.sin(time*10+seed);
+        const cx=aa.x+(bb.x-aa.x)*mid+nX*amount,cy=aa.y+(bb.y-aa.y)*mid+nY*amount;
+        ctx.beginPath();ctx.lineWidth=.85+styleState.glitch*.012;
+        ctx.strokeStyle=rgba(styleState.warm,.13+styleState.glitch*.007);
+        ctx.moveTo(cx-nX*3,cy-nY*3);
+        ctx.lineTo(cx+nX*(styleState.glitch/100)*12,cy+nY*(styleState.glitch/100)*12);
+        ctx.stroke();
+      }
     }
     for(const n of graph.nodes){const p=graphPixel(n),xx=p.x,yy=p.y;
       const hub=isHub(n);
@@ -553,6 +606,24 @@
   document.querySelectorAll('.preset').forEach(el=>el.addEventListener('click',()=>updatePalette({...palettes[el.dataset.palette],palette:el.dataset.palette})));
   for(const [id,key] of [['colorWarm','warm'],['colorCool','cool'],['colorBackground','background']])
     document.getElementById(id).addEventListener('input',e=>updatePalette({[key]:e.target.value}));
+  document.getElementById('topologySelect').addEventListener('change',e=>{
+    if(e.target.value!==styleState.topology){styleState.topology=e.target.value;updatePanel();savePrefs();window.dispatchEvent(new CustomEvent('ai-topology-changed'));}
+  });
+  for(const [key,control] of [['curve','curveRange'],['glitch','glitchRange']]){
+    document.getElementById(control).addEventListener('input',e=>{
+      styleState[key]=Number(e.target.value);updatePanel();savePrefs();
+      if(render3d?.connectomes)render3d.connectomes();
+    });
+  }
+  document.getElementById('backgroundMode').addEventListener('change',e=>{
+    styleState.backgroundMode=e.target.value;syncEnvironment();updatePanel();savePrefs();
+  });
+  document.getElementById('grainToggle').addEventListener('click',()=>{
+    styleState.grain=!styleState.grain;syncEnvironment();updatePanel();savePrefs();
+  });
+  document.getElementById('imageToggle').addEventListener('click',()=>{
+    styleState.showImage=!styleState.showImage;syncEnvironment();updatePanel();savePrefs();
+  });
   document.getElementById('autoFocus').addEventListener('click',()=>setAutoFocus(!view.autoFocus));
   document.getElementById('autoRotate').addEventListener('click',()=>{view.autoRotate=!view.autoRotate;updatePanel();savePrefs()});
   document.getElementById('zoomRange').addEventListener('input',e=>{view.focusZoom=Number(e.target.value);if(!view.autoFocus&&!selection)view.zoomGoal=view.focusZoom;updatePanel();savePrefs()});
@@ -582,15 +653,18 @@
     setColors(opts){return updatePalette(opts||{})},
     getColors(){return {...styleState}},
     setAutoFocus(on=true){setAutoFocus(on);return view.autoFocus},
-    setAutoRotate(on=true){view.autoRotate=!!on;updatePanel();return view.autoRotate},
-    setZoom(zoom=1.55){view.focusZoom=clamp(Number(zoom)||1,1,2.5);if(!view.autoFocus)view.zoomGoal=view.focusZoom;updatePanel();return view.focusZoom},
+    setAutoRotate(on=true){view.autoRotate=!!on;updatePanel();savePrefs();return view.autoRotate},
+    setZoom(zoom=1.55){view.focusZoom=clamp(Number(zoom)||1,1,2.5);if(!view.autoFocus)view.zoomGoal=view.focusZoom;updatePanel();savePrefs();return view.focusZoom},
     resetView(){document.getElementById('resetView').click()},
     setRotationSpeed(speed=.55){view.rotationSpeed=clamp(Number(speed)||0,0,2.5);updatePanel();savePrefs();return view.rotationSpeed},
     setDensity(density=60){view.density=clamp(Number(density)||0,0,100);if(render3d)render3d.rebuild();updatePanel();savePrefs();return view.density},
     getPreferences(){return snapshotPrefs()},
+    setTopology(topology='mesh'){if(!['mesh','clusters'].includes(topology))return false;styleState.topology=topology;updatePanel();savePrefs();window.dispatchEvent(new CustomEvent('ai-topology-changed'));return true},
+    setConnectomeEffects(curve=40,glitch=25){styleState.curve=clamp(Number(curve)||0,0,100);styleState.glitch=clamp(Number(glitch)||0,0,100);updatePanel();savePrefs();render3d?.connectomes?.();return true},
+    setBackgroundMode(mode='plain'){if(!['plain','nebula'].includes(mode))return false;styleState.backgroundMode=mode;syncEnvironment();updatePanel();savePrefs();return true},
     getViewSettings(){return {autoFocus:view.autoFocus,autoRotate:view.autoRotate,focusZoom:view.focusZoom,speed:view.speed,rotationSpeed:view.rotationSpeed,density:view.density,yaw:view.yaw,pitch:view.pitch,zoom:view.zoom,targetId:view.targetId,settled:!!(graph.nodes.find(n=>n.id===(selection||view.targetId))&&(selection||view.autoFocus)&&Math.abs(view.x-view.xGoal)<.023&&Math.abs(view.y-view.yGoal)<.023&&Math.abs(view.zoom-view.zoomGoal)<.075)}},
     showStats(show=true){statsVisible=!!show;info.classList.toggle('show',statsVisible);status.classList.toggle('show',statsVisible)},
-    setReferenceOverlay(enabled=true, opacity=.37){reference.style.display=enabled?'block':'none';reference.style.opacity=clamp(Number(opacity)||0,0,1);return true},
+    setReferenceOverlay(enabled=true){styleState.showImage=!!enabled;syncEnvironment();updatePanel();savePrefs();return true},
     get renderer(){return render3d?'three.js':'canvas fallback'},
   };
   window.AINetwork=API;
@@ -657,15 +731,38 @@
 
       let edgeMeshes=[],nodePoints=null,nodeGeometry=null,nodeShader=null,signals=null;
       let focusedMesh=null,lastFocused=undefined;
-      let graphNodeMap=new Map(),edgesForSignals=[],activeLineMeshes=[];
-      function clearGroup(){for(const child of [...group.children]){if(child===signals)continue;group.remove(child);child.geometry?.dispose?.();child.material?.dispose?.()}majorSprites.length=0;edgeMeshes.length=0;activeLineMeshes.length=0;focusedMesh=null;lastFocused=undefined}
+      let graphNodeMap=new Map(),edgesForSignals=[],activeLineMeshes=[],glitchOverlay=null,glitchCandidates=[],lastArcUpdate=-1,lastHotUpdate=-1;
+      function curvedPoint(pa,pb,key,t,arcT=0,glitch=0){
+        const p=pa.clone().lerp(pb,t);
+        if(!t||t===1)return p;
+        const dx=pb.x-pa.x,dy=pb.y-pa.y,len=Math.hypot(dx,dy)||1;
+        const bend=Math.min(.60,len*.29)*styleState.curve/100*(hash(key)%2?1:-1)*Math.sin(Math.PI*t);
+        const jitter=glitch * .14 * Math.sin((t*13+arcT*7)+(hash(key)%97))*Math.sin(t*Math.PI);
+        const offset=bend+jitter;
+        p.x-=dy/len*offset;p.y+=dx/len*offset;
+        return p;
+      }
+      function sampleWorldEdge(a,b,key,glitch=0,clock=0){
+        const pa=worldPos(a),pb=worldPos(b),steps=styleState.curve||glitch?7:1,coords=[];
+        let last=pa;
+        for(let i=1;i<=steps;i++){
+          const cur=curvedPoint(pa,pb,key,i/steps,clock,glitch);
+          coords.push(...last.toArray(),...cur.toArray());last=cur;
+        }
+        return coords;
+      }
+      function clearGroup(){for(const child of [...group.children]){if(child===signals)continue;group.remove(child);child.geometry?.dispose?.();child.material?.dispose?.()}majorSprites.length=0;edgeMeshes.length=0;activeLineMeshes.length=0;focusedMesh=null;glitchOverlay=null;lastFocused=undefined;lastHotUpdate=-1}
       function buildGraph(){
         clearGroup();graphNodeMap=new Map(graph.nodes.map(n=>[n.id,n]));
         const lightEdges=[],darkEdges=[],tealEdges=[],signalCandidates=[];
+        glitchCandidates=[];
         let i=0;
         for(const e of graph.edges){const a=graphNodeMap.get(e.source),b=graphNodeMap.get(e.target);if(!a||!b)continue;
-          const aa=worldPos(a),bb=worldPos(b);const arr=e.strength>.47?lightEdges:e.strength>.25?darkEdges:tealEdges;
-          arr.push(...aa.toArray(),...bb.toArray());if(e.strength>.58)signalCandidates.push(e);
+          if(e.strength>.58)signalCandidates.push(e);
+          if(e.visual===false)continue;
+          const arr=e.strength>.47?lightEdges:e.strength>.25?darkEdges:tealEdges;
+          arr.push(...sampleWorldEdge(a,b,edgeKey(a.id,b.id)));
+          if(e.kind==='visual-mesh'||e.strength>.36)glitchCandidates.push(e);
           i++;
         }
         function addLines(positions,rgba,opacity){
@@ -675,6 +772,14 @@
           const line=new THREE.LineSegments(geo,mat);group.add(line);edgeMeshes.push({line,opacity});
         }
         addLines(darkEdges,styleState.cool,.28);addLines(tealEdges,styleState.cool,.32);addLines(lightEdges,styleState.warm,.48);
+        // One reused GPU geometry for intermittent electrical interference.
+        // No per-frame material or buffer allocations.
+        const maxArcs=14,steps=7,arcPositions=new Float32Array(maxArcs*steps*6);
+        const arcGeometry=new THREE.BufferGeometry();
+        arcGeometry.setAttribute('position',new THREE.BufferAttribute(arcPositions,3));
+        const arcMaterial=new THREE.LineBasicMaterial({color:styleState.warm,transparent:true,opacity:0,blending:THREE.AdditiveBlending,depthWrite:false,depthTest:false});
+        glitchOverlay=new THREE.LineSegments(arcGeometry,arcMaterial);
+        glitchOverlay.frustumCulled=false;glitchOverlay.renderOrder=6;group.add(glitchOverlay);
         const np=[],nc=[],ns=[];
         for(const n of graph.nodes){const p=worldPos(n),hub=isHub(n),major=(n.anchor&&n.activity>.58)||hub;
           np.push(...p.toArray());
@@ -719,26 +824,58 @@
         if(!selection)return;
         const pp=[];
         for(const e of graph.edges){
-          if(e.source!==selection&&e.target!==selection)continue;
+          if(e.visual===false||(e.source!==selection&&e.target!==selection))continue;
           const a=graphNodeMap.get(e.source),b=graphNodeMap.get(e.target);
-          if(a&&b){pp.push(...worldPos(a).toArray(),...worldPos(b).toArray())}
+          if(a&&b){pp.push(...sampleWorldEdge(a,b,edgeKey(a.id,b.id)))}
         }
         if(pp.length){const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(pp,3));
           const m=new THREE.LineBasicMaterial({color:styleState.warm,opacity:.96,transparent:true,blending:THREE.AdditiveBlending,depthTest:false,depthWrite:false});
           focusedMesh=new THREE.LineSegments(g,m);focusedMesh.renderOrder=4;group.add(focusedMesh)}
       }
-      function updateActiveLines(){
+      function updateActiveLines(t){
+        if(t-lastHotUpdate<.13)return;lastHotUpdate=t;
         while(activeLineMeshes.length){const item=activeLineMeshes.pop();group.remove(item.line);item.line.geometry.dispose();item.line.material.dispose();}
         const hot=[...edgeHeat.entries()].filter(([,v])=>v>.12).sort((a,b)=>b[1]-a[1]).slice(0,36);
         for(const [key,heat] of hot){
           const parts=key.split('↔');const a=graphNodeMap.get(parts[0]),b=graphNodeMap.get(parts[1]);
           if(!a||!b)continue;
-          const pos=[...worldPos(a).toArray(),...worldPos(b).toArray()];
+          // Semantic event routes stay hidden in mesh view; never create a
+          // misleading radial glow along a non-visible membership edge.
+          if(styleState.topology==='mesh')continue;
+          const pos=sampleWorldEdge(a,b,key);
           const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));
           const color=new THREE.Color(heat>.6?styleState.warm:styleState.cool);
           const m=new THREE.LineBasicMaterial({color,transparent:true,opacity:Math.min(.92,.18+heat*.32),blending:THREE.AdditiveBlending,depthWrite:false,depthTest:false});
           const line=new THREE.LineSegments(g,m);line.renderOrder=5;group.add(line);activeLineMeshes.push({line});
         }
+      }
+      function updateElectricArcs(t){
+        if(!glitchOverlay)return;
+        if(t-lastArcUpdate<.11)return;lastArcUpdate=t;
+        const intensity=styleState.glitch/100;
+        const positions=glitchOverlay.geometry.attributes.position;
+        if(!intensity||reducedMotion||!glitchCandidates.length||styleState.backgroundMode==='plain'&&intensity<.05){
+          glitchOverlay.material.opacity=0;return;
+        }
+        let used=0;
+        const limit=Math.min(14,glitchCandidates.length);
+        for(let i=0;i<limit;i++){
+          const idx=(i*29+Math.floor(t*6)*7)%glitchCandidates.length;
+          const e=glitchCandidates[idx];
+          const a=graphNodeMap.get(e.source),b=graphNodeMap.get(e.target);
+          if(!a||!b)continue;
+          const phase=hash(edgeKey(a.id,b.id))*.001 + t*6.13;
+          // Glitches flash only on a minority of existing mesh edges.
+          const visible=Math.sin(phase*1.73+i*4.7) > (1.03-intensity*.60);
+          const coords=visible?sampleWorldEdge(a,b,edgeKey(a.id,b.id),intensity,t):null;
+          for(let j=0;j<42;j++){
+            positions.array[used*42+j]=coords?coords[j]:0;
+          }
+          used++;
+        }
+        for(let i=used*42;i<positions.array.length;i++)positions.array[i]=0;
+        positions.needsUpdate=true;
+        glitchOverlay.material.opacity=.25+intensity*.55;
       }
       function render(dt,t){
         const aspect=w/h,viewH=12.8;
@@ -757,7 +894,7 @@
         backingBokeh.forEach(b=>{b.s.material.opacity=clamp(b.base*(.93+.07*Math.sin(t*b.rate+b.phase))*styleState.glow,0,1);b.s.position.y+=Math.sin(t*.12+b.phase)*.00013});
         majorSprites.forEach(s=>{const heat=Math.min(getHeat(nodeHeat,s.nodeId),1.3);const f=.9+.1*Math.sin(t*1.4+s.phase)+heat*.12; s.core.material.opacity=clamp((s.base+heat*.18)*f*styleState.glow,0,1);s.bloom.material.opacity=clamp((s.base*.51+heat*.12)*f*styleState.glow,0,1); if(s.ring){s.ring.material.opacity=clamp(.14+heat*.22,0,.72); const rs=s.ringBaseScale*(1+heat*.12); s.ring.scale.set(rs,rs,1);}});
         if(lastFocused!==selection)updateFocusLines();
-        updateActiveLines();
+        updateActiveLines(t);updateElectricArcs(t);
         if(selection){for(const item of edgeMeshes)item.line.material.opacity=item.opacity*.27;
           if(nodeShader)nodeShader.uniforms.uAlpha.value=.66;
         }else{for(const item of edgeMeshes)item.line.material.opacity=item.opacity;
@@ -776,8 +913,9 @@
         // Recreate graph shaders/sprites/filaments in the new palette.
         buildGraph();
       }
-      render3d={render,rebuild:buildGraph,refresh:buildGraph,recolor,project,resize(){const aspect=w/Math.max(h,1);camera.left=-6*aspect;camera.right=6*aspect;camera.top=6;camera.bottom=-6;camera.updateProjectionMatrix();renderer.setPixelRatio(dpr);renderer.setSize(w,h,false);dotsShader.uniforms.uDpr.value=dpr;signalMat.uniforms.uDpr.value=dpr;buildGraph()}};
-      fallback.style.display='none';render3d.resize();
+      function environment(){auxGroup.visible=styleState.backgroundMode!=='plain';}
+      render3d={render,rebuild:buildGraph,refresh:buildGraph,recolor,project,connectomes:buildGraph,environment,resize(){const aspect=w/Math.max(h,1);camera.left=-6*aspect;camera.right=6*aspect;camera.top=6;camera.bottom=-6;camera.updateProjectionMatrix();renderer.setPixelRatio(dpr);renderer.setSize(w,h,false);dotsShader.uniforms.uDpr.value=dpr;signalMat.uniforms.uDpr.value=dpr;buildGraph()}};
+      fallback.style.display='none';render3d.resize();environment();
     }catch(error){console.warn('Three.js renderer unavailable; using Canvas fallback.',error);render3d=null;}
   }
 
@@ -787,7 +925,7 @@
     fallback.width=Math.round(w*dpr);fallback.height=Math.round(h*dpr);drawAtmosphere();
     if(render3d)render3d.resize();
   }
-  onResize();restorePrefs(readPrefs());window.addEventListener('resize',onResize,{passive:true});window.visualViewport?.addEventListener('resize',onResize,{passive:true});
+  onResize();syncEnvironment();restorePrefs(readPrefs());window.addEventListener('resize',onResize,{passive:true});window.visualViewport?.addEventListener('resize',onResize,{passive:true});
   if((window.visualViewport?.width||window.innerWidth)<=560){controls.classList.add('collapsed');const btn=document.getElementById('collapseStudio');btn.textContent='+';btn.setAttribute('aria-expanded','false');}
   document.addEventListener('visibilitychange',()=>{active=!document.hidden;lastFrame=performance.now()});
   function loop(now){requestAnimationFrame(loop);if(!active)return;
@@ -855,7 +993,6 @@ html[data-sol-view="screensaver"] #sol-fs:hover,html[data-sol-view="screensaver"
   // The main Panorama, studio and screensaver deliberately share the exact
   // same stored camera, density and palette preferences on this browser.
   net.setGraph({nodes:[],edges:[]});
-  net.setReferenceOverlay(true,.13);
   function shape(payload){
     var nodes=payload.nodes.map(function(n){return Object.assign({},n)});
     var edges=payload.edges.map(function(e){return Object.assign({},e)});
@@ -869,6 +1006,65 @@ html[data-sol-view="screensaver"] #sol-fs:hover,html[data-sol-view="screensaver"
       n.y=.5+(n.y-.5)*squash;
       n.z*=.8;
     });
+    if(net.getPreferences().topology==='mesh'){
+      // Keep actual SOL membership/event edges for live signals and inspection,
+      // but render an independent proximity mesh rather than radial spokes.
+      // Synthetic links are explicitly decorative, never represented as traffic.
+      edges.forEach(function(e){e.visual=false;});
+      var original=nodes.slice(), count=original.length;
+      var seed=function(str){var h=2166136261;for(var k=0;k<str.length;k++)h=Math.imul(h^str.charCodeAt(k),16777619);return h>>>0;};
+      original.forEach(function(n,i){
+        var hash=seed(n.id);
+        var angle=(hash%6283)/1000;
+        var jitter=n.role==='event'?.082:.048;
+        n.x=Math.max(.10,Math.min(.90,.5+(n.x-.5)*.94+Math.cos(angle)*jitter));
+        n.y=Math.max(.09,Math.min(.91,.5+(n.y-.5)*.94+Math.sin(angle)*jitter));
+        n.z+=(hash%31-15)/100;
+      });
+      // Evenly scattered anchor filaments fill empty pockets of the mesh.
+      var countDecorative=narrow?24:Math.min(74,Math.max(42,Math.floor(count*.52)));
+      var gold=2.399963229728653;
+      for(var i=0;i<countDecorative;i++){
+        var rad=Math.sqrt((i+.6)/(countDecorative+.8));
+        var theta=i*gold+0.27;
+        nodes.push({id:"mesh:filament:"+i,label:"Filamento",type:"relay",role:"decorative",
+          activity:.06,x:.5+Math.cos(theta)*rad*.39,y:.5+Math.sin(theta)*rad*.40,
+          z:Math.sin(i*1.43)*.35});
+      }
+      var links=new Set();
+      function meshLink(a,b,strength){
+        if(a.id===b.id)return;
+        var key=[a.id,b.id].sort().join("|");
+        if(links.has(key))return;
+        links.add(key);
+        edges.push({source:a.id,target:b.id,strength:strength,kind:"visual-mesh",visual:true});
+      }
+      // Nearest-neighbour triangulation; each point links to nearby peers,
+      // including actual domain hubs, printers, events and scattered filaments.
+      nodes.forEach(function(n,i){
+        var nearby=[];
+        for(var j=0;j<nodes.length;j++){
+          if(i===j)continue;
+          var q=nodes[j];
+          var dx=(n.x-q.x)*1.15,dy=n.y-q.y;
+          var d=Math.sqrt(dx*dx+dy*dy);
+          if(d<.245&&d>.014)nearby.push([d,q]);
+        }
+        nearby.sort(function(a,b){return a[0]-b[0]});
+        var degree=n.center?4:(n.role==="decorative"?3:2);
+        for(var j=0;j<Math.min(degree,nearby.length);j++){
+          // Edges are geometric, never presented as real communication.
+          meshLink(n,nearby[j][1],.20+Math.min(.48,(.18-nearby[j][0])*.90));
+        }
+      });
+      // Connect remote islands with a sparse spanning chain if necessary.
+      var sorted=nodes.slice().sort(function(a,b){return a.x-b.x||a.y-b.y});
+      for(var i=1;i<sorted.length;i++){
+        if(Math.hypot(sorted[i].x-sorted[i-1].x,sorted[i].y-sorted[i-1].y)<.14)
+          meshLink(sorted[i-1],sorted[i],.21);
+      }
+      return {nodes:nodes,edges:edges};
+    }
     // Decorative microfilaments only around stable centers and child groups.
     // Individual events never generate fake relays; they are real leaf nodes.
     var bases=nodes.filter(function(n){return n.center||n.type==="group"||n.type==="printer"||n.type==="device"});
@@ -955,6 +1151,12 @@ html[data-sol-view="screensaver"] #sol-fs:hover,html[data-sol-view="screensaver"
     requestAnimationFrame(labelTick);
   }
   requestAnimationFrame(labelTick);
+  window.addEventListener("ai-topology-changed",function(){
+    if(!latestGraph.nodes.length)return;
+    lastSignature="";
+    net.setGraph(shape(latestGraph));
+    lastSignature=latestGraph.nodes.map(function(n){return n.id}).join("|");
+  });
   async function update(){
     if(pending || (document.hidden && mode!=="screensaver"))return;
     pending=true;

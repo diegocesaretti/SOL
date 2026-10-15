@@ -35,3 +35,37 @@ test("constellation persists settings and exposes density without embedding-spec
   assert.match(html,/camera\.left=-6\*aspect/);
   assert.match(html,/camera\.right=6\*aspect/);
 });
+
+
+test("mesh and atmospheric controls are present and persistent across Panorama views", () => {
+  const html=readFileSync(new URL("../../assets/panorama-neural.html",import.meta.url),"utf8");
+  for(const id of ["topologySelect","curveRange","glitchRange","backgroundMode","grainToggle","imageToggle"]){
+    assert.match(html,new RegExp('id="'+id+'"'));
+  }
+  assert.match(html,/value="mesh">Connected network mesh/);
+  assert.match(html,/value="clusters">Clustered branches/);
+  assert.match(html,/value="plain">Plain solid color/);
+  assert.match(html,/showImage:styleState\.showImage/);
+  assert.match(html,/backgroundMode:styleState\.backgroundMode/);
+  assert.match(html,/grain:styleState\.grain/);
+  assert.match(html,/curve:styleState\.curve/);
+  assert.match(html,/glitch:styleState\.glitch/);
+  assert.match(html,/topology:styleState\.topology/);
+  assert.match(html,/localStorage\.setItem\(PREF_KEY/);
+  assert.match(html,/addEventListener\('storage'/);
+  assert.match(html,/ai-topology-changed/);
+  assert.match(html,/net\.getPreferences\(\)\.topology==='mesh'/);
+  assert.match(html,/kind:"visual-mesh"/);
+  assert.match(html,/e\.visual=false/);
+  assert.match(html,/sampleWorldEdge/);
+  assert.match(html,/updateElectricArcs/);
+  assert.match(html,/auxGroup\.visible=styleState\.backgroundMode!=='plain'/);
+  assert.doesNotMatch(html,/net\.setReferenceOverlay\(true,\.13\)/);
+});
+test("glitch animation pools GPU buffers instead of new per-frame meshes",()=>{
+  const html=readFileSync(new URL("../../assets/panorama-neural.html",import.meta.url),"utf8");
+  assert.match(html,/new Float32Array\(maxArcs\*steps\*6\)/);
+  assert.match(html,/positions\.needsUpdate=true/);
+  assert.match(html,/if\(t-lastArcUpdate<\.11\)return/);
+  assert.match(html,/render3d=\{render,rebuild:buildGraph,refresh:buildGraph/);
+});
