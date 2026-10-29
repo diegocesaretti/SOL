@@ -1,4 +1,4 @@
-# SOL Agent 0.3 — Adaptador Pi experimental
+# SOL Agent 0.3.1 — Adaptador Pi experimental
 
 **Estado:** código en PR borrador, no activado en HTPC, no incluido en SOL-Full.
 
@@ -23,9 +23,9 @@ Si falta cualquier requisito, Pi no arranca. La rama experimental no tiene confi
 
 ## Dependencia y empaquetado
 
-Se verificó la API publicada del SDK Pi v1.4.0, desde el proyecto Pi (licencia MIT). Actualmente la dependencia **NO está incorporada al archivo .solplugin ni a la distribución Windows**. Al seleccionar el motor Pi sin tener la biblioteca disponible en el entorno de desarrollo, la misión produce error controlado y reintenta con demora. El workflow `sol-agent-shadow.yml` instala Pi en un **directorio temporal aislado** para verificar los exports reales del paquete; los tests normales utilizan un SDK simulado para comprobar las barreras de seguridad.
+Se verificó la API publicada del SDK Pi v1.4.0, desde el proyecto Pi (licencia MIT). La rama incluye `package.json`, `package-lock.json` y un empaquetador experimental que instala el SDK Pi fijado a la versión 1.4.0 en un directorio temporal. GitHub Actions produce artefactos experimentales por plataforma; **no son actualizaciones de SOL-Full ni instalaciones autorizadas en el HTPC**. Al seleccionar el motor Pi sin tener la biblioteca disponible en el entorno de desarrollo, la misión produce error controlado y reintenta con demora. El workflow `sol-agent-shadow.yml` instala Pi en un **directorio temporal aislado** para verificar los exports reales del paquete; los tests normales utilizan un SDK simulado para comprobar las barreras de seguridad.
 
-Antes de probarlo en un HTPC hace falta definir el empaquetado reproducible de dependencias (incluyendo lockfile, auditoría y rollback), ejecutar un modelo real en sandbox, y medir fallos, latencia y consumo. No instalar Pi dentro de la ruta de producción ni hacer `npm install` en el plugin que se va a empaquetar con el empaquetador recursivo existente.
+Antes de probarlo en un HTPC falta auditar dependencias y su compatibilidad con el gestor de plugins, ensayar instalación/rollback en un entorno aislado, ejecutar un modelo real con permisos limitados y medir costos, latencia y falsas alarmas. Las pruebas actuales crean una sesión de Pi sin hacer llamadas a un modelo. No instalar Pi dentro de la ruta de producción ni hacer `npm install` en el plugin que se va a empaquetar con el empaquetador recursivo existente.
 
 ## Diferencias respecto a Rakazo
 
