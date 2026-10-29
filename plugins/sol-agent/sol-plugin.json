@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "id": "sol-agent",
   "name": "SOL Agent (Experimental Persistent)",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Agente residente experimental: misiones duraderas, investigación autónoma con lecturas MCP autorizadas y reinicio recuperable, sin acciones externas.",
   "runtime": "node",
   "entry": "entry.mjs",
