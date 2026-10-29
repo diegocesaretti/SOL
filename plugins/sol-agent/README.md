@@ -1,4 +1,4 @@
-# SOL Agent — experimental 0.3.0 (autonomous shadow mode)
+# SOL Agent — experimental 0.3.1 (autonomous shadow mode)
 
 **This is a development-only plugin.** It does not replace Pulse, run device actions, change listings, control printers, or send Nexo/WhatsApp messages. Default: `autoStart=false`, no sources configured, local-model inference disabled.
 
@@ -24,7 +24,7 @@ Ver [escenarios y pruebas de aceptación](USE_CASES.md). Ni los perfiles ni los 
 
 ## Motor Pi opcional (v0.3)
 
-Existe un adaptador para el SDK real de Pi, con sesiones efímeras en memoria y **todas las herramientas internas desactivadas**. Las decisiones se ejecutan únicamente mediante la lista de lecturas de SOL y su comprobación de permisos. Su activación requiere opt-in explícito para el envío de datos a un proveedor remoto y credenciales del modelo; no hay credenciales guardadas en el código. Pi todavía no está empaquetado para la instalación Windows.
+Existe un adaptador para el SDK real de Pi, con sesiones efímeras en memoria y **todas las herramientas internas desactivadas**. Las decisiones se ejecutan únicamente mediante la lista de lecturas de SOL y su comprobación de permisos. Su activación requiere opt-in explícito para el envío de datos a un proveedor remoto y credenciales del modelo; no hay credenciales guardadas en el código. Pi se empaqueta en artefactos de CI con dependencias bloqueadas; aún no se ha probado su instalación mediante el gestor del HTPC.
 
 [Detalles técnicos, privacidad y limitaciones de empaquetado](PI_INTEGRATION.md).
 
