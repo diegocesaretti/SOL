@@ -115,6 +115,21 @@ export function createAutonomousRuntime({ dataDir, tools = [], configuredGoals =
     await persist();
     return { ok: true, id, paused: item.paused };
   }
+  async function wakeGoal(id, reason = "external_signal") {
+    if (busy) return { ok: false, skipped: "busy" };
+    const g = state.missions[id];
+    if (!g) throw new Error("goal_not_found");
+    if (g.paused) return { ok: true, queued: false, reason: "paused" };
+    const last = Date.parse(g.lastWakeAt || "");
+    if (Number.isFinite(last) && now().getTime() - last >= 0 && now().getTime() - last < 300000)
+      return { ok: true, queued: false, reason: "debounced" };
+    g.lastWakeAt = current();
+    g.dueAt = current();
+    g.history.push({at:current(),type:"wake",note:cut(reason,140)});
+    g.history = g.history.slice(-12);
+    await persist();
+    return {ok:true, queued:true, id:g.id};
+  }
   async function recordFeedback(missionId, proposalId, rating, note = "") {
     if (busy) throw new Error("runtime_busy");
     if (!["useful","irrelevant","incorrect"].includes(rating)) throw new Error("invalid_feedback_rating");
@@ -235,5 +250,5 @@ export function createAutonomousRuntime({ dataDir, tools = [], configuredGoals =
     for (const item of Object.values(state.missions)) delete item._volatileObservation;
     await originalPersist();
   }
-  return { load, addGoal, pauseGoal, recordFeedback, inspect, listProposals, cycle, checkpoint };
+  return { load, addGoal, pauseGoal, wakeGoal, recordFeedback, inspect, listProposals, cycle, checkpoint };
 }
