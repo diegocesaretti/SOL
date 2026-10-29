@@ -5,11 +5,13 @@ on:
     paths:
       - "plugins/sol-agent/**"
       - "scripts/build-sol-agent-pi.mjs"
+      - "scripts/pack-sol-agent-fast.mjs"
       - ".github/workflows/sol-agent-shadow.yml"
   pull_request:
     paths:
       - "plugins/sol-agent/**"
       - "scripts/build-sol-agent-pi.mjs"
+      - "scripts/pack-sol-agent-fast.mjs"
       - ".github/workflows/sol-agent-shadow.yml"
 permissions:
   contents: read
@@ -33,6 +35,8 @@ jobs:
         run: node plugins/sol-agent/pi-session-smoke.mjs
       - name: Stage and package experimental Pi-enabled plugin without installing in SOL
         run: node scripts/build-sol-agent-pi.mjs
+      - name: Verify ZIP CRC integrity
+        run: unzip -t -q dist/SOLAgent-0.3.1-pi-experimental.solplugin
       - name: Inspect packaged manifest and Pi SDK
         run: |
           unzip -p dist/SOLAgent-0.3.1-pi-experimental.solplugin sol-plugin.json | node -e '
