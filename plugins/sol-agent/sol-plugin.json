@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 2,
+  "id": "sol-agent",
+  "name": "SOL Agent (Shadow)",
+  "version": "0.1.0",
+  "description": "Agente de observación proactiva, aislado y sin acciones ni notificaciones; compatible con lectura MCP autorizada de plugins SOL.",
+  "runtime": "node",
+  "entry": "entry.mjs",
+  "args": [],
+  "autoStart": false,
+  "restartPolicy": "on-failure",
+  "capabilities": [
+    "mcp.sol-agent",
+    "proactivity.proposals",
+    "proactivity.shadow"
+  ],
+  "requires": [
+    "plugin-api.v1",
+    "mcp.register",
+    "filesystem.plugin-data"
+  ],
+  "permissions": [
+    "mcp.register",
+    "filesystem.plugin-data",
+    "network.local",
+    "mcp.invoke.read"
+  ],
+  "settings": [
+    {
+      "key": "api_port",
+      "label": "Puerto local del agente",
+      "type": "number",
+      "env": "SOL_AGENT_PORT",
+      "required": false,
+      "default": 8796,
+      "min": 1024,
+      "max": 65535
+    },
+    {
+      "key": "sources_json",
+      "label": "Fuentes MCP de lectura permitidas (JSON)",
+      "type": "text",
+      "env": "SOL_AGENT_SOURCES_JSON",
+      "required": false,
+      "default": "[]"
+    },
+    {
+      "key": "objectives",
+      "label": "Objetivos permanentes (sin datos sensibles)",
+      "type": "text",
+      "env": "SOL_AGENT_OBJECTIVES",
+      "required": false,
+      "default": "Detectar oportunidades y riesgos relevantes, investigar y proponer sin ejecutar."
+    },
+    {
+      "key": "interval_minutes",
+      "label": "Frecuencia de observación (min)",
+      "type": "number",
+      "env": "SOL_AGENT_INTERVAL_MINUTES",
+      "required": false,
+      "default": 15,
+      "min": 5,
+      "max": 1440
+    },
+    {
+      "key": "model_enabled",
+      "label": "Habilitar razonamiento con modelo LOCAL (opt-in)",
+      "type": "boolean",
+      "env": "SOL_AGENT_MODEL_ENABLED",
+      "required": false,
+      "default": false
+    },
+    {
+      "key": "model_name",
+      "label": "Modelo local OpenAI-compatible",
+      "type": "text",
+      "env": "SOL_AGENT_MODEL_NAME",
+      "required": false,
+      "default": ""
+    },
+    {
+      "key": "model_endpoint",
+      "label": "Endpoint local del modelo",
+      "type": "text",
+      "env": "SOL_AGENT_MODEL_ENDPOINT",
+      "required": false,
+      "default": "http://127.0.0.1:11434/v1/chat/completions"
+    },
+    {
+      "key": "model_token",
+      "label": "Token del modelo local (si corresponde)",
+      "type": "secret",
+      "env": "SOL_AGENT_MODEL_TOKEN",
+      "required": false
+    }
+  ]
+}
