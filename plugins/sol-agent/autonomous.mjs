@@ -74,7 +74,7 @@ export function createAutonomousRuntime({ dataDir, tools = [], configuredGoals =
     state.updatedAt = current();
     await mkdir(dataDir, { recursive: true });
     const tmp = file + "." + randomUUID() + ".tmp";
-    await writeFile(tmp, JSON.stringify(state), { encoding: "utf8", mode: 0o600 });
+    await writeFile(tmp, JSON.stringify(state, (key,value) => key === "_volatileObservation" ? undefined : value), { encoding: "utf8", mode: 0o600 });
     await rename(tmp, file);
   }
   async function load() {
