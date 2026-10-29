@@ -129,3 +129,26 @@ test("business mission correlates evidence from separate SOL plugins without any
   assert.deepEqual(r.listProposals()[0].evidence,["seller","production"]);
  }finally{await rm(dir,{recursive:true,force:true});}
 });
+
+test("event wakeups are durable, debounced, and never bypass paused missions",async()=>{
+ const dir=await mkdtemp(join(tmpdir(),"sol-agent-wakeup-"));
+ let clock=new Date("2026-10-29T10:00:00Z");
+ try {
+  const make=()=>createAutonomousRuntime({dataDir:dir,tools,now:()=>clock,
+   decide:async()=>({action:"wait",note:"No relevant changes",waitMinutes:60}),
+   invokeRead:async()=>{throw Error("never read");}
+  });
+  const r=make();await r.load();const g=await r.addGoal({objective});
+  assert.equal((await r.cycle()).outcome,"waiting");
+  assert.equal((await r.cycle()).skipped,"nothing_due");
+  const first=await r.wakeGoal(g.id,"Plugin event");
+  assert.equal(first.queued,true);
+  assert.equal((await r.wakeGoal(g.id,"Duplicate")).reason,"debounced");
+  const restored=make();await restored.load();
+  assert.equal((await restored.cycle()).outcome,"waiting");
+  await restored.pauseGoal(g.id,true);
+  clock=new Date("2026-10-29T10:10:00Z");
+  assert.equal((await restored.wakeGoal(g.id,"Event while paused")).reason,"paused");
+  assert.equal(restored.inspect().missions[0].paused,true);
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
