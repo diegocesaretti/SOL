@@ -43,7 +43,7 @@ export async function observe({ state, sources, invokeRead, infer, now = new Dat
       if (!snapshots[source.id]) {
         snapshots[source.id] = hash; baselined++;
       } else if (snapshots[source.id] !== hash) {
-        changes.push({ id: source.id, name: source.name, sample: JSON.stringify(value).slice(0, 3000) });
+        changes.push({ id: source.id, name: source.name, sample: JSON.stringify(value).slice(0, 3000), hash });
       }
     } catch (error) { errors.push({ id: source.id, error: String(error?.message || error).slice(0, 100) }); }
   }
@@ -62,7 +62,7 @@ export async function observe({ state, sources, invokeRead, infer, now = new Dat
       signatures.add(proposal.signature); newItems.push(proposal);
     }
     proposals = [...existing, ...newItems].slice(-100);
-    for (const item of changes) snapshots[item.id] = digest(JSON.parse(item.sample));
+    for (const item of changes) snapshots[item.id] = item.hash;
     // The complete response is hashed below by the read wrapper; no raw samples are persisted.
   }
   return { state: { ...original, snapshots, proposals, lastCycle: time, lastErrors: errors }, changes: changes.length, baselined, errors, proposalsAdded: proposals.length - existing.length };
