@@ -115,7 +115,7 @@ const mcpTools = [
   { name: "sol_agent_missions", description: "List persistent missions (read-only).", requiredScope: "read",
     inputSchema: { type: "object", properties: {}, additionalProperties: false } },
   { name: "sol_agent_goal_create", description: "Queue a persistent read-only research objective; does NOT perform external actions.", requiredScope: "submit",
-    inputSchema: { type: "object", properties: { objective: { type: "string", minLength: 12, maxLength: 800 }, intervalMinutes: { type: "integer", minimum: 10, maximum: 1440 } }, required: ["objective"], additionalProperties: false } },
+    inputSchema: { type: "object", properties: { objective: { type: "string", minLength: 12, maxLength: 800 }, profile: {type:"string",enum:["general","home","business"]}, intervalMinutes: { type: "integer", minimum: 10, maximum: 1440 } }, required: ["objective"], additionalProperties: false } },
   { name: "sol_agent_goal_pause", description: "Pause or resume an existing SOL Agent research mission.", requiredScope: "submit",
     inputSchema: { type: "object", properties: { id: { type: "string" }, paused: { type: "boolean" } }, required: ["id","paused"], additionalProperties: false } },
   { name: "sol_agent_feedback", description: "Record explicit feedback on an agent suggestion; only changes SOL Agent local memory.", requiredScope: "submit",
