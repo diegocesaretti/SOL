@@ -1,4 +1,4 @@
-# SOL Agent — experimental 0.2.0 (autonomous shadow mode)
+# SOL Agent — experimental 0.3.0 (autonomous shadow mode)
 
 **This is a development-only plugin.** It does not replace Pulse, run device actions, change listings, control printers, or send Nexo/WhatsApp messages. Default: `autoStart=false`, no sources configured, local-model inference disabled.
 
@@ -10,7 +10,7 @@ Se configura con `SOL_AGENT_AUTONOMY_ENABLED`, `SOL_AGENT_TOOLS_JSON` y `SOL_AGE
 
 El registro duradero se guarda en `SOL_PLUGIN_DATA_DIR/sol-agent-missions.json`. Los datos completos recibidos de las herramientas solo se utilizan temporalmente en memoria; al disco van resúmenes, identificadores y hashes.
 
-**No está instalado ni activado en producción.** Es un prototipo con límites, sin ejecución de acciones externas, sin navegador, sin delegación entre agentes y sin integrar todavía el código de Pi o Rakazo. No se ha verificado su compatibilidad con todos los plugins.
+**No está instalado ni activado en producción.** Es un prototipo con límites, sin ejecución de acciones externas, sin navegador, sin delegación entre agentes y con adaptador SDK Pi experimental desactivado por defecto; no se integró el código fuente de Rakazo. No se ha verificado su compatibilidad con todos los plugins.
 
 ## Aprendizajes aplicados de Home Assistant y negocios
 
@@ -22,8 +22,14 @@ Se añadió `sol_agent_goal_wake` (scope `submit`) para adelantar un objetivo cu
 
 Ver [escenarios y pruebas de aceptación](USE_CASES.md). Ni los perfiles ni los ejemplos están activados automáticamente.
 
+## Motor Pi opcional (v0.3)
+
+Existe un adaptador para el SDK real de Pi, con sesiones efímeras en memoria y **todas las herramientas internas desactivadas**. Las decisiones se ejecutan únicamente mediante la lista de lecturas de SOL y su comprobación de permisos. Su activación requiere opt-in explícito para el envío de datos a un proveedor remoto y credenciales del modelo; no hay credenciales guardadas en el código. Pi todavía no está empaquetado para la instalación Windows.
+
+[Detalles técnicos, privacidad y limitaciones de empaquetado](PI_INTEGRATION.md).
+
 ## Purpose
-SOL Agent is a deliberately small compatibility bridge for future agentic reasoning, inspired by the architectural patterns of Rakazo. It **does not yet copy or vendor Rakazo source code**. Dependency/licensing review and a proper Pi adapter are future work.
+SOL Agent is a deliberately small compatibility bridge for future agentic reasoning, inspired by the architectural patterns of Rakazo. It **does not copy or vendor Rakazo source code**. An optional Pi SDK reasoning adapter has been added but is not bundled in the .solplugin distribution; see [PI_INTEGRATION.md](PI_INTEGRATION.md).
 
 It uses SOL's existing plugin lifecycle and owner-scoped `/v1/plugin-api/mcp/tools/invoke-read` endpoint; tool arguments are explicitly configured rather than guessed. That permits data sources from any existing plugin **only when SOL authorizes that read tool**. This is not yet proof of end-to-end compatibility with every plugin.
 
