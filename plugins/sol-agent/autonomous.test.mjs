@@ -100,3 +100,32 @@ test("home profile requires independent, stable checks across scheduled cycles",
   assert.equal(g.status,"ready");
  }finally{await rm(dir,{recursive:true,force:true});}
 });
+
+test("business mission correlates evidence from separate SOL plugins without any write",async()=>{
+ const dir=await mkdtemp(join(tmpdir(),"sol-agent-business-"));
+ const mixedTools=[
+  {id:"seller",name:"bwa_3d_status",arguments:{},description:"Seller status"},
+  {id:"production",name:"bambuddy_queue",arguments:{},description:"Production queue"}
+ ];
+ const invocations=[];
+ try {
+  const r=createAutonomousRuntime({dataDir:dir,tools:mixedTools,
+   now:()=>new Date("2026-10-29T16:00:00Z"),
+   decide:async context=>{
+    if (!context.history.some(h=>h.type==="read_result")) return {action:"read",toolId:"seller",note:"Check seller"};
+    if (!context.history.some(h=>h.type==="read_result" && h.toolId==="production"))
+      return {action:"read",toolId:"production",note:"Check production"};
+    return {action:"finish",note:"Manual review",proposal:{
+     title:"Review workload",rationale:"Both sources require inspection",
+     confidence:.85,priority:"medium",evidence:["seller","production"]
+    }};
+   },
+   invokeRead:async name=>{invocations.push(name);return {status:"ok"};}
+  });
+  await r.load(); await r.addGoal({objective:"Correlate shop status and printer queue to find bottlenecks.",profile:"business"});
+  assert.equal((await r.cycle()).outcome,"finished");
+  assert.deepEqual(invocations,["bwa_3d_status","bambuddy_queue"]);
+  assert.equal(r.listProposals().length,1);
+  assert.deepEqual(r.listProposals()[0].evidence,["seller","production"]);
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
