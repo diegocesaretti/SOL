@@ -1,14 +1,15 @@
 name: SOL Agent Shadow Safety Checks
 on:
   push:
-    branches:
-      - feature/sol-agent-shadow
+    branches: [feature/sol-agent-shadow]
     paths:
       - "plugins/sol-agent/**"
+      - "scripts/build-sol-agent-pi.mjs"
       - ".github/workflows/sol-agent-shadow.yml"
   pull_request:
     paths:
       - "plugins/sol-agent/**"
+      - "scripts/build-sol-agent-pi.mjs"
       - ".github/workflows/sol-agent-shadow.yml"
 permissions:
   contents: read
@@ -22,37 +23,30 @@ jobs:
           node-version: "24"
       - name: Check runtime syntax
         run: |
-          for f in plugins/sol-agent/*.mjs; do node --check "$f"; done
+          for f in plugins/sol-agent/*.mjs scripts/build-sol-agent-pi.mjs; do node --check "$f"; done
       - name: Run isolated unit tests
         run: node --test plugins/sol-agent/*.test.mjs
-      - name: Check actual Pi SDK 1.4.0 API in an isolated temp directory
+      - name: Install locked Pi SDK in plugin's isolated directory
+        working-directory: plugins/sol-agent
+        run: npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+      - name: Offline smoke test against REAL Pi SDK
+        run: node plugins/sol-agent/pi-session-smoke.mjs
+      - name: Stage and package experimental Pi-enabled plugin without installing in SOL
+        run: node scripts/build-sol-agent-pi.mjs
+      - name: Inspect packaged manifest and Pi SDK
         run: |
-          mkdir -p "$RUNNER_TEMP/pi-check"
-          cd "$RUNNER_TEMP/pi-check"
-          npm install --ignore-scripts --no-audit --no-fund --no-save @earendil-works/pi-coding-agent@1.4.0
-          node --input-type=module -e '
-            const sdk = await import("@earendil-works/pi-coding-agent");
-            const names = ["createAgentSession","ModelRuntime","SettingsManager","SessionManager","createExtensionRuntime"];
-            for (const name of names) if (!sdk[name]) throw new Error("Pi SDK missing " + name);
-            console.log("Pi SDK real exports verified");
-          '
-      - name: Generate Pi SDK dependency lockfile (bootstrap, no installation)
-        run: |
-          cd plugins/sol-agent
-          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
-          node --input-type=module -e '
-            import { readFileSync } from "node:fs";
-            const content = JSON.parse(readFileSync("package-lock.json","utf8"));
-            console.log("SOL_LOCK_BEGIN" + JSON.stringify(content) + "SOL_LOCK_END");
-          '
-      - name: Pack without installing or publishing
-        run: node scripts/pack-sol-plugin.mjs plugins/sol-agent dist/SOLAgent-0.1.0.solplugin
-      - name: Inspect packaged manifest
-        run: |
-          unzip -p dist/SOLAgent-0.1.0.solplugin sol-plugin.json | node -e '
+          unzip -p dist/SOLAgent-0.3.1-pi-experimental.solplugin sol-plugin.json | node -e '
           let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
             const x=JSON.parse(s);
             if(x.autoStart!==false || x.permissions.includes("mcp.invoke.write")) process.exit(1);
             if(x.id!=="sol-agent") process.exit(1);
-            console.log("Safety manifest OK");
+            console.log("Safe manifest validated");
           })'
+          unzip -l dist/SOLAgent-0.3.1-pi-experimental.solplugin | grep -F 'node_modules/@earendil-works/pi-coding-agent/package.json'
+      - name: Retain CI-only experimental artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sol-agent-pi-experimental-linux
+          path: dist/SOLAgent-0.3.1-pi-experimental.solplugin
+          if-no-files-found: error
+          retention-days: 7
