@@ -1,9 +1,9 @@
 {
   "schemaVersion": 2,
   "id": "sol-agent",
-  "name": "SOL Agent (Shadow)",
-  "version": "0.1.0",
-  "description": "Agente de observación proactiva, aislado y sin acciones ni notificaciones; compatible con lectura MCP autorizada de plugins SOL.",
+  "name": "SOL Agent (Autonomous Shadow)",
+  "version": "0.2.0",
+  "description": "Agente residente experimental: misiones duraderas, investigación autónoma con lecturas MCP autorizadas y reinicio recuperable, sin acciones externas.",
   "runtime": "node",
   "entry": "entry.mjs",
   "args": [],
@@ -11,7 +11,8 @@
   "restartPolicy": "on-failure",
   "capabilities": [
     "mcp.sol-agent",
-    "proactivity.proposals",
+    "proactivity.missions",
+    "proactivity.reasoning",
     "proactivity.shadow"
   ],
   "requires": [
@@ -92,6 +93,30 @@
       "type": "secret",
       "env": "SOL_AGENT_MODEL_TOKEN",
       "required": false
+    },
+    {
+      "key": "autonomy_enabled",
+      "label": "Activar misiones autónomas experimentales (solo lectura)",
+      "type": "boolean",
+      "env": "SOL_AGENT_AUTONOMY_ENABLED",
+      "required": false,
+      "default": false
+    },
+    {
+      "key": "tools_json",
+      "label": "Catálogo acotado de herramientas MCP de lectura autorizadas",
+      "type": "text",
+      "env": "SOL_AGENT_TOOLS_JSON",
+      "required": false,
+      "default": "[]"
+    },
+    {
+      "key": "goals_json",
+      "label": "Misiones iniciales, opcionales (JSON)",
+      "type": "text",
+      "env": "SOL_AGENT_GOALS_JSON",
+      "required": false,
+      "default": "[]"
     }
   ]
 }
