@@ -30,9 +30,8 @@ export function piConfiguration({ provider, modelId, apiKey, allowRemote }) {
   return { provider, modelId };
 }
 
-export async function decideWithPi({
+export async function createPiDecisionSession({
   provider, modelId, apiKey, allowRemote = false, dataDir,
-  objective, tools, history, feedback, profile, guidance, observation, steps, cycles,
   sdkLoader = () => import("@earendil-works/pi-coding-agent")
 }) {
   piConfiguration({ provider, modelId, apiKey, allowRemote });
@@ -76,7 +75,21 @@ export async function decideWithPi({
     tools: [],
     customTools: []
   });
-  if (!session || typeof session.prompt !== "function") throw new Error("pi_session_incompatible");
+  if (!session || typeof session.prompt !== "function") {
+    session?.dispose?.();
+    throw new Error("pi_session_incompatible");
+  }
+  if (typeof session.getActiveToolNames !== "function" ||
+      session.getActiveToolNames().length !== 0) {
+    session.dispose();
+    throw new Error("pi_tools_must_be_empty");
+  }
+  return session;
+}
+
+export async function decideWithPi(options) {
+  const { objective, tools, history, feedback, profile, guidance, observation, steps, cycles } = options;
+  const session = await createPiDecisionSession(options);
   try {
     const context = JSON.stringify({ objective, tools, history, feedback, profile,
       guidance, observation, steps, cycles });
