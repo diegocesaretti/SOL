@@ -70,3 +70,33 @@ test("human feedback remains durable and informs later reasoning", async()=>{
   assert.equal((await after.cycle()).outcome,"waiting");
  }finally{await rm(dir,{recursive:true,force:true});}
 });
+
+test("home profile requires independent, stable checks across scheduled cycles",async()=>{
+ const dir=await mkdtemp(join(tmpdir(),"sol-agent-home-"));
+ let instant=new Date("2026-10-29T15:00:00Z");
+ const calls=[];
+ try{
+  const runner=createAutonomousRuntime({dataDir:dir,tools,now:()=>instant,
+   decide:async context=>{
+    calls.push(context);
+    if (!context.observation) return {action:"read",toolId:"printer_status",note:"Verify latest state"};
+    return {action:"finish",note:"Still abnormal",proposal:{title:"Inspect persistent fault",
+      rationale:"The same status is confirmed",confidence:0.8,priority:"medium",evidence:["printer_status"]}};
+   },
+   invokeRead:async()=>({status:"unavailable"})
+  });
+  await runner.load();
+  const g=await runner.addGoal({objective:"Inspect home devices for consistent unavailable states.",profile:"home",intervalMinutes:60});
+  assert.equal((await runner.cycle()).outcome,"finished");
+  assert.equal(runner.listProposals().length,0);
+  assert.equal(runner.inspect().missions[0].filteredProposals,1);
+  instant=new Date("2026-10-29T16:01:00Z");
+  assert.equal((await runner.cycle()).outcome,"finished");
+  assert.equal(runner.listProposals().length,1);
+  assert.equal(runner.listProposals()[0].profile,"home");
+  assert.equal(runner.listProposals()[0].attention,"quiet_digest");
+  assert.equal(calls[0].profile,"home");
+  assert.match(calls[0].guidance,/lecturas aisladas/);
+  assert.equal(g.status,"ready");
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
