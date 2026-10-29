@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { readFile, mkdir, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { normalizeProfile, guidanceFor, proposalGate } from "./policy.mjs";
+import { safeToolName, catalogCoverage } from "./compatibility.mjs";
 
 const idRe = /^[a-z][a-z0-9_-]{2,39}$/;
 const iso = value => new Date(value).toISOString();
@@ -19,7 +20,7 @@ export function validateCatalog(raw) {
     const id = item?.id;
     const name = item?.name;
     if (typeof id !== "string" || !idRe.test(id) || ids.has(id)) throw new Error("invalid_tool_id");
-    if (typeof name !== "string" || !/^[a-z][a-z0-9_]{2,100}$/.test(name) || name.startsWith("sol_agent_")) throw new Error("invalid_tool_name");
+    if (!safeToolName(name)) throw new Error("invalid_tool_name");
     if (!item.arguments || typeof item.arguments !== "object" || Array.isArray(item.arguments) || JSON.stringify(item.arguments).length > 2000) throw new Error("invalid_tool_args");
     ids.add(id);
     // Arguments are fixed by the owner, never generated or modified by a model.
@@ -130,7 +131,7 @@ export function createAutonomousRuntime({ dataDir, tools = [], configuredGoals =
   function inspect() {
     resetDay();
     return { ok: true, mode: "shadow_autonomous", active: Object.values(state.missions).filter(g => !g.paused).length,
-      missionCount: Object.keys(state.missions).length, modelCallsToday: state.budget.model,
+      missionCount: Object.keys(state.missions).length, readContracts: catalogCoverage(catalog), modelCallsToday: state.budget.model,
       readCallsToday: state.budget.reads, modelDailyLimit, readDailyLimit, busy,
       missions: Object.values(state.missions).map(g => ({
         id: g.id, objective: g.objective, profile: g.profile || "general", paused: g.paused, phase: g.phase, dueAt: g.dueAt,
