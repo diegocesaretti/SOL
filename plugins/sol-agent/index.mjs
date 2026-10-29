@@ -6,6 +6,7 @@ import { parseSources, observe } from "./core.mjs";
 import { inferLocally } from "./model.mjs";
 import { createAutonomousRuntime, validateCatalog } from "./autonomous.mjs";
 import { decideGoalLocally } from "./autonomous-model.mjs";
+import { decideWithPi } from "./pi-adapter.mjs";
 
 const pluginId = process.env.SOL_PLUGIN_ID?.trim() || "sol-agent";
 const dataDir = process.env.SOL_PLUGIN_DATA_DIR?.trim() || join(process.env.SOL_PLUGIN_ROOT?.trim() || process.cwd(), ".data");
@@ -20,6 +21,14 @@ const modelName = process.env.SOL_AGENT_MODEL_NAME?.trim() || "";
 const modelEndpoint = process.env.SOL_AGENT_MODEL_ENDPOINT?.trim() || "http://127.0.0.1:11434/v1/chat/completions";
 const modelToken = process.env.SOL_AGENT_MODEL_TOKEN || "";
 const autonomyEnabled = process.env.SOL_AGENT_AUTONOMY_ENABLED === "true";
+const agentEngine = process.env.SOL_AGENT_ENGINE || "local";
+if (!["local", "pi"].includes(agentEngine)) throw new Error("invalid_agent_engine");
+const piProvider = process.env.SOL_AGENT_PI_PROVIDER || "";
+const piModelId = process.env.SOL_AGENT_PI_MODEL_ID || "";
+const piApiKey = process.env.SOL_AGENT_PI_API_KEY || "";
+const piAllowRemote = process.env.SOL_AGENT_PI_ALLOW_REMOTE === "true";
+const autonomousModelReady = agentEngine === "pi"
+  ? Boolean(piProvider && piModelId && piApiKey && piAllowRemote) : modelConfigured;
 const authorizedTools = validateCatalog(process.env.SOL_AGENT_TOOLS_JSON || "[]");
 const configuredGoals = JSON.parse(process.env.SOL_AGENT_GOALS_JSON || "[]");
 if (!Array.isArray(configuredGoals) || configuredGoals.length > 12) throw new Error("invalid_agent_goals_config");
@@ -35,7 +44,8 @@ let runtimeLoaded = false;
 function status() {
   const utcDay = new Date().toISOString().slice(0, 10);
   const autonomousStatus = runtimeLoaded ? runtime.inspect() : null;
-  return { ok: true, plugin: pluginId, version: "0.2.0", mode: autonomyEnabled ? "shadow_autonomous" : "shadow",
+  return { ok: true, plugin: pluginId, version: "0.3.0", mode: autonomyEnabled ? "shadow_autonomous" : "shadow",
+    reasoningEngine: agentEngine, autonomousModelReady, piRemoteOptIn: piAllowRemote,
     canExecute: false, canNotify: false, sources: sources.length,
     modelConfigured, coreReady, toolsRegistered, busy, lastRun, lastError,
     proposals: state.proposals?.length || 0, modelCallsToday: state.budget?.[utcDay] || 0,
@@ -77,7 +87,11 @@ async function invokeRead(name, args) {
 const runtime = createAutonomousRuntime({
   dataDir, tools: authorizedTools, configuredGoals, invokeRead,
   decide: async (context) => {
-    if (!modelConfigured) throw new Error("model_disabled");
+    if (!autonomousModelReady) throw new Error("reasoning_backend_not_configured");
+    if (agentEngine === "pi") return decideWithPi({
+      provider: piProvider, modelId: piModelId, apiKey: piApiKey,
+      allowRemote: piAllowRemote, dataDir, ...context
+    });
     return decideGoalLocally({ endpoint: modelEndpoint, model: modelName, token: modelToken, ...context });
   }
 });
@@ -175,11 +189,11 @@ export async function start() {
   await register();
   const interval = setInterval(() => { if (!autonomyEnabled) void tick(); }, intervalMs);
   interval.unref?.();
-  const autonomyTimer = setInterval(() => { if (autonomyEnabled && modelConfigured) void runtime.cycle(); }, 60000);
+  const autonomyTimer = setInterval(() => { if (autonomyEnabled && autonomousModelReady) void runtime.cycle(); }, 60000);
   autonomyTimer.unref?.();
   const retry = setInterval(() => { if (!toolsRegistered) void register(); }, 30000);
   retry.unref?.();
-  if (autonomyEnabled && modelConfigured) void runtime.cycle();
+  if (autonomyEnabled && autonomousModelReady) void runtime.cycle();
   else if (!autonomyEnabled) void tick();
   for (const sig of ["SIGINT", "SIGTERM"]) process.once(sig, async () => {
     clearInterval(interval); clearInterval(autonomyTimer); clearInterval(retry);
