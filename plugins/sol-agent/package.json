@@ -1,0 +1,13 @@
+{
+  "name": "@sol/sol-agent-standalone",
+  "version": "0.3.1",
+  "private": true,
+  "type": "module",
+  "description": "Isolated read-only SOL Agent plugin runtime",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "1.4.0"
+  }
+}
