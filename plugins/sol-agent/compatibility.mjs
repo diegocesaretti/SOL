@@ -8,7 +8,7 @@ export const PLUGIN_READ_CONTRACTS = Object.freeze({
   "finanzas": ["finanzas_status","finanzas_vencimientos_list","finanzas_vencimiento_get","finanzas_resumen"],
   "educacion": ["educacion_estado","educacion_materias","educacion_materiales_buscar","educacion_material_leer","educacion_tareas","educacion_calendario","educacion_proximas_evaluaciones"]
 });
-const BLOCKED_VERBS = /(?:^|_)(?:call_service|control|navigate|send|write|delete|create|upsert|play|execute|ejecutar|sincronizar|confirmar|marcar_pagado|login|logout|print|action|patch)(?:_|$)/;
+const BLOCKED_VERBS = /(?:^|_)(?:call_service|control|navigate|send|write|delete|create|upsert|play|execute|ejecutar|sincronizar|confirmar|marcar_pagado|login|logout|print|action|patch|link|set|update|approve|publish|archive)(?:_|$)/;
 export function safeToolName(name) {
   return typeof name === "string" && /^[a-z][a-z0-9_]{2,100}$/.test(name)
     && !name.startsWith("sol_agent_") && !BLOCKED_VERBS.test(name);
