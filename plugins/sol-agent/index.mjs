@@ -118,6 +118,8 @@ const mcpTools = [
     inputSchema: { type: "object", properties: { objective: { type: "string", minLength: 12, maxLength: 800 }, profile: {type:"string",enum:["general","home","business"]}, intervalMinutes: { type: "integer", minimum: 10, maximum: 1440 } }, required: ["objective"], additionalProperties: false } },
   { name: "sol_agent_goal_pause", description: "Pause or resume an existing SOL Agent research mission.", requiredScope: "submit",
     inputSchema: { type: "object", properties: { id: { type: "string" }, paused: { type: "boolean" } }, required: ["id","paused"], additionalProperties: false } },
+  { name: "sol_agent_goal_wake", description: "Queue an authorized mission for the next safe research cycle; no external actions.", requiredScope: "submit",
+    inputSchema: { type: "object", properties: { id: {type:"string"}, reason: {type:"string",maxLength:140} }, required:["id"], additionalProperties:false } },
   { name: "sol_agent_feedback", description: "Record explicit feedback on an agent suggestion; only changes SOL Agent local memory.", requiredScope: "submit",
     inputSchema: { type: "object", properties: { missionId: {type:"string"}, proposalId:{type:"string"}, rating:{type:"string",enum:["useful","irrelevant","incorrect"]}, note:{type:"string",maxLength:280} }, required:["missionId","proposalId","rating"], additionalProperties:false } }
 ];
@@ -163,6 +165,7 @@ export async function start() {
       if (body.tool === "sol_agent_missions") return sendJson(res, 200, runtime.inspect());
       if (body.tool === "sol_agent_goal_create") return sendJson(res, 200, await runtime.addGoal(body.arguments || {}));
       if (body.tool === "sol_agent_goal_pause") return sendJson(res, 200, await runtime.pauseGoal(body.arguments?.id, body.arguments?.paused));
+      if (body.tool === "sol_agent_goal_wake") return sendJson(res, 200, await runtime.wakeGoal(body.arguments?.id, body.arguments?.reason));
       if (body.tool === "sol_agent_feedback") return sendJson(res, 200, await runtime.recordFeedback(body.arguments?.missionId, body.arguments?.proposalId, body.arguments?.rating, body.arguments?.note));
       return sendJson(res, 404, { error: "unknown_tool" });
     } catch { return sendJson(res, 400, { error: "bad_request" }); }
