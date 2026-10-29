@@ -1,0 +1,38 @@
+name: SOL Agent Shadow Safety Checks
+on:
+  push:
+    branches:
+      - feature/sol-agent-shadow
+    paths:
+      - "plugins/sol-agent/**"
+      - ".github/workflows/sol-agent-shadow.yml"
+  pull_request:
+    paths:
+      - "plugins/sol-agent/**"
+      - ".github/workflows/sol-agent-shadow.yml"
+permissions:
+  contents: read
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Check runtime syntax
+        run: |
+          for f in plugins/sol-agent/*.mjs; do node --check "$f"; done
+      - name: Run isolated unit tests
+        run: node --test plugins/sol-agent/*.test.mjs
+      - name: Pack without installing or publishing
+        run: node scripts/pack-sol-plugin.mjs plugins/sol-agent dist/SOLAgent-0.1.0.solplugin
+      - name: Inspect packaged manifest
+        run: |
+          unzip -p dist/SOLAgent-0.1.0.solplugin sol-plugin.json | node -e '
+          let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
+            const x=JSON.parse(s);
+            if(x.autoStart!==false || x.permissions.includes("mcp.invoke.write")) process.exit(1);
+            if(x.id!=="sol-agent") process.exit(1);
+            console.log("Safety manifest OK");
+          })'
