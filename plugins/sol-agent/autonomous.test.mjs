@@ -45,3 +45,28 @@ test("persistent mission can investigate and resume after restart", async()=>{
    assert.equal((await again.cycle()).skipped,"nothing_due");
  }finally{await rm(dir,{recursive:true,force:true});}
 });
+
+test("human feedback remains durable and informs later reasoning", async()=>{
+ const dir=await mkdtemp(join(tmpdir(),"sol-feedback-"));
+ let current=new Date("2026-10-29T12:00:00Z");
+ let cycles=0;
+ try {
+  const build=()=>createAutonomousRuntime({dataDir:dir,tools,now:()=>current,
+    decide:async context=>{
+      cycles++;
+      if(cycles===1)return {action:"read",toolId:"printer_status",note:"Check current state"};
+      if(cycles===2)return {action:"finish",note:"Review printer",proposal:{title:"Check printer",rationale:"Observed issue",priority:"medium",confidence:.8,evidence:["printer_status"]}};
+      assert.equal(context.feedback[0].rating,"irrelevant");
+      return {action:"wait",note:"Respect user feedback",waitMinutes:60};
+    },
+    invokeRead:async()=>({status:"warning"})
+  });
+  const first=build();await first.load();const g=await first.addGoal({objective});
+  assert.equal((await first.cycle()).outcome,"finished");
+  const p=first.listProposals()[0];
+  await first.recordFeedback(g.id,p.id,"irrelevant","No issue");
+  current=new Date("2026-10-29T13:01:00Z");
+  const after=build();await after.load();
+  assert.equal((await after.cycle()).outcome,"waiting");
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
