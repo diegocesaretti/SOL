@@ -1,6 +1,16 @@
-# SOL Agent — experimental 0.1.0 (shadow mode)
+# SOL Agent — experimental 0.2.0 (autonomous shadow mode)
 
 **This is a development-only plugin.** It does not replace Pulse, run device actions, change listings, control printers, or send Nexo/WhatsApp messages. Default: `autoStart=false`, no sources configured, local-model inference disabled.
+
+## Autonomía experimental v0.2
+
+Se añadió un motor de misiones duraderas con calendario, historial resumido, reanudación tras reinicios y decisiones del modelo entre consultar una herramienta MCP, concluir o esperar. El modelo solamente puede seleccionar herramientas de lectura expresamente habilitadas por SOL y sus argumentos están predefinidos por el propietario.
+
+Se configura con `SOL_AGENT_AUTONOMY_ENABLED`, `SOL_AGENT_TOOLS_JSON` y `SOL_AGENT_GOALS_JSON`. El razonamiento necesita un modelo local activado expresamente. Los nuevos MCP son `sol_agent_missions`, `sol_agent_goal_create`, `sol_agent_goal_pause` y `sol_agent_feedback`.
+
+El registro duradero se guarda en `SOL_PLUGIN_DATA_DIR/sol-agent-missions.json`. Los datos completos recibidos de las herramientas solo se utilizan temporalmente en memoria; al disco van resúmenes, identificadores y hashes.
+
+**No está instalado ni activado en producción.** Es un prototipo con límites, sin ejecución de acciones externas, sin navegador, sin delegación entre agentes y sin integrar todavía el código de Pi o Rakazo. No se ha verificado su compatibilidad con todos los plugins.
 
 ## Purpose
 SOL Agent is a deliberately small compatibility bridge for future agentic reasoning, inspired by the architectural patterns of Rakazo. It **does not yet copy or vendor Rakazo source code**. Dependency/licensing review and a proper Pi adapter are future work.
