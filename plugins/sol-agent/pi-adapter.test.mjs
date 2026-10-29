@@ -22,6 +22,7 @@ function fakeSdk({ reply = '{"action":"wait","note":"No changes","waitMinutes":6
       return { session: {
         prompt: async text => {state.calls.push(text);},
         getLastAssistantText: () => reply,
+        getActiveToolNames: () => [],
         dispose: () => {state.disposed++;}
       }};
     }
