@@ -147,6 +147,7 @@ export function createAutonomousRuntime({ dataDir, tools = [], configuredGoals =
         const decisionRaw = await decide({
           objective: due.objective, history: cleanHistory(due.history),
           tools: catalog.map(t => ({ id: t.id, description: t.description })),
+          observation: due._volatileObservation || null,
           steps: due.steps, cycles: due.cycles
         });
         const decision = validateDecision(decisionRaw, catalog);
