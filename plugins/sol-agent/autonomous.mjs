@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { readFile, mkdir, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { normalizeProfile, guidanceFor, proposalGate } from "./policy.mjs";
 
 const idRe = /^[a-z][a-z0-9_-]{2,39}$/;
 const iso = value => new Date(value).toISOString();
@@ -32,7 +33,7 @@ export function validateGoal(value) {
   if (objective.length < 12 || !Number.isInteger(intervalMinutes) || intervalMinutes < 10 || intervalMinutes > 1440) throw new Error("invalid_goal_fields");
   const id = value.id || "mission-" + randomUUID().slice(0, 12);
   if (typeof id !== "string" || !idRe.test(id)) throw new Error("invalid_goal_id");
-  return { id, objective, intervalMinutes };
+  return { id, objective, intervalMinutes, profile: normalizeProfile(value.profile) };
 }
 export function validateDecision(value, tools) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid_decision");
@@ -56,9 +57,9 @@ export function validateDecision(value, tools) {
 function cleanHistory(items) { return (items || []).slice(-12).map(x => ({ at: x.at, type: x.type, note: cut(x.note, 320), toolId: x.toolId || undefined, hash: x.hash || undefined })); }
 function initial() { return { version: 2, missions: {}, budget: { day: "", model: 0, reads: 0 }, updatedAt: null }; }
 function mission(config, now) {
-  return { id: config.id, objective: config.objective, intervalMinutes: config.intervalMinutes,
+  return { id: config.id, objective: config.objective, intervalMinutes: config.intervalMinutes, profile: config.profile,
     paused: false, dueAt: now, phase: "ready", steps: 0, cycles: 0, history: [], feedback: [],
-    proposals: [], errors: 0, lastError: null, updatedAt: now };
+    proposals: [], errors: 0, lastError: null, filteredProposals: 0, updatedAt: now };
 }
 export function createAutonomousRuntime({ dataDir, tools = [], configuredGoals = [], decide, invokeRead,
   now = () => new Date(), modelDailyLimit = 30, readDailyLimit = 60, stepLimit = 4 }) {
@@ -96,6 +97,7 @@ export function createAutonomousRuntime({ dataDir, tools = [], configuredGoals =
     await persist();
   }
   async function addGoal(input) {
+    if (busy) throw new Error("runtime_busy");
     const config = validateGoal(input);
     if (Object.keys(state.missions).length >= 12) throw new Error("goal_limit");
     if (state.missions[config.id]) throw new Error("goal_already_exists");
@@ -131,8 +133,8 @@ export function createAutonomousRuntime({ dataDir, tools = [], configuredGoals =
       missionCount: Object.keys(state.missions).length, modelCallsToday: state.budget.model,
       readCallsToday: state.budget.reads, modelDailyLimit, readDailyLimit, busy,
       missions: Object.values(state.missions).map(g => ({
-        id: g.id, objective: g.objective, paused: g.paused, phase: g.phase, dueAt: g.dueAt,
-        cycles: g.cycles, steps: g.steps, updatedAt: g.updatedAt, lastError: g.lastError, proposalCount: g.proposals.length
+        id: g.id, objective: g.objective, profile: g.profile || "general", paused: g.paused, phase: g.phase, dueAt: g.dueAt,
+        cycles: g.cycles, steps: g.steps, updatedAt: g.updatedAt, lastError: g.lastError, proposalCount: g.proposals.length, filteredProposals: g.filteredProposals || 0
       })) };
   }
   function listProposals(limit = 30) {
@@ -159,7 +161,7 @@ export function createAutonomousRuntime({ dataDir, tools = [], configuredGoals =
         }
         state.budget.model += 1; await persist(); // reserve BEFORE model call
         const decisionRaw = await decide({
-          objective: due.objective, history: cleanHistory(due.history),
+          objective: due.objective, profile: due.profile || "general", guidance: guidanceFor(due.profile || "general"), history: cleanHistory(due.history),
           tools: catalog.map(t => ({ id: t.id, description: t.description })),
           feedback: (due.feedback || []).slice(-10),
           observation: due._volatileObservation || null,
@@ -179,19 +181,20 @@ export function createAutonomousRuntime({ dataDir, tools = [], configuredGoals =
           const serialized = JSON.stringify(value);
           if (serialized.length > 200000) throw new Error("tool_response_too_large");
           // The raw result is NOT persisted. Only a digest and model-authored notes survive.
-          due.history.push({ at: current(), type: "read_result", toolId: tool.id, hash: sum(value),
+          due.history.push({ at: current(), type: "read_result", toolId: tool.id, cycle: due.cycles, hash: sum(value),
             note: "Lectura realizada. Resultado disponible temporalmente para el siguiente razonamiento." });
           // Include tool data only in-memory for the next model decision during this cycle.
           due._volatileObservation = { id: tool.id, result: serialized.slice(0, 3500) };
           await persist(); // _volatileObservation is stripped below at save time in the main wrapper
         } else if (decision.action === "finish") {
           due.history.push({ at: current(), type: "conclusion", note: decision.note });
-          if (decision.proposal && decision.proposal.evidence.some(id => due.history.some(h => h.type === "read_result" && h.toolId === id))) {
-            const signature = sum({ title: decision.proposal.title.toLowerCase(), rationale: decision.proposal.rationale.toLowerCase() });
-            if (!due.proposals.some(p => p.signature === signature)) due.proposals.push({
-              id: randomUUID(), signature, ...decision.proposal, at: current(), status: "review_only"
+          const gate = proposalGate({ profile: due.profile || "general", proposal: decision.proposal, history: due.history, feedback: due.feedback || [], now: now() });
+          if (gate.accepted) {
+            const signature = sum({ title: decision.proposal.title.toLowerCase().replace(/\\s+/g," "), evidence: [...decision.proposal.evidence].sort() });
+            if (!due.proposals.some(p => p.signature === signature && Date.parse(p.at) >= now().getTime() - 86400000)) due.proposals.push({
+              id: randomUUID(), signature, ...decision.proposal, profile: due.profile || "general", attention: gate.attention, at: current(), status: "review_only"
             });
-          }
+          } else if (decision.proposal) { due.filteredProposals = (due.filteredProposals || 0) + 1; }
           due.proposals = due.proposals.slice(-100);
           due.cycles += 1; due.steps = 0; due.phase = "waiting";
           due.dueAt = nextTime(now(), due.intervalMinutes);
