@@ -49,7 +49,7 @@ try {
   await unlinkSymlinks(join(src, "node_modules"));
   const bytes = await totalBytes(src);
   if (bytes > 180 * 1024 * 1024) throw new Error("plugin_too_large:" + bytes);
-  await run(process.execPath, ["scripts/pack-sol-plugin.mjs", src, output], process.cwd());
+  await run(process.execPath, ["scripts/pack-sol-agent-fast.mjs", src, output], process.cwd());
   console.log("Experimental plugin packaged: " + output + " (" + bytes + " input bytes)");
 } finally {
   await rm(stage, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
