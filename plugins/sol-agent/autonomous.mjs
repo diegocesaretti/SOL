@@ -46,7 +46,8 @@ export function validateDecision(value, tools) {
     const proposal = value.proposal && typeof value.proposal === "object" && typeof value.proposal.title === "string" && typeof value.proposal.rationale === "string"
       ? { title: cut(value.proposal.title, 140), rationale: cut(value.proposal.rationale, 600),
           priority: ["low","medium","high"].includes(value.proposal.priority) ? value.proposal.priority : "medium",
-          confidence: Math.min(1, Math.max(0, Number(value.proposal.confidence) || 0)) } : null;
+          confidence: Math.min(1, Math.max(0, Number(value.proposal.confidence) || 0)),
+          evidence: Array.isArray(value.proposal.evidence) ? [...new Set(value.proposal.evidence.filter(id => tools.some(t => t.id === id)))].slice(0, 8) : [] } : null;
     return { action: "finish", note, proposal: proposal?.title && proposal?.rationale ? proposal : null };
   }
   if (value.action === "wait") return { action: "wait", note: cut(value.note, 320) || "Sin novedades", waitMinutes: Math.max(10, Math.min(1440, Number(value.waitMinutes) || 60)) };
@@ -171,7 +172,7 @@ export function createAutonomousRuntime({ dataDir, tools = [], configuredGoals =
           await persist(); // _volatileObservation is stripped below at save time in the main wrapper
         } else if (decision.action === "finish") {
           due.history.push({ at: current(), type: "conclusion", note: decision.note });
-          if (decision.proposal) {
+          if (decision.proposal && decision.proposal.evidence.some(id => due.history.some(h => h.type === "read_result" && h.toolId === id))) {
             const signature = sum({ title: decision.proposal.title.toLowerCase(), rationale: decision.proposal.rationale.toLowerCase() });
             if (!due.proposals.some(p => p.signature === signature)) due.proposals.push({
               id: randomUUID(), signature, ...decision.proposal, at: current(), status: "review_only"
