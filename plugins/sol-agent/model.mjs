@@ -9,7 +9,7 @@ export async function inferLocally({ endpoint, model, token, objectives, changes
   if (!model) throw new Error("model_name_required");
   const url = localEndpoint(endpoint);
   const response = await fetcher(url, {
-    method: "POST", headers: { "content-type": "application/json", ...(token ? { authorization: "Bearer " + token } : {}) },
+    method: "POST", redirect: "error", headers: { "content-type": "application/json", ...(token ? { authorization: "Bearer " + token } : {}) },
     body: JSON.stringify({
       model, temperature: 0.1, max_tokens: 700,
       messages: [
