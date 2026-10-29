@@ -10,7 +10,7 @@ const PROMPT = [
   "No inventes hechos ni acciones. Si no hay una oportunidad relevante, conclui sin propuesta. Evita alarmas sin evidencia.",
   "Devolve exclusivamente JSON valido con uno de estos esquemas:",
   '{"action":"read","toolId":"id-registrado","note":"por que investigas"}',
-  '{"action":"finish","note":"resumen conciso de hallazgos y estado de la mision","proposal":{"title":"...","rationale":"...","priority":"low|medium|high","confidence":0.8}}',
+  '{"action":"finish","note":"resumen conciso de hallazgos y estado de la mision","proposal":{"title":"...","rationale":"...","priority":"low|medium|high","confidence":0.8,"evidence":["id-de-herramienta-consultada"]}}',
   '{"action":"wait","note":"por que conviene volver mas adelante","waitMinutes":60}',
   "La propiedad proposal es opcional; no inventes aprobaciones. Nunca incluyas datos sensibles completos."
 ].join("\n");
