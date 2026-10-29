@@ -12,6 +12,16 @@ El registro duradero se guarda en `SOL_PLUGIN_DATA_DIR/sol-agent-missions.json`.
 
 **No está instalado ni activado en producción.** Es un prototipo con límites, sin ejecución de acciones externas, sin navegador, sin delegación entre agentes y sin integrar todavía el código de Pi o Rakazo. No se ha verificado su compatibilidad con todos los plugins.
 
+## Aprendizajes aplicados de Home Assistant y negocios
+
+Las misiones pueden elegir perfil `home`, `business` o `general`. El perfil hogar exige dos lecturas coincidentes del mismo origen en ciclos separados por al menos dos minutos antes de registrar una sugerencia; se evitan alertas por una medición aislada. El perfil negocio exige evidencia de herramientas consultadas, favorece revisar producción, pedidos y stock, y nunca modifica registros.
+
+El plugin tiene un catálogo diagnóstico para cinco dominios existentes (Home Assistant, Bambuddy, BWA 3D, Finanzas y Educación). Es una lista orientativa, **no una concesión de acceso**: cada lectura sigue pasando por `/v1/plugin-api/mcp/tools/invoke-read` y los permisos originales de SOL. Nombres de herramientas con verbos de acción o escritura son rechazados al cargar el catálogo. Plugins futuros pueden aportar lecturas adicionales autorizadas.
+
+Se añadió `sol_agent_goal_wake` (scope `submit`) para adelantar un objetivo cuando llegue un evento externo autorizado. Requiere un objetivo existente, respeta pausas y deduplica despertares durante cinco minutos. **No está conectado automáticamente a Pulse ni a otros publicadores**, no contiene payloads de eventos y no ejecuta acciones.
+
+Ver [escenarios y pruebas de aceptación](USE_CASES.md). Ni los perfiles ni los ejemplos están activados automáticamente.
+
 ## Purpose
 SOL Agent is a deliberately small compatibility bridge for future agentic reasoning, inspired by the architectural patterns of Rakazo. It **does not yet copy or vendor Rakazo source code**. Dependency/licensing review and a proper Pi adapter are future work.
 
