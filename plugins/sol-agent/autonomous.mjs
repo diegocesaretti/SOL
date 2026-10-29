@@ -57,7 +57,7 @@ function cleanHistory(items) { return (items || []).slice(-12).map(x => ({ at: x
 function initial() { return { version: 2, missions: {}, budget: { day: "", model: 0, reads: 0 }, updatedAt: null }; }
 function mission(config, now) {
   return { id: config.id, objective: config.objective, intervalMinutes: config.intervalMinutes,
-    paused: false, dueAt: now, phase: "ready", steps: 0, cycles: 0, history: [],
+    paused: false, dueAt: now, phase: "ready", steps: 0, cycles: 0, history: [], feedback: [],
     proposals: [], errors: 0, lastError: null, updatedAt: now };
 }
 export function createAutonomousRuntime({ dataDir, tools = [], configuredGoals = [], decide, invokeRead,
@@ -112,6 +112,19 @@ export function createAutonomousRuntime({ dataDir, tools = [], configuredGoals =
     await persist();
     return { ok: true, id, paused: item.paused };
   }
+  async function recordFeedback(missionId, proposalId, rating, note = "") {
+    if (busy) throw new Error("runtime_busy");
+    if (!["useful","irrelevant","incorrect"].includes(rating)) throw new Error("invalid_feedback_rating");
+    const g = state.missions[missionId];
+    if (!g) throw new Error("goal_not_found");
+    const p = (g.proposals || []).find(x => x.id === proposalId);
+    if (!p) throw new Error("proposal_not_found");
+    p.feedback = rating;
+    const record = { at: current(), rating, proposalTitle: p.title, note: cut(note, 280) };
+    g.feedback = [...(g.feedback || []), record].slice(-30);
+    await persist();
+    return { ok: true, missionId, proposalId, rating };
+  }
   function inspect() {
     resetDay();
     return { ok: true, mode: "shadow_autonomous", active: Object.values(state.missions).filter(g => !g.paused).length,
@@ -148,6 +161,7 @@ export function createAutonomousRuntime({ dataDir, tools = [], configuredGoals =
         const decisionRaw = await decide({
           objective: due.objective, history: cleanHistory(due.history),
           tools: catalog.map(t => ({ id: t.id, description: t.description })),
+          feedback: (due.feedback || []).slice(-10),
           observation: due._volatileObservation || null,
           steps: due.steps, cycles: due.cycles
         });
@@ -217,5 +231,5 @@ export function createAutonomousRuntime({ dataDir, tools = [], configuredGoals =
     for (const item of Object.values(state.missions)) delete item._volatileObservation;
     await originalPersist();
   }
-  return { load, addGoal, pauseGoal, inspect, listProposals, cycle, checkpoint };
+  return { load, addGoal, pauseGoal, recordFeedback, inspect, listProposals, cycle, checkpoint };
 }
