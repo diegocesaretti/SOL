@@ -25,6 +25,19 @@ jobs:
           for f in plugins/sol-agent/*.mjs; do node --check "$f"; done
       - name: Run isolated unit tests
         run: node --test plugins/sol-agent/*.test.mjs
+      - name: Check actual Pi SDK 1.4.0 API in an isolated temp directory
+        run: |
+          mkdir -p "$RUNNER_TEMP/pi-check"
+          cd "$RUNNER_TEMP/pi-check"
+          npm install --ignore-scripts --no-audit --no-fund --no-save @earendil-works/pi-coding-agent@1.4.0
+          node --input-type=module -e '
+            import { createRequire } from "node:module";
+            const require = createRequire(import.meta.url);
+            const sdk = await import(require.resolve("@earendil-works/pi-coding-agent"));
+            const names = ["createAgentSession","ModelRuntime","SettingsManager","SessionManager","createExtensionRuntime"];
+            for (const name of names) if (!sdk[name]) throw new Error("Pi SDK missing " + name);
+            console.log("Pi SDK real exports verified");
+          '
       - name: Pack without installing or publishing
         run: node scripts/pack-sol-plugin.mjs plugins/sol-agent dist/SOLAgent-0.1.0.solplugin
       - name: Inspect packaged manifest
