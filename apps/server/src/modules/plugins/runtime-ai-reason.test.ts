@@ -61,17 +61,17 @@ test("rejects a member in another household, a minor, or inactive identity resol
 });
 
 test("Codex is the only provider and Core owns the fixed planning instructions", async () => {
-  let seen: ReasoningRequest | null = null;
+  const seen: ReasoningRequest[] = [];
   const go = gateway({ reason:async req => {
-    seen = req; return { provider:"codex",text:'{"action":"wait","note":"ok","waitMinutes":60}' };
+    seen.push(req); return { provider:"codex",text:'{"action":"wait","note":"ok","waitMinutes":60}' };
   }});
   const r = await go(authorized,request);
   assert.equal(r.provider,"codex");
-  assert.equal(seen?.householdId,authorized.householdId);
-  assert.equal(seen?.memberId,authorized.memberId);
-  assert.equal(seen?.purpose,"planning");
-  assert.match(seen?.instructions||"",/NO tenés acceso a herramientas/);
-  assert.equal(seen?.context,request.context);
+  assert.equal(seen[0]?.householdId,authorized.householdId);
+  assert.equal(seen[0]?.memberId,authorized.memberId);
+  assert.equal(seen[0]?.purpose,"planning");
+  assert.match(seen[0]?.instructions||"",/NO tenés acceso a herramientas/);
+  assert.equal(seen[0]?.context,request.context);
   const noFallback = gateway({reason:async()=>({provider:"openai",text:"ok"})});
   await assert.rejects(() => noFallback(authorized,request), /unexpected_provider/);
 });
