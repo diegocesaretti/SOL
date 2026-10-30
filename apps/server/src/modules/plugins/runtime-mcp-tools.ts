@@ -3,7 +3,7 @@ import type { SolPluginRuntimePrincipal } from "./types.js";
 
 const TOOL_RE = /^[a-z][a-z0-9_]{1,79}$/;
 const STREMIO_PLAYBACK_TOOL = "home_assistant_stremio_play_best";
-export type RuntimeMcpScope = "read" | "actions";
+export type RuntimeMcpScope = "read" | "submit" | "actions";
 
 export interface RuntimeMcpToolDescriptor {
   pluginId: string;
