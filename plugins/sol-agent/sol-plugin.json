@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "id": "sol-agent",
   "name": "SOL Agent (Experimental Persistent)",
-  "version": "0.4.0",
-  "description": "Agente experimental con misiones persistentes, razonamiento mediante Codex ya conectado en SOL y lecturas MCP autorizadas. Sin acciones externas.",
+  "version": "0.5.0",
+  "description": "Agente experimental con Codex, misiones persistentes y avisos opt-in vía Nexo a un número propietario fijo. No ejecuta acciones en equipos.",
   "runtime": "node",
   "entry": "entry.mjs",
   "args": [],
@@ -14,7 +14,8 @@
     "proactivity.missions",
     "proactivity.reasoning",
     "proactivity.shadow",
-    "proactivity.pi-reasoner"
+    "proactivity.pi-reasoner",
+    "communications.nexo.opt-in"
   ],
   "requires": [
     "plugin-api.v1",
@@ -173,6 +174,32 @@
       "env": "SOL_AGENT_PI_ALLOW_REMOTE",
       "required": false,
       "default": false
+    },
+    {
+      "key": "nexoNotificationsEnabled",
+      "label": "Habilitar propuestas críticas por Nexo (opt-in)",
+      "type": "boolean",
+      "description": "Desactivado por defecto. Envía hallazgos de alta prioridad al canal protegido de Nexo como máximo una vez al día.",
+      "env": "SOL_AGENT_NEXO_NOTIFICATIONS_ENABLED",
+      "required": false,
+      "default": false
+    },
+    {
+      "key": "nexoUrl",
+      "label": "Dirección local de Nexo",
+      "type": "text",
+      "description": "Únicamente http://127.0.0.1 o localhost. Nunca envía claves a direcciones remotas.",
+      "env": "SOL_AGENT_NEXO_URL",
+      "required": false,
+      "default": "http://127.0.0.1:3210"
+    },
+    {
+      "key": "nexoNotifyToken",
+      "label": "Token privado de avisos SOL Agent → Nexo",
+      "type": "secret",
+      "description": "Secreto de 24+ caracteres compartido únicamente por configuración segura con Nexo. Independiente del token de Morning Brief.",
+      "env": "SOL_AGENT_NEXO_NOTIFY_TOKEN",
+      "required": false
     }
   ]
 }
