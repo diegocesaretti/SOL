@@ -7,6 +7,7 @@ import { upsertPluginPersonIdentity } from "./identity-service.js";
 import { getPluginVisiblePerson, listPluginVisiblePeople } from "./identity-read-service.js";
 import { registerPluginMcpTools } from "./mcp-registry.js";
 import { searchPluginRuntimeWhatsapp } from "./runtime-core-read.js";
+import { authorizeNexoAgentSubmit } from "./runtime-nexo-agent-submit.js";
 import { invokePluginRuntimeTool, listPluginRuntimeTools, type RuntimeMcpScope } from "./runtime-mcp-tools.js";
 import { pluginManager } from "./runtime.js";
 import type { SolPluginRuntimePrincipal } from "./types.js";
@@ -72,6 +73,7 @@ export async function handlePluginRuntimeApi(path: string, request: IncomingMess
     && path !== "/v1/plugin-api/mcp/tools/register"
     && path !== "/v1/plugin-api/mcp/tools/available"
     && path !== "/v1/plugin-api/mcp/tools/invoke-read"
+    && path !== "/v1/plugin-api/mcp/tools/invoke-submit"
     && path !== "/v1/plugin-api/mcp/tools/invoke-action"
     && path !== "/v1/plugin-api/mcp/core/search-whatsapp"
     && !peopleMatch
@@ -163,6 +165,17 @@ export async function handlePluginRuntimeApi(path: string, request: IncomingMess
     if (!input) return true;
     try { sendJson(response, 200, await invokePluginRuntimeTool(principal, "read", input)); }
     catch (error) { runtimeError(response, error); }
+    return true;
+  }
+
+  if (path === "/v1/plugin-api/mcp/tools/invoke-submit" && request.method === "POST") {
+    if (!requirePermission(response, principal, "mcp.invoke.submit")) return true;
+    const input = await jsonBody<{name?:unknown; arguments?:unknown}>(request, response);
+    if (!input) return true;
+    try {
+      await authorizeNexoAgentSubmit(principal, input);
+      sendJson(response, 200, await invokePluginRuntimeTool(principal, "submit", input));
+    } catch (error) { runtimeError(response, error); }
     return true;
   }
 
