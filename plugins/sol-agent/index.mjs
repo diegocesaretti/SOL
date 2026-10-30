@@ -7,6 +7,7 @@ import { inferLocally } from "./model.mjs";
 import { createAutonomousRuntime, validateCatalog } from "./autonomous.mjs";
 import { decideGoalLocally } from "./autonomous-model.mjs";
 import { decideWithPi } from "./pi-adapter.mjs";
+import { decideWithSolCodex } from "./codex-bridge.mjs";
 
 const pluginId = process.env.SOL_PLUGIN_ID?.trim() || "sol-agent";
 const dataDir = process.env.SOL_PLUGIN_DATA_DIR?.trim() || join(process.env.SOL_PLUGIN_ROOT?.trim() || process.cwd(), ".data");
@@ -21,20 +22,24 @@ const modelName = process.env.SOL_AGENT_MODEL_NAME?.trim() || "";
 const modelEndpoint = process.env.SOL_AGENT_MODEL_ENDPOINT?.trim() || "http://127.0.0.1:11434/v1/chat/completions";
 const modelToken = process.env.SOL_AGENT_MODEL_TOKEN || "";
 const autonomyEnabled = process.env.SOL_AGENT_AUTONOMY_ENABLED === "true";
-const agentEngine = process.env.SOL_AGENT_ENGINE || "local";
-if (!["local", "pi"].includes(agentEngine)) throw new Error("invalid_agent_engine");
+const agentEngine = process.env.SOL_AGENT_ENGINE || "codex";
+if (!["codex", "local", "pi"].includes(agentEngine)) throw new Error("invalid_agent_engine");
 const piProvider = process.env.SOL_AGENT_PI_PROVIDER || "";
 const piModelId = process.env.SOL_AGENT_PI_MODEL_ID || "";
 const piApiKey = process.env.SOL_AGENT_PI_API_KEY || "";
 const piAllowRemote = process.env.SOL_AGENT_PI_ALLOW_REMOTE === "true";
-const autonomousModelReady = agentEngine === "pi"
-  ? Boolean(piProvider && piModelId && piApiKey && piAllowRemote) : modelConfigured;
+const piConfigured = Boolean(piProvider && piModelId && piApiKey && piAllowRemote);
 const authorizedTools = validateCatalog(process.env.SOL_AGENT_TOOLS_JSON || "[]");
 const configuredGoals = JSON.parse(process.env.SOL_AGENT_GOALS_JSON || "[]");
 if (!Array.isArray(configuredGoals) || configuredGoals.length > 12) throw new Error("invalid_agent_goals_config");
 const apiUrl = (process.env.SOL_PLUGIN_API_URL || process.env.SOL_CORE_URL || "").trim().replace(/\/$/, "");
 const apiToken = process.env.SOL_PLUGIN_TOKEN || "";
 const coreReady = Boolean(apiUrl && apiToken);
+const approvedPermissions = JSON.parse(process.env.SOL_PLUGIN_APPROVED_PERMISSIONS || "[]");
+if (!Array.isArray(approvedPermissions)) throw new Error("invalid_approved_permissions");
+const codexAuthorized = coreReady && approvedPermissions.includes("ai.reason");
+const autonomousModelReady = agentEngine === "codex" ? codexAuthorized
+  : agentEngine === "pi" ? piConfigured : modelConfigured;
 const secretPath = "/mcp/" + randomBytes(24).toString("base64url");
 const callbackUrl = "http://127.0.0.1:" + port + secretPath;
 let state = { version: 1, snapshots: {}, proposals: [], budget: {} };
@@ -44,8 +49,8 @@ let runtimeLoaded = false;
 function status() {
   const utcDay = new Date().toISOString().slice(0, 10);
   const autonomousStatus = runtimeLoaded ? runtime.inspect() : null;
-  return { ok: true, plugin: pluginId, version: "0.3.0", mode: autonomyEnabled ? "shadow_autonomous" : "shadow",
-    reasoningEngine: agentEngine, autonomousModelReady, piRemoteOptIn: piAllowRemote,
+  return { ok: true, plugin: pluginId, version: "0.4.0", mode: autonomyEnabled ? "shadow_autonomous" : "shadow",
+    reasoningEngine: agentEngine, autonomousModelReady, codexAuthorized, piRemoteOptIn: piAllowRemote,
     canExecute: false, canNotify: false, sources: sources.length,
     modelConfigured, coreReady, toolsRegistered, busy, lastRun, lastError,
     proposals: state.proposals?.length || 0, modelCallsToday: state.budget?.[utcDay] || 0,
@@ -88,6 +93,7 @@ const runtime = createAutonomousRuntime({
   dataDir, tools: authorizedTools, configuredGoals, invokeRead,
   decide: async (context) => {
     if (!autonomousModelReady) throw new Error("reasoning_backend_not_configured");
+    if (agentEngine === "codex") return decideWithSolCodex({ apiUrl, pluginToken: apiToken, ...context });
     if (agentEngine === "pi") return decideWithPi({
       provider: piProvider, modelId: piModelId, apiKey: piApiKey,
       allowRemote: piAllowRemote, dataDir, ...context
