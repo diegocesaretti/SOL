@@ -1,0 +1,93 @@
+name: SOL Agent Shadow Safety Checks
+on:
+  push:
+    branches: [feature/sol-agent-shadow]
+    paths:
+      - "plugins/sol-agent/**"
+      - "scripts/build-sol-agent-pi.mjs"
+      - "scripts/pack-sol-agent-fast.mjs"
+      - ".github/workflows/sol-agent-shadow.yml"
+  pull_request:
+    paths:
+      - "plugins/sol-agent/**"
+      - "scripts/build-sol-agent-pi.mjs"
+      - "scripts/pack-sol-agent-fast.mjs"
+      - ".github/workflows/sol-agent-shadow.yml"
+permissions:
+  contents: read
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Check runtime syntax
+        run: |
+          for f in plugins/sol-agent/*.mjs scripts/build-sol-agent-pi.mjs; do node --check "$f"; done
+      - name: Run isolated unit tests
+        run: node --test plugins/sol-agent/*.test.mjs
+      - name: Install locked Pi SDK in plugin's isolated directory
+        working-directory: plugins/sol-agent
+        run: npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+      - name: Offline smoke test against REAL Pi SDK
+        run: node plugins/sol-agent/pi-session-smoke.mjs
+      - name: Stage and package experimental Pi-enabled plugin without installing in SOL
+        run: node scripts/build-sol-agent-pi.mjs
+      - name: Verify ZIP CRC integrity
+        run: unzip -t -q dist/SOLAgent-0.5.0-pi-experimental.solplugin
+      - name: Inspect packaged manifest and Pi SDK
+        run: |
+          unzip -p dist/SOLAgent-0.5.0-pi-experimental.solplugin sol-plugin.json | node -e '
+          let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
+            const x=JSON.parse(s);
+            if(x.autoStart!==false || x.permissions.includes("mcp.invoke.write")) process.exit(1);
+            if(x.id!=="sol-agent") process.exit(1);
+            console.log("Safe manifest validated");
+          })'
+          unzip -l dist/SOLAgent-0.5.0-pi-experimental.solplugin | grep -F 'node_modules/@earendil-works/pi-coding-agent/package.json'
+      - name: Retain CI-only experimental artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sol-agent-pi-experimental-linux
+          path: dist/SOLAgent-0.5.0-pi-experimental.solplugin
+          if-no-files-found: error
+          retention-days: 7
+  windows-smoke:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Install pinned Pi SDK without scripts
+        working-directory: plugins/sol-agent
+        run: npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+      - name: Verify real Pi SDK session has no tools
+        run: node plugins/sol-agent/pi-session-smoke.mjs
+      - name: Assemble the Windows-compatible experimental plugin
+        run: node scripts/build-sol-agent-pi.mjs
+      - name: Inspect zip manifest on Windows
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.IO.Compression
+          $archive = [System.IO.Compression.ZipFile]::OpenRead("dist/SOLAgent-0.5.0-pi-experimental.solplugin")
+          try {
+            $manifestEntry = $archive.Entries | Where-Object FullName -eq "sol-plugin.json" | Select-Object -First 1
+            if (-not $manifestEntry) { throw "missing plugin manifest" }
+            $reader = [System.IO.StreamReader]::new($manifestEntry.Open())
+            try { $manifest = $reader.ReadToEnd() | ConvertFrom-Json } finally { $reader.Dispose() }
+            if ($manifest.autoStart -ne $false) { throw "plugin must not start automatically" }
+            if ($manifest.permissions -contains "mcp.invoke.write") { throw "write permission forbidden" }
+            $sdk = $archive.Entries | Where-Object FullName -eq "node_modules/@earendil-works/pi-coding-agent/package.json"
+            if (-not $sdk) { throw "Pi SDK missing from Windows artifact" }
+            Write-Host "Windows Pi package verified"
+          } finally { $archive.Dispose() }
+      - name: Retain Windows test artifact (not a production release)
+        uses: actions/upload-artifact@v4
+        with:
+          name: sol-agent-pi-experimental-windows
+          path: dist/SOLAgent-0.5.0-pi-experimental.solplugin
+          if-no-files-found: error
+          retention-days: 7

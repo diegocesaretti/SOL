@@ -1,0 +1,205 @@
+{
+  "schemaVersion": 2,
+  "id": "sol-agent",
+  "name": "SOL Agent (Experimental Persistent)",
+  "version": "0.5.0",
+  "description": "Agente experimental con Codex, misiones persistentes y avisos opt-in vía Nexo a un número propietario fijo. No ejecuta acciones en equipos.",
+  "runtime": "node",
+  "entry": "entry.mjs",
+  "args": [],
+  "autoStart": false,
+  "restartPolicy": "on-failure",
+  "capabilities": [
+    "mcp.sol-agent",
+    "proactivity.missions",
+    "proactivity.reasoning",
+    "proactivity.shadow",
+    "proactivity.pi-reasoner",
+    "communications.nexo.opt-in"
+  ],
+  "requires": [
+    "plugin-api.v1",
+    "mcp.register",
+    "filesystem.plugin-data",
+    "ai.reason"
+  ],
+  "permissions": [
+    "mcp.register",
+    "filesystem.plugin-data",
+    "network.local",
+    "mcp.invoke.read",
+    "ai.reason"
+  ],
+  "settings": [
+    {
+      "key": "api_port",
+      "label": "Puerto local del agente",
+      "type": "number",
+      "env": "SOL_AGENT_PORT",
+      "required": false,
+      "default": 8796,
+      "min": 1024,
+      "max": 65535
+    },
+    {
+      "key": "sources_json",
+      "label": "Fuentes MCP de lectura permitidas (JSON)",
+      "type": "text",
+      "env": "SOL_AGENT_SOURCES_JSON",
+      "required": false,
+      "default": "[]"
+    },
+    {
+      "key": "objectives",
+      "label": "Objetivos permanentes (sin datos sensibles)",
+      "type": "text",
+      "env": "SOL_AGENT_OBJECTIVES",
+      "required": false,
+      "default": "Detectar oportunidades y riesgos relevantes, investigar y proponer sin ejecutar."
+    },
+    {
+      "key": "interval_minutes",
+      "label": "Frecuencia de observación (min)",
+      "type": "number",
+      "env": "SOL_AGENT_INTERVAL_MINUTES",
+      "required": false,
+      "default": 15,
+      "min": 5,
+      "max": 1440
+    },
+    {
+      "key": "model_enabled",
+      "label": "Habilitar razonamiento con modelo LOCAL (opt-in)",
+      "type": "boolean",
+      "env": "SOL_AGENT_MODEL_ENABLED",
+      "required": false,
+      "default": false
+    },
+    {
+      "key": "model_name",
+      "label": "Modelo local OpenAI-compatible",
+      "type": "text",
+      "env": "SOL_AGENT_MODEL_NAME",
+      "required": false,
+      "default": ""
+    },
+    {
+      "key": "model_endpoint",
+      "label": "Endpoint local del modelo",
+      "type": "text",
+      "env": "SOL_AGENT_MODEL_ENDPOINT",
+      "required": false,
+      "default": "http://127.0.0.1:11434/v1/chat/completions"
+    },
+    {
+      "key": "model_token",
+      "label": "Token del modelo local (si corresponde)",
+      "type": "secret",
+      "env": "SOL_AGENT_MODEL_TOKEN",
+      "required": false
+    },
+    {
+      "key": "autonomy_enabled",
+      "label": "Activar misiones autónomas experimentales (solo lectura)",
+      "type": "boolean",
+      "env": "SOL_AGENT_AUTONOMY_ENABLED",
+      "required": false,
+      "default": false
+    },
+    {
+      "key": "tools_json",
+      "label": "Catálogo acotado de herramientas MCP de lectura autorizadas",
+      "type": "text",
+      "env": "SOL_AGENT_TOOLS_JSON",
+      "required": false,
+      "default": "[]"
+    },
+    {
+      "key": "goals_json",
+      "label": "Misiones iniciales, opcionales (JSON)",
+      "type": "text",
+      "env": "SOL_AGENT_GOALS_JSON",
+      "required": false,
+      "default": "[]"
+    },
+    {
+      "key": "reasoning_engine",
+      "label": "Proveedor de razonamiento (Codex de SOL por defecto)",
+      "type": "select",
+      "env": "SOL_AGENT_ENGINE",
+      "required": false,
+      "default": "codex",
+      "options": [
+        {
+          "value": "codex",
+          "label": "Codex conectado a SOL (sin nueva API key)"
+        },
+        {
+          "value": "local",
+          "label": "Modelo local OpenAI-compatible"
+        },
+        {
+          "value": "pi",
+          "label": "Pi con proveedor externo (experimental)"
+        }
+      ]
+    },
+    {
+      "key": "pi_provider",
+      "label": "Proveedor Pi (anthropic / openai / google)",
+      "type": "text",
+      "env": "SOL_AGENT_PI_PROVIDER",
+      "required": false,
+      "default": ""
+    },
+    {
+      "key": "pi_model_id",
+      "label": "ID del modelo Pi",
+      "type": "text",
+      "env": "SOL_AGENT_PI_MODEL_ID",
+      "required": false,
+      "default": ""
+    },
+    {
+      "key": "pi_api_key",
+      "label": "Clave API de modelo Pi (secreta)",
+      "type": "secret",
+      "env": "SOL_AGENT_PI_API_KEY",
+      "required": false
+    },
+    {
+      "key": "pi_allow_remote",
+      "label": "AUTORIZAR envío de contexto a modelo remoto mediante Pi",
+      "type": "boolean",
+      "env": "SOL_AGENT_PI_ALLOW_REMOTE",
+      "required": false,
+      "default": false
+    },
+    {
+      "key": "nexoNotificationsEnabled",
+      "label": "Habilitar propuestas críticas por Nexo (opt-in)",
+      "type": "boolean",
+      "description": "Desactivado por defecto. Envía hallazgos de alta prioridad al canal protegido de Nexo como máximo una vez al día.",
+      "env": "SOL_AGENT_NEXO_NOTIFICATIONS_ENABLED",
+      "required": false,
+      "default": false
+    },
+    {
+      "key": "nexoUrl",
+      "label": "Dirección local de Nexo",
+      "type": "text",
+      "description": "Únicamente http://127.0.0.1 o localhost. Nunca envía claves a direcciones remotas.",
+      "env": "SOL_AGENT_NEXO_URL",
+      "required": false,
+      "default": "http://127.0.0.1:3210"
+    },
+    {
+      "key": "nexoNotifyToken",
+      "label": "Token privado de avisos SOL Agent → Nexo",
+      "type": "secret",
+      "description": "Secreto de 24+ caracteres compartido únicamente por configuración segura con Nexo. Independiente del token de Morning Brief.",
+      "env": "SOL_AGENT_NEXO_NOTIFY_TOKEN",
+      "required": false
+    }
+  ]
+}
