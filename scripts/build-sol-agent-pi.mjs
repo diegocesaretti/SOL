@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
 const source = resolve("plugins/sol-agent");
-const output = resolve("dist/SOLAgent-0.4.0-pi-experimental.solplugin");
+const output = resolve("dist/SOLAgent-0.5.0-pi-experimental.solplugin");
 const stage = await mkdtemp(join(tmpdir(), "sol-agent-pi-"));
 const src = join(stage, "plugin");
 
