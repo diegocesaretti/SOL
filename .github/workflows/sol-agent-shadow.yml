@@ -36,22 +36,22 @@ jobs:
       - name: Stage and package experimental Pi-enabled plugin without installing in SOL
         run: node scripts/build-sol-agent-pi.mjs
       - name: Verify ZIP CRC integrity
-        run: unzip -t -q dist/SOLAgent-0.3.1-pi-experimental.solplugin
+        run: unzip -t -q dist/SOLAgent-0.4.0-pi-experimental.solplugin
       - name: Inspect packaged manifest and Pi SDK
         run: |
-          unzip -p dist/SOLAgent-0.3.1-pi-experimental.solplugin sol-plugin.json | node -e '
+          unzip -p dist/SOLAgent-0.4.0-pi-experimental.solplugin sol-plugin.json | node -e '
           let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
             const x=JSON.parse(s);
             if(x.autoStart!==false || x.permissions.includes("mcp.invoke.write")) process.exit(1);
             if(x.id!=="sol-agent") process.exit(1);
             console.log("Safe manifest validated");
           })'
-          unzip -l dist/SOLAgent-0.3.1-pi-experimental.solplugin | grep -F 'node_modules/@earendil-works/pi-coding-agent/package.json'
+          unzip -l dist/SOLAgent-0.4.0-pi-experimental.solplugin | grep -F 'node_modules/@earendil-works/pi-coding-agent/package.json'
       - name: Retain CI-only experimental artifact
         uses: actions/upload-artifact@v4
         with:
           name: sol-agent-pi-experimental-linux
-          path: dist/SOLAgent-0.3.1-pi-experimental.solplugin
+          path: dist/SOLAgent-0.4.0-pi-experimental.solplugin
           if-no-files-found: error
           retention-days: 7
   windows-smoke:
@@ -72,7 +72,7 @@ jobs:
         shell: pwsh
         run: |
           Add-Type -AssemblyName System.IO.Compression
-          $archive = [System.IO.Compression.ZipFile]::OpenRead("dist/SOLAgent-0.3.1-pi-experimental.solplugin")
+          $archive = [System.IO.Compression.ZipFile]::OpenRead("dist/SOLAgent-0.4.0-pi-experimental.solplugin")
           try {
             $manifestEntry = $archive.Entries | Where-Object FullName -eq "sol-plugin.json" | Select-Object -First 1
             if (-not $manifestEntry) { throw "missing plugin manifest" }
@@ -88,6 +88,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: sol-agent-pi-experimental-windows
-          path: dist/SOLAgent-0.3.1-pi-experimental.solplugin
+          path: dist/SOLAgent-0.4.0-pi-experimental.solplugin
           if-no-files-found: error
           retention-days: 7
