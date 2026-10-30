@@ -46,6 +46,7 @@ test("plugin schema v2 accepts supported host capability requirements", () => {
     "credentials.write",
     "mcp.register",
     "mcp.invoke.read",
+    "mcp.invoke.submit",
     "filesystem.plugin-data",
   ]));
   assert.deepEqual(parsed.requires, [
@@ -62,6 +63,7 @@ test("plugin schema v2 accepts supported host capability requirements", () => {
     "credentials.write",
     "mcp.register",
     "mcp.invoke.read",
+    "mcp.invoke.submit",
     "filesystem.plugin-data",
   ]);
 });
