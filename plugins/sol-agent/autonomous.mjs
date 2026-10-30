@@ -177,7 +177,7 @@ export function createAutonomousRuntime({ dataDir, tools = [], configuredGoals =
         }
         state.budget.model += 1; await persist(); // reserve BEFORE model call
         const decisionRaw = await decide({
-          objective: due.objective, profile: due.profile || "general", guidance: guidanceFor(due.profile || "general"), history: cleanHistory(due.history),
+          missionId: due.id, objective: due.objective, profile: due.profile || "general", guidance: guidanceFor(due.profile || "general"), history: cleanHistory(due.history),
           tools: catalog.map(t => ({ id: t.id, description: t.description })),
           feedback: (due.feedback || []).slice(-10),
           observation: due._volatileObservation || null,
