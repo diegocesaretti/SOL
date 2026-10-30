@@ -1,12 +1,20 @@
-# SOL Agent — experimental 0.3.1 (autonomous shadow mode)
+# SOL Agent — experimental 0.4.0 (autonomous shadow mode)
 
 **This is a development-only plugin.** It does not replace Pulse, run device actions, change listings, control printers, or send Nexo/WhatsApp messages. Default: `autoStart=false`, no sources configured, local-model inference disabled.
+
+## Codex de SOL: proveedor predeterminado (0.4)
+
+El agente utiliza por defecto la integración **Codex App Server que ya administra SOL Core**, sin crear otra cuenta ni acceder a los tokens de ChatGPT. Para hacerlo, SOL Core debe contar con el permiso `ai.reason` y el endpoint interno de [PR #118](https://github.com/diegocesaretti/SOL/pull/118). Este requisito es obligatorio antes de instalar SOL Agent 0.4.
+
+El modelo local o Pi externo siguen disponibles de forma opcional. La conexión Codex está deshabilitada si falta el permiso aprobado, y `autoStart=false` / `SOL_AGENT_AUTONOMY_ENABLED=false` permanecen como valores predeterminados. La información proporcionada a Codex pasa por la cuenta ChatGPT conectada a SOL; revisá las fuentes privadas antes de habilitarlo.
+
+**No se ha probado extremo a extremo con la cuenta Codex real ni se instaló en el HTPC**. Ver [contrato, seguridad y pruebas pendientes](CODEX_BRIDGE.md).
 
 ## Autonomía experimental v0.2
 
 Se añadió un motor de misiones duraderas con calendario, historial resumido, reanudación tras reinicios y decisiones del modelo entre consultar una herramienta MCP, concluir o esperar. El modelo solamente puede seleccionar herramientas de lectura expresamente habilitadas por SOL y sus argumentos están predefinidos por el propietario.
 
-Se configura con `SOL_AGENT_AUTONOMY_ENABLED`, `SOL_AGENT_TOOLS_JSON` y `SOL_AGENT_GOALS_JSON`. El razonamiento necesita un modelo local activado expresamente. Los nuevos MCP son `sol_agent_missions`, `sol_agent_goal_create`, `sol_agent_goal_pause` y `sol_agent_feedback`.
+Se configura con `SOL_AGENT_AUTONOMY_ENABLED`, `SOL_AGENT_TOOLS_JSON` y `SOL_AGENT_GOALS_JSON`. El razonamiento necesita Codex conectado en SOL con permiso `ai.reason`, o un modelo alternativo configurado explícitamente. Los nuevos MCP son `sol_agent_missions`, `sol_agent_goal_create`, `sol_agent_goal_pause` y `sol_agent_feedback`.
 
 El registro duradero se guarda en `SOL_PLUGIN_DATA_DIR/sol-agent-missions.json`. Los datos completos recibidos de las herramientas solo se utilizan temporalmente en memoria; al disco van resúmenes, identificadores y hashes.
 
