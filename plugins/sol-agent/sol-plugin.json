@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "id": "sol-agent",
   "name": "SOL Agent (Experimental Persistent)",
-  "version": "0.3.1",
-  "description": "Agente residente experimental: misiones duraderas, investigación autónoma con lecturas MCP autorizadas y reinicio recuperable, sin acciones externas.",
+  "version": "0.4.0",
+  "description": "Agente experimental con misiones persistentes, razonamiento mediante Codex ya conectado en SOL y lecturas MCP autorizadas. Sin acciones externas.",
   "runtime": "node",
   "entry": "entry.mjs",
   "args": [],
@@ -19,13 +19,15 @@
   "requires": [
     "plugin-api.v1",
     "mcp.register",
-    "filesystem.plugin-data"
+    "filesystem.plugin-data",
+    "ai.reason"
   ],
   "permissions": [
     "mcp.register",
     "filesystem.plugin-data",
     "network.local",
-    "mcp.invoke.read"
+    "mcp.invoke.read",
+    "ai.reason"
   ],
   "settings": [
     {
@@ -121,19 +123,23 @@
     },
     {
       "key": "reasoning_engine",
-      "label": "Motor de razonamiento (local / Pi experimental)",
+      "label": "Proveedor de razonamiento (Codex de SOL por defecto)",
       "type": "select",
       "env": "SOL_AGENT_ENGINE",
       "required": false,
-      "default": "local",
+      "default": "codex",
       "options": [
+        {
+          "value": "codex",
+          "label": "Codex conectado a SOL (sin nueva API key)"
+        },
         {
           "value": "local",
           "label": "Modelo local OpenAI-compatible"
         },
         {
           "value": "pi",
-          "label": "Pi SDK (requiere dependencia y permiso remoto explícito)"
+          "label": "Pi con proveedor externo (experimental)"
         }
       ]
     },
