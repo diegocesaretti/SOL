@@ -1,6 +1,14 @@
-# SOL Agent — experimental 0.4.0 (autonomous shadow mode)
+# SOL Agent — experimental 0.5.0 (autonomous shadow mode)
 
-**This is a development-only plugin.** It does not replace Pulse, run device actions, change listings, control printers, or send Nexo/WhatsApp messages. Default: `autoStart=false`, no sources configured, local-model inference disabled.
+**This is a development-only plugin.** It does not replace Pulse, run device actions, change listings or control printers. Nexo/WhatsApp notifications are independently opt-in and strictly bounded. Default: `autoStart=false`, no sources configured, local-model inference disabled.
+
+## Canal Nexo bidireccional experimental (0.5)
+
+Nexo podrá administrar misiones mediante comandos deterministas `/agente` recibidos de un número propietario configurado y autorizado, sin exponer comandos de gestión al modelo de Codex. También se añade un publicador de hallazgos de alta prioridad hacia Nexo con destinatario fijado por Nexo, un máximo de un mensaje por día y horario de silencio. **Ambos canales vienen desactivados por defecto** y requieren secretos y permisos aprobados.
+
+Se necesitan [Core PR #119](https://github.com/diegocesaretti/SOL/pull/119), [Nexo PR #42](https://github.com/diegocesaretti/Whatsapp-Codex-Nexo/pull/42) y el presente PR, junto con el puente Codex de Core PR #118. No instalar ninguno de forma aislada: sin los contratos completos no funcionará la integración.
+
+Ver [diseño, controles y pruebas pendientes](NEXO_INTEGRATION.md).
 
 ## Codex de SOL: proveedor predeterminado (0.4)
 
