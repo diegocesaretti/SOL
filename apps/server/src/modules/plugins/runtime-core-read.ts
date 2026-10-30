@@ -3,7 +3,7 @@ import type { AuthPrincipal } from "../auth/session.js";
 import { searchMcpWhatsapp } from "../mcp/whatsapp.js";
 import type { SolPluginRuntimePrincipal } from "./types.js";
 
-async function memberPrincipal(principal: SolPluginRuntimePrincipal): Promise<AuthPrincipal> {
+export async function memberPrincipal(principal: SolPluginRuntimePrincipal): Promise<AuthPrincipal> {
   const result = await db.query<{
     household_id: string;
     member_id: string;
