@@ -8,6 +8,7 @@ import { createAutonomousRuntime, validateCatalog } from "./autonomous.mjs";
 import { decideGoalLocally } from "./autonomous-model.mjs";
 import { decideWithPi } from "./pi-adapter.mjs";
 import { decideWithSolCodex } from "./codex-bridge.mjs";
+import { createNexoNotificationPublisher } from "./nexo-publisher.mjs";
 
 const pluginId = process.env.SOL_PLUGIN_ID?.trim() || "sol-agent";
 const dataDir = process.env.SOL_PLUGIN_DATA_DIR?.trim() || join(process.env.SOL_PLUGIN_ROOT?.trim() || process.cwd(), ".data");
@@ -22,6 +23,9 @@ const modelName = process.env.SOL_AGENT_MODEL_NAME?.trim() || "";
 const modelEndpoint = process.env.SOL_AGENT_MODEL_ENDPOINT?.trim() || "http://127.0.0.1:11434/v1/chat/completions";
 const modelToken = process.env.SOL_AGENT_MODEL_TOKEN || "";
 const autonomyEnabled = process.env.SOL_AGENT_AUTONOMY_ENABLED === "true";
+const nexoNotificationsEnabled = process.env.SOL_AGENT_NEXO_NOTIFICATIONS_ENABLED === "true";
+const nexoNotifyToken = process.env.SOL_AGENT_NEXO_NOTIFY_TOKEN || "";
+const nexoBaseUrl = process.env.SOL_AGENT_NEXO_URL || "http://127.0.0.1:3210";
 const agentEngine = process.env.SOL_AGENT_ENGINE || "codex";
 if (!["codex", "local", "pi"].includes(agentEngine)) throw new Error("invalid_agent_engine");
 const piProvider = process.env.SOL_AGENT_PI_PROVIDER || "";
@@ -49,9 +53,9 @@ let runtimeLoaded = false;
 function status() {
   const utcDay = new Date().toISOString().slice(0, 10);
   const autonomousStatus = runtimeLoaded ? runtime.inspect() : null;
-  return { ok: true, plugin: pluginId, version: "0.4.0", mode: autonomyEnabled ? "shadow_autonomous" : "shadow",
+  return { ok: true, plugin: pluginId, version: "0.5.0", mode: autonomyEnabled ? "shadow_autonomous" : "shadow",
     reasoningEngine: agentEngine, autonomousModelReady, codexAuthorized, piRemoteOptIn: piAllowRemote,
-    canExecute: false, canNotify: false, sources: sources.length,
+    canExecute: false, canNotify: autonomyEnabled && nexoNotificationsEnabled && nexoNotifyToken.length >= 24, sources: sources.length,
     modelConfigured, coreReady, toolsRegistered, busy, lastRun, lastError,
     proposals: state.proposals?.length || 0, modelCallsToday: state.budget?.[utcDay] || 0,
     modelDailyLimit: 8, autonomous: autonomousStatus && { active: autonomousStatus.active, missionCount: autonomousStatus.missionCount,
@@ -100,6 +104,11 @@ const runtime = createAutonomousRuntime({
     });
     return decideGoalLocally({ endpoint: modelEndpoint, model: modelName, token: modelToken, ...context });
   }
+});
+const nexoPublisher = createNexoNotificationPublisher({
+  dataDir, enabled: autonomyEnabled && nexoNotificationsEnabled,
+  token: nexoNotifyToken, baseUrl: nexoBaseUrl,
+  proposals: () => runtime.listProposals(50)
 });
 export async function tick() {
   if (busy) return { skipped: "busy" };
@@ -167,6 +176,7 @@ export async function start() {
   await mkdir(dataDir, { recursive: true });
   await load();
   await runtime.load();
+  await nexoPublisher.load();
   runtimeLoaded = true;
   server = createServer(async (req, res) => {
     const path = new URL(req.url || "/", "http://127.0.0.1").pathname;
@@ -197,12 +207,14 @@ export async function start() {
   interval.unref?.();
   const autonomyTimer = setInterval(() => { if (autonomyEnabled && autonomousModelReady) void runtime.cycle(); }, 60000);
   autonomyTimer.unref?.();
+  const nexoNotifyTimer = setInterval(() => { void nexoPublisher.publish(); }, 300000);
+  nexoNotifyTimer.unref?.();
   const retry = setInterval(() => { if (!toolsRegistered) void register(); }, 30000);
   retry.unref?.();
   if (autonomyEnabled && autonomousModelReady) void runtime.cycle();
   else if (!autonomyEnabled) void tick();
   for (const sig of ["SIGINT", "SIGTERM"]) process.once(sig, async () => {
-    clearInterval(interval); clearInterval(autonomyTimer); clearInterval(retry);
+    clearInterval(interval); clearInterval(autonomyTimer); clearInterval(nexoNotifyTimer); clearInterval(retry);
     await register([]).catch(() => {});
     server.close();
     process.exit(0);
