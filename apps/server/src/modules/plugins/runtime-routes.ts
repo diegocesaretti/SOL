@@ -7,6 +7,7 @@ import { upsertPluginPersonIdentity } from "./identity-service.js";
 import { getPluginVisiblePerson, listPluginVisiblePeople } from "./identity-read-service.js";
 import { registerPluginMcpTools } from "./mcp-registry.js";
 import { searchPluginRuntimeWhatsapp } from "./runtime-core-read.js";
+import { reasonPluginCodex } from "./runtime-ai-reason.js";
 import { invokePluginRuntimeTool, listPluginRuntimeTools, type RuntimeMcpScope } from "./runtime-mcp-tools.js";
 import { pluginManager } from "./runtime.js";
 import type { SolPluginRuntimePrincipal } from "./types.js";
@@ -74,6 +75,7 @@ export async function handlePluginRuntimeApi(path: string, request: IncomingMess
     && path !== "/v1/plugin-api/mcp/tools/invoke-read"
     && path !== "/v1/plugin-api/mcp/tools/invoke-action"
     && path !== "/v1/plugin-api/mcp/core/search-whatsapp"
+    && path !== "/v1/plugin-api/ai/reason"
     && !peopleMatch
     && !connectionPath
     && !credentialPath
@@ -153,6 +155,16 @@ export async function handlePluginRuntimeApi(path: string, request: IncomingMess
     const input = await jsonBody<{ query?: unknown; limit?: unknown }>(request, response);
     if (!input) return true;
     try { sendJson(response, 200, { results: await searchPluginRuntimeWhatsapp(principal, input) }); }
+    catch (error) { runtimeError(response, error); }
+    return true;
+  }
+
+  if (path === "/v1/plugin-api/ai/reason" && request.method === "POST") {
+    if (!requirePermission(response, principal, "ai.reason")) return true;
+    if (principal.pluginId !== "sol-agent") { sendJson(response, 403, { error: "agent_reason_plugin_not_allowed" }); return true; }
+    const input = await jsonBody<unknown>(request, response);
+    if (!input) return true;
+    try { sendJson(response, 200, await reasonPluginCodex(principal, input)); }
     catch (error) { runtimeError(response, error); }
     return true;
   }
