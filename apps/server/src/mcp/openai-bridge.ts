@@ -1,4 +1,4 @@
-import { mkdir, open, readFile, unlink } from "node:fs/promises";
+import { mkdir, open, readFile, stat, unlink } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/client";
@@ -44,7 +44,10 @@ async function acquireBridgeLock(): Promise<void> {
           }
         }
       } catch {
-        // A partially written lock is safe to replace after the exclusive-create failed.
+        const info = await stat(bridgeLockPath).catch(() => undefined);
+        if (info && Date.now() - info.mtimeMs < 30_000) {
+          throw new Error("SOL OpenAI bridge is already starting");
+        }
       }
       if (!stale) throw new Error("SOL OpenAI bridge already running");
       await unlink(bridgeLockPath).catch(() => undefined);
