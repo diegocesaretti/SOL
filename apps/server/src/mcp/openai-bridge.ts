@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { mkdir, open, readFile, stat, unlink } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/client";
@@ -6,6 +6,55 @@ import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { config } from "../config.js";
 import { authenticateMcpAccess } from "../modules/mcp/access.js";
 import { readOpenAiBridgeState, writeOpenAiBridgeState, type OpenAiBridgeState } from "./openai-bridge-state.js";
+
+
+const bridgeLockPath = resolve(config.dataDir, "openai-plugin-bridge.lock");
+let bridgeLockOwned = false;
+
+async function releaseBridgeLock(): Promise<void> {
+  if (!bridgeLockOwned) return;
+  bridgeLockOwned = false;
+  await unlink(bridgeLockPath).catch(() => undefined);
+}
+
+async function acquireBridgeLock(): Promise<void> {
+  await mkdir(config.dataDir, { recursive: true });
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const handle = await open(bridgeLockPath, "wx");
+      try {
+        await handle.writeFile(JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }), "utf8");
+      } finally {
+        await handle.close();
+      }
+      bridgeLockOwned = true;
+      return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST" || attempt > 0) throw error;
+      let stale = true;
+      try {
+        const lock = JSON.parse(await readFile(bridgeLockPath, "utf8")) as { pid?: unknown };
+        const pid = typeof lock.pid === "number" ? lock.pid : Number(lock.pid);
+        if (Number.isInteger(pid) && pid > 0) {
+          try {
+            process.kill(pid, 0);
+            stale = false;
+          } catch (probe) {
+            if ((probe as NodeJS.ErrnoException).code === "EPERM") stale = false;
+          }
+        }
+      } catch {
+        const info = await stat(bridgeLockPath).catch(() => undefined);
+        if (info && Date.now() - info.mtimeMs < 30_000) {
+          throw new Error("SOL OpenAI bridge is already starting");
+        }
+      }
+      if (!stale) throw new Error("SOL OpenAI bridge already running");
+      await unlink(bridgeLockPath).catch(() => undefined);
+    }
+  }
+  throw new Error("SOL OpenAI bridge lock acquisition failed");
+}
 
 const CORE_READ = new Set([
   "sol_status",
@@ -133,6 +182,7 @@ function parseTextResult(result: any): unknown {
 }
 
 async function main(): Promise<void> {
+  await acquireBridgeLock();
   const token = await loadMcpToken();
   async function assertMcpAccessActive(): Promise<void> {
     if (!(await authenticateMcpAccess(token))) {
@@ -316,6 +366,7 @@ async function main(): Promise<void> {
       client?.close().catch(() => undefined),
       nexoClient.close().catch(() => undefined),
     ]);
+    await releaseBridgeLock();
     process.exit(0);
   };
   process.on("SIGINT", () => void shutdown("SIGINT"));
@@ -360,6 +411,7 @@ async function main(): Promise<void> {
         client?.close().catch(() => undefined),
         nexoClient.close().catch(() => undefined),
       ]);
+      await releaseBridgeLock();
       process.exit(2);
     }
     let result: unknown;
@@ -383,7 +435,8 @@ async function main(): Promise<void> {
   }
 }
 
-void main().catch((error) => {
+void main().catch(async (error) => {
   console.error(error instanceof Error ? error.message : String(error));
+  await releaseBridgeLock();
   process.exit(1);
 });
