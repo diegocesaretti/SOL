@@ -1,4 +1,5 @@
-import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { dirname, resolve } from "node:path";
 import { config } from "../config.js";
 
@@ -28,8 +29,14 @@ export async function readOpenAiBridgeState(): Promise<OpenAiBridgeState | null>
 
 export async function writeOpenAiBridgeState(state: OpenAiBridgeState): Promise<void> {
   await mkdir(dirname(statePath), { recursive: true });
-  await writeFile(statePath, JSON.stringify(state, null, 2), "utf8");
-  await chmod(statePath, 0o600).catch(() => undefined);
+  const tempPath = `${statePath}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(tempPath, JSON.stringify(state, null, 2), { encoding: "utf8", mode: 0o600 });
+    await chmod(tempPath, 0o600).catch(() => undefined);
+    await rename(tempPath, statePath);
+  } finally {
+    await unlink(tempPath).catch(() => undefined);
+  }
 }
 
 export async function publicOpenAiBridgeState(): Promise<Record<string, unknown>> {
